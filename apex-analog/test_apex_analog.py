@@ -87,7 +87,7 @@ class Safety(unittest.TestCase):
                 kb._ask([command])
 
     def test_allowlist_has_not_grown_by_accident(self):
-        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4})
+        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4, 0xB3})
         self.assertEqual(set(a.BIND_COMMANDS), {0x63, 0x64, 0x60})
         self.assertEqual(set(a.BIND_CHECKS), set(a.BIND_COMMANDS))
 
@@ -138,7 +138,8 @@ class SimulatedKeyboard:
         self.tables[2] = {hid: bytes(5) for hid in a.DEEP_HIDS}
         self.wheel = {layer: list(records) for layer, records in a.DEFAULT_WHEEL.items()}
         self.layer_key = 0xF0
-        self.second_actuation = {a.BIND_HIDS["W"]}  # only keys with a second actuation point take a deeper press
+        self.first = {hid: (50, 46) for hid in a.DEEP_HIDS}  # press and release points, n/255
+        self.second = {hid: (255, 255) for hid in a.DEEP_HIDS}  # where a deeper press starts: the bottom, out of the box
         self.sent = []
 
     def close(self):
@@ -160,6 +161,17 @@ class SimulatedKeyboard:
     def ask(self, p):
         if p[0] == 0xE0:
             return bytes([self.layer_key]).ljust(64, b"\0")
+        if p[0] in (0xB1, 0xB2, 0xB3):
+            deep = p[0] == 0xB3 and p[1] == 2
+            count, first, stride = (p[2], 3, 3) if p[0] == 0xB3 else (p[1], 2, 3 if p[0] == 0xB1 else 2)
+            out = b""
+            for i in range(count):
+                hid = p[first + stride * i]
+                if p[0] == 0xB2:
+                    out += bytes([hid, 0])
+                else:
+                    out += bytes([hid, *(self.second if deep else self.first)[hid]])
+            return out.ljust(64, b"\0")
         if p[0] == 0xE4:
             return b"".join(self.wheel[0 if p[1] == 0 else 1]).ljust(64, b"\0")
         if p[0] == 0xE3:
@@ -180,13 +192,19 @@ class SimulatedKeyboard:
             layer = self.table(p[1])
             for i in range(p[2]):
                 hid, record = p[3 + 6 * i], p[4 + 6 * i:9 + 6 * i]
-                if layer == 2 and hid not in self.second_actuation:
-                    continue  # refused: no second actuation point
+                if layer == 2 and (self.first[hid][0] > self.second[hid][0] or self.first[hid][1] > self.second[hid][1]):
+                    continue  # refused: the deeper press would start before the first one
                 self.tables[layer][hid] = bytes(record)
         elif p[0] == 0x64:
             self.wheel[0 if p[1] == 0 else 1] = [bytes(p[2:7]), bytes(p[7:12])]
         elif p[0] == 0x60:
             self.layer_key = p[1]
+        elif p[0] == 0x33:
+            assert p[1] == 2, p.hex()
+            for i in range(p[2]):
+                hid, press, release = p[3 + 3 * i:6 + 3 * i]
+                if press >= self.first[hid][0] and release >= self.first[hid][1]:
+                    self.second[hid] = (press, release)
         else:
             raise AssertionError(f"unexpected write {p.hex(' ')}")
 
@@ -197,6 +215,7 @@ RealKeyboard = a.Keyboard
 def simulated(sim=None):
     kb = RealKeyboard.__new__(RealKeyboard)
     kb.fd, kb.client = None, sim or SimulatedKeyboard()
+    kb.keys = [name for name, (_, hid, _) in a.BY_NAME.items() if not name.startswith("INT") and name not in ("#", "ISO\\")]
     return kb
 
 
@@ -334,9 +353,30 @@ class Bindings(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "refused"):
                 a._check_layer_key(payload)
 
+    def test_deeper_press(self):
+        sim = SimulatedKeyboard()
+        said = self.run_cli(sim, "bind", "W", "e", "--layer", "deep")
+        self.assertIn("still at the very bottom", said)
+        said = self.run_cli(sim, "actuation", "W,A", "3.0", "--deep")
+        self.assertIn("starts at 3.0 mm", said)
+        _, press, release = a.actuation_level(3.0)
+        self.assertEqual(sim.second[0x1A], (press, release))
+        self.assertIn(bytes([0x33, 2, 2, 0x1A, press, release, 0x04, press, release]), sim.sent)
+        self.assertNotIn("still at the very bottom", self.run_cli(sim, "bind", "W", "e", "--layer", "deep"))
+        self.assertIn("Deeper press at 3.0", self.run_cli(sim, "actuation"))
+        with self.assertRaisesRegex(ValueError, "past where the key first fires"):
+            self.run_cli(sim, "actuation", "S", "0.4", "--deep")
+        self.assertIn("back at the very bottom", self.run_cli(sim, "actuation", "W", "0", "--deep"))
+        self.assertEqual(sim.second[0x1A], (255, 255))
+        for payload in ([0x33, 0, 1, 0x1A, 9, 9], [0x33, 2, 1, 0x3A, 99, 90], [0x33, 2, 1, 0xE3, 99, 90], [0x33, 2, 1, 0x1A, 90, 99],
+                        [0x33, 2, 1, 0x1A, 0, 0], [0x33, 2, 21] + [0x1A, 99, 90] * 21):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                a._check_deep_actuation(payload)
+
     def test_refusals_are_explained(self):
         sim = SimulatedKeyboard()
-        with self.assertRaisesRegex(a.ApexError, "second actuation"):
+        sim.second[0x04] = (10, 10)  # shallower than where A first fires
+        with self.assertRaisesRegex(a.ApexError, "starts shallower"):
             self.run_cli(sim, "bind", "A", "b", "--layer", "deep")
         with self.assertRaisesRegex(ValueError, "never fires"):
             self.run_cli(sim, "bind", "SS", "f13")
@@ -1027,7 +1067,7 @@ class Actuation(unittest.TestCase):
         self.assertNotIn(a.BY_NAME["LGUI"][1], second[3:9:3])
 
     def test_settings_command_list_stays_short(self):
-        self.assertEqual(set(a.SETTING_COMMANDS), {0x31, 0x32})
+        self.assertEqual(set(a.SETTING_COMMANDS), {0x31, 0x32, 0x33})
         self.assertEqual(a.SAVE_COMMAND, 0x09)
 
 

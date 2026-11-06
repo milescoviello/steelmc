@@ -77,6 +77,7 @@ ALLOWED = {
     0xE0: "which key turns on the SteelSeries layer while it's held",
     0xE3: "what up to 10 keys do, on one layer",
     0xE4: "what the volume wheel does, on one layer",
+    0xB3: "each key's press and release points, or with 2 first, where its deeper press starts",
 }
 
 # The only commands that change anything, sent only for lights. Each handler was read on both chips: they store colours in the
@@ -99,7 +100,9 @@ LED_HIDS = [
 SETTING_COMMANDS = {
     0x31: "set the press and release points of up to 20 keys",
     0x32: "set the mode byte of up to 30 keys",
+    0x33: "with 2 first, set where the deeper press of up to 20 keys starts",
 }
+DEEP_OFF = 255  # a second actuation point at the very bottom, which is how every key starts out
 RAPID_TAP_MODE = 2  # the value the keyboard's own RAPID TAP menu sets
 # Change what keys do, on the keyboard itself, only when you ask. Each handler stores in memory and reaches no flash save,
 # so a replug undoes them unless you save. Every message is checked against BIND_CHECKS before it's sent.
@@ -306,6 +309,25 @@ def _check_layer_key(payload):
 
 
 BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel, 0x60: _check_layer_key}
+
+
+def _check_deep_actuation(payload):
+    """33 2 <n> [<hid> <press> <release>]... Only the second actuation point: 31 already sets the first, and 33's other forms
+    set it too, with different checks."""
+    if len(payload) < 3 or payload[1] != 2:
+        raise ValueError("refused to send 33: only its second actuation form, 33 02, is used")
+    count = payload[2]
+    if not 1 <= count <= 20 or len(payload) != 3 + 3 * count:
+        raise ValueError("refused to send 33: it takes 1 to 20 keys, 3 bytes each")
+    for i in range(count):
+        hid, press, release = payload[3 + 3 * i:6 + 3 * i]
+        if hid not in DEEP_HIDS or hid == BY_NAME["LGUI"][1]:
+            raise ValueError(f"refused to send 33: {hid:#04x} can't have a deeper press")
+        if not 1 <= release <= press:
+            raise ValueError("refused to send 33: release must be from 1 up to the press point")
+
+
+SETTING_CHECKS = {0x33: _check_deep_actuation}
 
 
 def bind_key(key):
@@ -689,6 +711,34 @@ class Keyboard:
             part = names[start:start + 30]
             self._write([0x32, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], mode)])
 
+    def deep_actuation(self, keys=None):
+        """Where each key's deeper press starts: {'W': {'press': 3.0, 'release': 2.9, 'press_raw': 128, 'release_raw': 120}},
+        or None for a key whose second point is still at the very bottom, as every key starts out."""
+        names = key_names(keys) or self.keys
+        out = {}
+        for start in range(0, len(names), 20):
+            part = names[start:start + 20]
+            hids = [BY_NAME[n][1] for n in part]
+            request = [0xB3, 2, len(part)] + [byte for hid in hids for byte in (hid, 0, 0)]
+            reply = self._ask(request, lambda r, h=tuple(hids): len(r) >= 3 * len(h) and all(r[3 * i] == x for i, x in enumerate(h)))
+            for i, name in enumerate(part):
+                press, release = reply[3 * i + 1], reply[3 * i + 2]
+                out[name] = None if press >= DEEP_OFF else {"press": round(curve_mm(press), 2), "release": round(curve_mm(release), 2),
+                                                            "press_raw": press, "release_raw": release}
+        return out
+
+    def set_deep_actuation(self, keys, mm):
+        """Set where these keys' deeper press starts, at the nearest firmware level, or None to put it back at the bottom.
+        The keyboard ignores a point shallower than the key's first one, and LGUI can't have one."""
+        if mm is None:
+            press = release = DEEP_OFF
+        else:
+            _, press, release = actuation_level(mm)
+        names = [n for n in key_names(keys) if n != "LGUI"]
+        for start in range(0, len(names), 20):
+            part = names[start:start + 20]
+            self._write([0x33, 2, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], press, release)])
+
     def active_slot(self):
         """Which of the five saved configs is active: the number on the OLED's home screen."""
         return self._ask([0xE2])[0]
@@ -773,8 +823,9 @@ class Keyboard:
         if not payload or (payload[0] not in LIGHT_COMMANDS and payload[0] not in SETTING_COMMANDS and payload[0] != SAVE_COMMAND
                            and payload[0] not in BIND_COMMANDS):
             raise ValueError(f"refused to send {payload[:1]!r}: not a known write command")
-        if payload[0] in BIND_CHECKS:
-            BIND_CHECKS[payload[0]](payload)
+        check = BIND_CHECKS.get(payload[0]) or SETTING_CHECKS.get(payload[0])
+        if check:
+            check(payload)
         if self.client is not None:
             self.client.call(OP_WRITE, bytes(payload))  # the daemon leaves the gap, so nobody else's command lands in it
             return
@@ -3654,8 +3705,11 @@ def cmd_bind(args):
             time.sleep(0.1)
             if kb.bindings(layer, [key])[key] != record:
                 if layer == 2:
-                    raise ApexError(f"The keyboard refused it: {key} needs a second actuation point before a deeper press can do anything.")
+                    raise ApexError(f"The keyboard refused it: {key}'s deeper press starts shallower than where it first fires. "
+                                    f"Move it with apex-analog actuation {key} 3.0 --deep.")
                 raise ApexError("Sent, but it reads back differently.")
+            if layer == 2 and record != bytes(5) and kb.deep_actuation([key])[key] is None:
+                print(f"{key}'s deeper press is still at the very bottom. Choose where it starts with apex-analog actuation {key} 3.0 --deep.")
     if args.action == "default":
         print(f"{key} is back to what it does out of the box {LAYER_LABELS[layer]}: {describe_binding(record)}. The keyboard reads it back.")
     else:
@@ -4258,10 +4312,41 @@ def cmd_info(args):
         print(f"{name:8}{k['mm']:6.1f}{k['press']:7.2f}{k['release']:9.2f}{k['mode']:6d}")
 
 
+def set_deep(kb, names, mm):
+    """Where a deeper press starts, which has to be deeper than where the key first fires. 0 puts it back at the bottom."""
+    names = [n for n in names if n != "LGUI"]
+    if mm:
+        _, press, release = actuation_level(mm)
+        first = kb.actuation(names)
+        shallow = [n for n in names if first[n]["press_raw"] > press or first[n]["release_raw"] > release]
+        if shallow:
+            raise ValueError(f"A deeper press has to start past where the key first fires. Too shallow for: {' '.join(shallow)}")
+    kb.set_deep_actuation(names, mm or None)
+    time.sleep(0.1)
+    got = kb.deep_actuation(names)
+    wrong = [n for n in names if (got[n] is None) != (not mm) or (mm and (got[n]["press_raw"], got[n]["release_raw"]) != (press, release))]
+    if wrong:
+        raise ApexError(f"Sent, but these read back differently: {' '.join(wrong)}")
+    return names
+
+
 def cmd_actuation(args):
     if args.mm is None and args.keys is not None:
         raise ValueError("Say how deep too, like: apex-analog actuation W 1.0")
     with Keyboard() as kb:
+        if args.deep and args.keys is not None:
+            names = list(kb.keys) if args.keys == "all" else key_names(args.keys)
+            missing = [n for n in names if n not in kb.keys]
+            if missing:
+                raise ValueError(f"No sensor fitted on this keyboard for: {' '.join(missing)}")
+            done = set_deep(kb, names, args.mm)
+            count = f"{len(done)} key{'s' if len(done) != 1 else ''}"
+            print(f"The deeper press on {count} starts at {actuation_level(args.mm)[0]:.1f} mm, read back from the keyboard. "
+                  f"Give it something to do with apex-analog bind KEY ACTION --layer deep." if args.mm else
+                  f"The deeper press on {count} is back at the very bottom.")
+            if "LGUI" in names:
+                print("LGUI skipped: it can't have a deeper press.")
+            return 0
         if args.keys is not None:
             names = list(kb.keys) if args.keys == "all" else key_names(args.keys)
             missing = [n for n in names if n not in kb.keys]
@@ -4279,11 +4364,19 @@ def cmd_actuation(args):
             if "LGUI" in names:
                 print("LGUI skipped: this command can't change it.")
         settings = kb.actuation()
+        deep = kb.deep_actuation()
     groups = {}
     for name, value in settings.items():
         groups.setdefault(value["press"], []).append(name)
     for press, names in sorted(groups.items()):
         print(f"{press:.2f} mm: " + ("every other key" if len(names) > 30 else " ".join(names)))
+    deeper = {}
+    for name, value in deep.items():
+        if value:  # named by its level, which the release point sits closest to
+            level = min(LEVEL_TENTHS, key=lambda t: abs(t / 10 - value["release"])) / 10
+            deeper.setdefault(level, []).append(name)
+    for level, names in sorted(deeper.items()):
+        print(f"Deeper press at {level:.1f} mm: " + " ".join(names))
     return 0
 
 
@@ -4385,6 +4478,8 @@ def build_parser():
     ac = commands.add_parser("actuation", help="see or set where keys actuate, no GG needed")
     ac.add_argument("keys", nargs="?", help="W, WASD, W,A,SPACE, or all. Leave out to just see the current settings")
     ac.add_argument("mm", nargs="?", type=float, help="depth from 0.1 to 4.0; uses the nearest of the firmware's 20 levels")
+    ac.add_argument("--deep", action="store_true",
+                    help="set where a deeper press starts instead, for bindings with --layer deep. 0 puts it back at the bottom")
     ac.set_defaults(func=cmd_actuation)
 
     pa = commands.add_parser("paint", help="set key colours from any program, one JSON line at a time on stdin")
