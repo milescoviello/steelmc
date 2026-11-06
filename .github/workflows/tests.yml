@@ -82,4 +82,4 @@ jobs:
           python-version: "3.14"
       - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 fontconfig
       - run: pip install PySide6
-      - run: python test_gui.py
+      - run: python -X faulthandler test_gui.py
