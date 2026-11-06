@@ -9,6 +9,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -119,12 +120,12 @@ class Firmware(unittest.TestCase):
     def test_refuses_any_other_firmware(self):
         a._find_control_node = lambda: ("/dev/null", "0417")
         with self.assertRaisesRegex(a.ApexError, "Refusing"):
-            a.Keyboard()
+            a.Keyboard(direct=True)
 
     def test_missing_keyboard_is_explained(self):
         a._find_control_node = lambda: (None, None)
         with self.assertRaisesRegex(a.NotFound, "plugged in|bootloader"):
-            a.Keyboard()
+            a.Keyboard(direct=True)
 
 
 class Digital(unittest.TestCase):
@@ -1060,7 +1061,7 @@ class Files(unittest.TestCase):
         self.assertTrue(path.startswith(self.folder.name))
         with open(path) as f:
             text = f.read()
-        self.assertIn("lights --keep", text)
+        self.assertIn("apex-analog daemon", text.replace("apex_analog.py", "apex-analog"))
         self.assertIn("Type=Application", text)
         a.cmd_autostart(self.run_cli("autostart", "on", "lights", "--effect", "ripple"))
         with open(path) as f:
@@ -1072,29 +1073,22 @@ class Files(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
         self.assertTrue(os.path.exists(other))
 
-    def test_a_finished_process_doesnt_count_as_running(self):
-        child = subprocess.Popen(["sleep", "30"])
-        self.addCleanup(child.wait)
-        self.assertTrue(a._running(child.pid))
-        child.kill()
-        for _ in range(100):
-            if not a._running(child.pid):
-                break
-            time.sleep(0.01)
-        self.assertFalse(a._running(child.pid))
-        self.assertFalse(a._running(99999999))
-
-    def test_stop_never_touches_something_that_isnt_ours(self):
-        sleeper = subprocess.Popen(["sleep", "30"])
-        self.addCleanup(sleeper.wait)
-        self.addCleanup(sleeper.kill)
-        saved = os.environ.get("XDG_RUNTIME_DIR")
-        os.environ["XDG_RUNTIME_DIR"] = self.folder.name
-        self.addCleanup(lambda: os.environ.__setitem__("XDG_RUNTIME_DIR", saved) if saved else os.environ.pop("XDG_RUNTIME_DIR"))
-        with open(a._pid_path(), "w") as f:
-            f.write(str(sleeper.pid))
-        a.cmd_stop(self.run_cli("stop"))
-        self.assertIsNone(sleeper.poll())
+    def test_recorder_adds_up_saves_privately_and_keeps_no_order(self):
+        os.makedirs(os.path.join(self.folder.name, "state"))
+        path = os.path.join(self.folder.name, "state", "typing.json")
+        recorder = a.TypingRecorder({"J": 1.89}, path, every=0.0)
+        base = time.monotonic() + 1
+        for now, mm in enumerate((0.0, 3.0, 4.0, 0.0)):
+            recorder.update({"J": mm}, base + now * 0.01)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        again = a.TypingRecorder({"J": 1.89}, path, every=0.0)
+        self.assertEqual(again.profile.keys["J"]["count"], 1)
+        for now, mm in enumerate((0.0, 3.0, 0.0)):
+            again.update({"J": mm}, base + 1 + now * 0.01)
+        self.assertEqual(a.TypingRecorder({}, path).profile.keys["J"]["count"], 2)
+        with open(path) as f:
+            import json
+            self.assertEqual(set(json.load(f)), {"keys"})
 
     def test_macro_add_list_delete_and_private_file(self):
         a.cmd_macro(self.run_cli("macro", "add", "hi", "text:Hi!", "100", "LCTRL+C"))
@@ -1228,6 +1222,217 @@ class Oled(unittest.TestCase):
             message = json.loads(line)
             self.assertEqual(message["cmd"], "notify")
             self.assertEqual(base64.b64decode(message["fb"]), bytes(frame.data))
+
+
+
+class FakeDevice:
+    firmware, node = "0416", "/dev/fake"
+
+    def __init__(self):
+        self.asked, self.written, self.closed = [], [], False
+        self.fail = None
+
+    def exchange_once(self, payload):
+        if self.fail:
+            raise self.fail
+        self.asked.append(payload)
+        if payload[0] == 0xD7:
+            return struct.pack("<28H", *[850 + payload[1]] * 28)
+        return bytes([payload[0]]) + bytes(63)
+
+    def _write(self, payload):
+        if self.fail:
+            raise self.fail
+        self.written.append(payload)
+
+    def close(self):
+        self.closed = True
+
+
+class DaemonBroker(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.path = os.path.join(self.folder.name, "s")
+        self.device = FakeDevice()
+        sleeper = [sys.executable, "-c", "import sys, time; print('started'); sys.stdout.flush(); time.sleep(30)"]
+        self.daemon = a.Daemon(self.path, lambda: self.device, lambda argv: sleeper, os.path.join(self.folder.name, "state.json"))
+        self.assertTrue(self.daemon.listen())
+        self.addCleanup(self.daemon.shutdown)
+        self.client = a.DaemonClient(self.path)
+        self.addCleanup(self.client.close)
+
+    def test_each_program_gets_its_own_answer(self):
+        other = a.DaemonClient(self.path)
+        self.addCleanup(other.close)
+        self.assertEqual(self.client.call(a.OP_ASK, bytes([0xD7, 1])), struct.pack("<28H", *[851] * 28))
+        self.assertEqual(other.call(a.OP_ASK, bytes([0xD7, 2])), struct.pack("<28H", *[852] * 28))
+        self.assertEqual(self.client.call(a.OP_ASK, bytes([0xD7, 1]))[:2], struct.pack("<H", 851))
+
+    def test_close_together_reads_share_one_real_read(self):
+        self.daemon.READ_CACHE = 5.0
+        for _ in range(5):
+            self.client.call(a.OP_ASK, bytes([0xD7, 3]))
+        self.assertEqual(len(self.device.asked), 1)
+        self.client.call(a.OP_ASK, bytes([0xDA, 1]))
+        self.client.call(a.OP_ASK, bytes([0xDA, 1]))
+        self.assertEqual(len(self.device.asked), 3)
+
+    def test_a_write_clears_shared_reads(self):
+        self.daemon.READ_CACHE = 5.0
+        self.client.call(a.OP_ASK, bytes([0xD7, 3]))
+        self.client.call(a.OP_WRITE, bytes([0x3B]))
+        self.client.call(a.OP_ASK, bytes([0xD7, 3]))
+        self.assertEqual(len(self.device.asked), 2)
+        self.assertEqual(self.device.written, [[0x3B]])
+
+    def test_daemon_also_refuses_unknown_reads(self):
+        for command in (0x01, 0x81, 0x7F, 0x3B):
+            with self.assertRaisesRegex(a.ApexError, "refused"):
+                self.client.call(a.OP_ASK, bytes([command]))
+        self.assertEqual(self.device.asked, [])
+
+    def test_real_keyboard_class_works_through_the_daemon(self):
+        saved = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self.folder.name
+        self.addCleanup(lambda: os.environ.__setitem__("XDG_RUNTIME_DIR", saved) if saved else os.environ.pop("XDG_RUNTIME_DIR"))
+        os.rename(self.path, a._socket_path())
+        self.daemon.path = a._socket_path()
+
+        class Calibrated(FakeDevice):
+            def exchange_once(inner, payload):
+                if payload[0] == 0xDA:
+                    out = b"".join(struct.pack("<BHH", payload[2 + i * 5], 3400, 850) for i in range(payload[1]))
+                    return out.ljust(64, b"\0")
+                return FakeDevice.exchange_once(inner, payload)
+        self.device = Calibrated()
+        with a.Keyboard() as kb:
+            self.assertIsNotNone(kb.client)
+            self.assertEqual(kb.firmware, "0416")
+            self.assertEqual(kb.raw("W")["W"], 852)
+            kb.set_colors({"W": (1, 2, 3)})
+            self.assertEqual(self.device.written[-1][:6], [0x3A, 1, 0x1A, 1, 2, 3])
+
+    def test_a_lost_keyboard_comes_back_as_disconnected_then_recovers(self):
+        self.client.call(a.OP_OPEN)
+        self.device.fail = a.Disconnected("unplugged")
+        with self.assertRaises(a.Disconnected):
+            self.client.call(a.OP_ASK, bytes([0xDA]))
+        self.assertTrue(self.device.closed)
+        self.device.fail, self.device.closed = None, False
+        self.assertTrue(self.client.call(a.OP_ASK, bytes([0xDA])))
+
+    def test_a_missing_keyboard_is_reported_as_missing(self):
+        def missing():
+            raise a.NotFound("No keyboard")
+        self.daemon.open_keyboard = missing
+        with self.assertRaisesRegex(a.NotFound, "No keyboard"):
+            self.client.call(a.OP_OPEN)
+
+    def job(self, slot="lights", argv=("lights", "--keep")):
+        return a._job_call(self.client, a.OP_JOB, {"slot": slot, "label": argv[0], "argv": list(argv)})
+
+    def test_starting_a_job_replaces_the_one_in_its_slot_and_is_remembered(self):
+        self.assertTrue(self.job()["ok"])
+        first = self.daemon.jobs["lights"]["process"]
+        self.assertTrue(self.job(argv=("lights", "--effect", "ripple"))["ok"])
+        self.assertIsNotNone(first.poll())
+        self.assertEqual(self.daemon._state()["lights"], ["lights", "--effect", "ripple"])
+        status = a._job_call(self.client, a.OP_STATUS, b"")
+        self.assertTrue(status["jobs"]["lights"]["running"])
+
+    def test_jobs_in_different_slots_run_together(self):
+        self.job()
+        self.job("input", ("gamepad",))
+        self.assertIsNone(self.daemon.jobs["lights"]["process"].poll())
+        self.assertIsNone(self.daemon.jobs["input"]["process"].poll())
+        self.assertNotIn("input", self.daemon._state())
+
+    def test_off_stops_a_job_and_forgets_it(self):
+        self.job()
+        process = self.daemon.jobs["lights"]["process"]
+        self.assertTrue(a._job_call(self.client, a.OP_OFF, b"lights")["found"])
+        self.assertIsNotNone(process.poll())
+        self.assertIsNone(self.daemon._state()["lights"])
+        self.assertFalse(a._job_call(self.client, a.OP_OFF, b"lights")["found"])
+
+    def test_a_job_that_fails_straight_away_reports_why(self):
+        self.daemon.spawn = lambda argv: [sys.executable, "-c", "import sys; print('apex-analog: bad rule'); sys.exit(1)"]
+        result = self.job("input", ("map", "W=nope"))
+        self.assertFalse(result["ok"])
+        self.assertIn("bad rule", result["log"])
+
+    def test_login_brings_back_lights_and_recording_but_never_a_gamepad(self):
+        self.daemon.start_saved_jobs()
+        self.assertEqual(sorted(self.daemon.jobs), ["lights", "recording"])
+        self.assertEqual(self.daemon.jobs["lights"]["argv"], a.DEFAULT_LIGHTS)
+        self.daemon._remember(lights=None, recording=False)
+        for slot in list(self.daemon.jobs):
+            self.daemon.stop_job(slot)
+        self.daemon.start_saved_jobs()
+        self.assertEqual(self.daemon.jobs, {})
+
+    def test_second_daemon_backs_off_and_a_stale_socket_is_replaced(self):
+        self.assertFalse(a.Daemon(self.path).listen())
+        stale = os.path.join(self.folder.name, "stale")
+        leftover = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        leftover.bind(stale)
+        leftover.close()
+        fresh = a.Daemon(stale, state_path=os.path.join(self.folder.name, "st2.json"))
+        self.assertTrue(fresh.listen())
+        fresh.shutdown()
+
+    def test_socket_is_private_to_this_user(self):
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+
+    def test_which_commands_leave_the_terminal(self):
+        parse = a.build_parser().parse_args
+        self.assertTrue(a._runs_as_a_job(parse(["gamepad"])))
+        self.assertTrue(a._runs_as_a_job(parse(["lights", "--effect", "ripple"])))
+        self.assertFalse(a._runs_as_a_job(parse(["gamepad", "--watch"])))
+        self.assertFalse(a._runs_as_a_job(parse(["lights", "--off"])))
+        self.assertFalse(a._runs_as_a_job(parse(["stream"])))
+        self.assertTrue(a._runs_as_a_job(parse(["stream", "--keys", "W", "--udp", "127.0.0.1:9"])))
+        self.assertFalse(a._runs_as_a_job(parse(["info"])))
+        self.assertFalse(a._runs_as_a_job(parse(["bars"])))
+
+
+class HelpAndBars(unittest.TestCase):
+    def test_help_lists_every_user_command(self):
+        for name, sub in a.build_parser().command_parsers.items():
+            if name not in ("record", "daemon", "help"):
+                self.assertRegex(a.HELP_TEXT, rf"\b{name}\b", name)
+
+    def test_help_on_one_command(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            a.cmd_help(a.build_parser().parse_args(["help", "gamepad"]))
+        self.assertIn("--deadzone", out.getvalue())
+        with self.assertRaisesRegex(ValueError, "No command"):
+            a.cmd_help(a.build_parser().parse_args(["help", "nope"]))
+
+    def settings(self, names):
+        return {n: {"press": 1.89} for n in names}
+
+    def test_bars_show_every_pressed_key_when_they_fit(self):
+        names = list(a.BY_NAME)[:20]
+        lines = a.bar_lines([(2.0, n) for n in names], self.settings(names), 120, 30)
+        self.assertEqual(len(lines), 20)
+        self.assertTrue(all(any(l.startswith(n) for l in lines) for n in names))
+
+    def test_bars_use_columns_rather_than_dropping_keys(self):
+        names = [n for n in a.BY_NAME]
+        lines = a.bar_lines([(2.0, n) for n in names], self.settings(names), 200, 20)
+        self.assertLessEqual(len(lines), 20)
+        text = "\n".join(lines)
+        for name in names:
+            self.assertIn(f"{name:7}|", text)
+        self.assertTrue(all(len(l) <= 200 for l in lines))
+
+    def test_no_keys_pressed(self):
+        self.assertEqual(a.bar_lines([], {}, 80, 20), ["Press a key slowly."])
 
 
 if __name__ == "__main__":

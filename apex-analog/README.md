@@ -203,11 +203,11 @@ Macros are saved on this computer and only run while `apex-analog` does. A recor
 ## Start at login
 
 ```
-apex-analog autostart on                         # the white press glow from lights --keep
-apex-analog autostart on lights --effect ripple  # or anything else
+apex-analog autostart on     # start the daemon at login, which brings back your lights and recording
 apex-analog autostart off
-apex-analog stop                                 # stop whichever one is running, before using another command
 ```
+
+The lights it brings back are whatever you last chose, `lights --keep` until you choose something else. `apex-analog off lights` keeps them off.
 
 ## On the keyboard's own screen
 
@@ -240,7 +240,7 @@ Add `http://127.0.0.1:8765/overlay` as an OBS browser source. It shows W A S D, 
 apex-analog profile
 ```
 
-Type normally for a while, then press Ctrl-C. It tells you how deep and fast you press, how often you bottom out, how many presses stopped short of your actuation point, and what that means for your settings. Runs add together. `--report` shows the totals and `--reset` clears them. It stores per-key totals only, never the order of keys, so it can't be read back as text.
+It records all the time in the background. This tells you how deep and fast you press, how often you bottom out, how many presses stopped short of your actuation point, and what that means for your settings. `--off` and `--on` stop and start recording, and `--reset` clears it. It stores per-key totals only, never the order of keys, so it can't be read back as text.
 
 ## Check your switches
 
@@ -309,16 +309,36 @@ apex-analog stream --keys WASD --serve 8765             # WebSocket and HTTP on 
 new WebSocket("ws://127.0.0.1:8765").onmessage = e => console.log(JSON.parse(e.data).W);
 ```
 
-`curl 127.0.0.1:8765` gets the latest reading. Any of these also work alongside `gamepad` and `map`, so one run can feed a game and your program together.
+`curl 127.0.0.1:8765` gets the latest reading. These run in the background, alongside anything else that's on. `apex-analog off stream` stops them.
 
 These tools can see everything you type, so network outputs make you choose keys with `--keys`. `--keys all` only works on this machine. `--serve` listens on 127.0.0.1 only and refuses web pages from other sites.
 
 **Check what you've got:** `apex-analog info`, or `apex-analog info --json`, shows your access and each key's press and release points.
 
+## How it runs
+
+A small daemon owns the keyboard, and every command goes through it. It starts by itself the first time you need it, and `apex-analog autostart on` starts it at login.
+
+Long-running commands (`gamepad`, `map`, `midi`, `type`, `lights`, `auto`, `oled`, `overlay`, and `stream` with a network output) run as background jobs. Your terminal comes straight back, and several can run at once:
+
+```
+apex-analog gamepad                  # the prompt comes straight back
+apex-analog lights --effect ripple   # both are running now
+apex-analog status                   # see what's on
+apex-analog off gamepad              # turn one off
+apex-analog stop                     # turn everything off, including the daemon
+apex-analog gamepad --watch          # stay in this terminal and show live values instead
+```
+
+`gamepad`, `map`, `midi` and `type` share one slot because they all take over the keyboard, so starting one replaces another. `lights` and `auto` share another. Your lights setting and typing recording come back at login; a controller never does, so your keys can't start the day not typing.
+
+`apex-analog help` lists everything, and `apex-analog help COMMAND` gives the details of one.
+
+Python programs go through the daemon automatically if it's running, and talk to the keyboard directly if it isn't.
+
 ## Limits
 
 - **61 keys have sensors**, the main block. ESC, the F row, nav keys and arrows don't, so they can't report depth.
-- **One run at a time.** The keyboard's replies carry no ID, so two readers would mix them up. A second copy refuses to start. Give one run several outputs instead.
 - **Millimetres come from the firmware's own actuation table**, not a physical measurement.
 - **Online games:** virtual controllers and rapid-trigger keys can break the rules of games with anti-cheat. Check before using them there.- **Network and pipe rates:** 60 updates a second by default, `--hz` to change it. Reading every key tops out near 190 a second, and reading keys from two rows near 490. Mapping defaults to 120.
 

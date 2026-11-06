@@ -11,6 +11,8 @@
   apex-analog stream            one JSON line per update, for piping into anything
   apex-analog overlay           key pressure on your stream, as an OBS browser source
   apex-analog profile           how you type, and what it means for your actuation point
+  apex-analog status            what's on. apex-analog off NAME turns one off, apex-analog stop turns off everything
+  apex-analog help              everything it can do
   apex-analog health            check every switch for drift, noise and short range
   apex-analog typeprint         experiment: recognise you by how you press keys
   apex-analog actuation W 1.0   set where keys actuate, no GG needed
@@ -27,7 +29,8 @@
   with Keyboard() as kb:
       print(kb.read()["W"])     # millimetres
 
-Only sends the read commands in ALLOWED, plus LIGHT_COMMANDS when you ask for lights and SETTING_COMMANDS when you set
+A small daemon owns the keyboard and every command goes through it, so long-running ones return your terminal straight away
+and any number can run at once. Only sends the read commands in ALLOWED, plus LIGHT_COMMANDS when you ask for lights and SETTING_COMMANDS when you set
 actuation or rapid tap, and only to the firmware they were checked on. The one flash write, SAVE_COMMAND, runs only from
 `apex-analog save` after you confirm it. No dependencies.
 """
@@ -55,7 +58,7 @@ import threading
 import time
 from typing import NamedTuple
 
-__version__ = "0.6.0"
+__version__ = "0.8.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"
@@ -234,10 +237,6 @@ def led_hid(key):
     raise ValueError(f"{key!r} isn't a key with an LED. Known: " + " ".join(sorted(k for k in {*BY_NAME, *NO_SENSOR_HIDS} if not k.startswith("INT"))))
 
 
-def _pid_path():
-    return os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "apex-analog.pid")
-
-
 def key_names(keys):
     """None, 'WASD', 'W,A,SPACE', or a list."""
     if keys is None:
@@ -296,7 +295,26 @@ class Keyboard:
         kb.actuation_icon()     whether the OLED's ACTUATION ICON is on
     """
 
-    def __init__(self):
+    client = None
+    fd = None
+
+    def __init__(self, direct=False):
+        """Goes through the daemon if one is running. direct=True talks to the keyboard itself, which is what the daemon does."""
+        if not direct:
+            try:
+                client = DaemonClient()
+            except OSError:
+                if _in_job():
+                    raise NotFound("The apex-analog daemon isn't running.") from None
+            else:
+                try:
+                    info = json.loads(client.call(OP_OPEN))
+                except ApexError:
+                    client.close()
+                    raise
+                self.client, self.node, self.firmware = client, info["node"], info["firmware"]
+                self._load_calibration()
+                return
         node, firmware = _find_control_node()
         if not node:
             if _usb_product_present(BOOTLOADER_PRODUCT):
@@ -316,13 +334,10 @@ class Keyboard:
         except OSError:
             os.close(self.fd)
             self.fd = None
-            raise ApexError("Another apex-analog is already reading the keyboard, and only one can run at a time because replies carry no ID. "
-                            "Stop it with: apex-analog stop") from None
-        try:
-            with open(_pid_path(), "w") as f:
-                f.write(str(os.getpid()))
-        except OSError:
-            pass
+            raise AccessDenied("Another program is using the keyboard directly. Replies carry no ID, so only one can.") from None
+        self._load_calibration()
+
+    def _load_calibration(self):
         self._calibration = {}
         try:
             for name, value in self._per_key(0xDA, 5, 5, list(BY_NAME)):
@@ -342,13 +357,34 @@ class Keyboard:
         self.close()
 
     def close(self):
+        if self.client is not None:
+            self.client.close()
+            self.client = None
         if self.fd is not None:
             os.close(self.fd)
             self.fd = None
 
+    def exchange_once(self, payload):
+        """One command and whatever comes back first, for the daemon. Empty if nothing did."""
+        try:
+            while select.select([self.fd], [], [], 0)[0]:
+                os.read(self.fd, 64)
+            os.write(self.fd, bytes([0, *payload]).ljust(65, b"\0")[:65])
+            if select.select([self.fd], [], [], 0.03)[0]:
+                return os.read(self.fd, 64)
+        except OSError as e:
+            raise Disconnected(f"Lost the keyboard: {e}") from None
+        return b""
+
     def _ask(self, payload, valid=None):
         if not payload or payload[0] not in ALLOWED:
             raise ValueError(f"refused to send {payload[:1]!r}: not a known read command")
+        if self.client is not None:
+            for _ in range(10):
+                reply = self.client.call(OP_ASK, bytes(payload))
+                if reply and (valid is None or valid(reply)):
+                    return reply
+            raise Disconnected("The keyboard stopped answering.")
         packet = bytes([0, *payload]).ljust(65, b"\0")[:65]
         try:
             for _ in range(10):  # a reply normally takes 1 ms, but one can get lost right after a write, so retry soon
@@ -492,6 +528,9 @@ class Keyboard:
         """Send a command that gets no reply, then give the keyboard time to act on it. One that arrives straight after appears to replace it."""
         if not payload or (payload[0] not in LIGHT_COMMANDS and payload[0] not in SETTING_COMMANDS and payload[0] != SAVE_COMMAND):
             raise ValueError(f"refused to send {payload[:1]!r}: not a known write command")
+        if self.client is not None:
+            self.client.call(OP_WRITE, bytes(payload))  # the daemon leaves the gap, so nobody else's command lands in it
+            return
         try:
             os.write(self.fd, bytes([0, *payload]).ljust(65, b"\0")[:65])
         except OSError as e:
@@ -1109,12 +1148,16 @@ class _KeyHolder:
             time.sleep(0.2)  # let the desktop notice the new keyboard before anything is forwarded to it
         if swallow:
             swallow.output = self.virtual_keys
-            if swallow.grab():
+            try:
+                grabbed = swallow.grab()
+            except OSError:  # something else is already holding it
+                grabbed = False
+            if grabbed:
                 self.swallow = swallow
             else:
                 for fd in swallow.fds:
                     os.close(fd)
-                self._warn("These keys will keep typing: a key stayed held down, so the keyboard was not taken over.")
+                self._warn("These keys will keep typing: a key stayed held down, or something else is holding the keyboard.")
 
     def _warn(self, message):
         if not self.warned:
@@ -2517,6 +2560,443 @@ class ServeSink:
                     client.close()
 
 
+# ---- the daemon ------------------------------------------------------------------------------------------------------
+
+OP_OPEN, OP_ASK, OP_WRITE, OP_JOB, OP_OFF, OP_STATUS, OP_QUIT = range(7)
+STATUS_OK, STATUS_LOST, STATUS_NOT_FOUND, STATUS_DENIED, STATUS_ERROR = range(5)
+_FRAME = struct.Struct("<BI")
+# What each long-running command occupies. Starting another in the same slot replaces it.
+SLOTS = {"lights": "lights", "auto": "lights", "gamepad": "input", "map": "input", "midi": "input", "type": "input", "overlay": "overlay", "oled": "oled", "stream": "stream"}
+DEFAULT_LIGHTS = ["lights", "--keep"]
+
+
+def _socket_path():
+    return os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "apex-analog.sock")
+
+
+def _in_job():
+    return bool(os.environ.get("APEX_ANALOG_JOB"))
+
+
+def _recv_exact(sock, count):
+    data = b""
+    while len(data) < count:
+        chunk = sock.recv(count - len(data))
+        if not chunk:
+            raise ConnectionError("closed")
+        data += chunk
+    return data
+
+
+class DaemonClient:
+    """One connection to the daemon. Each call gets its own answer, so any number of programs can share the keyboard."""
+
+    def __init__(self, path=None):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.sock.settimeout(15)
+            self.sock.connect(path or _socket_path())
+        except OSError:
+            self.sock.close()
+            raise
+
+    def call(self, op, data=b""):
+        try:
+            self.sock.sendall(_FRAME.pack(op, len(data)) + data)
+            status, size = _FRAME.unpack(_recv_exact(self.sock, _FRAME.size))
+            reply = _recv_exact(self.sock, size)
+        except OSError as e:
+            raise Disconnected(f"Lost the apex-analog daemon: {e}") from None
+        if status == STATUS_OK:
+            return reply
+        message = reply.decode(errors="replace")
+        raise {STATUS_LOST: Disconnected, STATUS_NOT_FOUND: NotFound, STATUS_DENIED: AccessDenied}.get(status, ApexError)(message)
+
+    def close(self):
+        self.sock.close()
+
+
+def daemon_client(start=True):
+    """Connect to the daemon, starting it if asked and needed. None if it can't be reached."""
+    try:
+        return DaemonClient()
+    except OSError:
+        if not start:
+            return None
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "daemon"], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        try:
+            return DaemonClient()
+        except OSError:
+            time.sleep(0.05)
+    return None
+
+
+class Daemon:
+    """Owns the keyboard and hands out access to it, runs long-lived commands as its own jobs, and brings the right ones back at login."""
+    READ_CACHE = 0.003  # readers asking for the same bank this close together share one read
+
+    def __init__(self, path=None, open_keyboard=None, spawn=None, state_path=None):
+        self.path = path or _socket_path()
+        self.open_keyboard = open_keyboard or (lambda: Keyboard(direct=True))
+        self.spawn = spawn or (lambda argv: [sys.executable, os.path.abspath(__file__), *argv])
+        self.state_path = state_path or _config_path("daemon.json")
+        self.lock, self.job_lock = threading.RLock(), threading.RLock()
+        self.done = threading.Event()
+        self.kb, self.jobs, self.cache = None, {}, {}
+        self.server = None
+
+    # keyboard access
+    def keyboard(self):
+        if self.kb is None:
+            self.kb = self.open_keyboard()
+        return self.kb
+
+    def lost(self):
+        with self.lock:
+            if self.kb is not None:
+                self.kb.close()
+            self.kb = None
+            self.cache = {}
+
+    def ask(self, payload):
+        if not payload or payload[0] not in ALLOWED:
+            raise ApexError(f"refused to send {payload[:1]!r}: not a known read command")
+        with self.lock:
+            now = time.monotonic()
+            if payload[0] == 0xD7 and payload in self.cache and now - self.cache[payload][0] < self.READ_CACHE:
+                return self.cache[payload][1]
+            reply = self.keyboard().exchange_once(payload)
+            if payload[0] == 0xD7 and _valid_bank(reply):
+                self.cache[payload] = (time.monotonic(), reply)
+            return reply
+
+    def write(self, payload):
+        with self.lock:
+            self.cache = {}
+            self.keyboard()._write(list(payload))
+        return b""
+
+    # jobs
+    def _state(self):
+        return _load_json(self.state_path)
+
+    def _remember(self, **values):
+        try:
+            _write_private(self.state_path, {**self._state(), **values})
+        except OSError:
+            pass
+
+    def start_job(self, slot, label, argv, cwd=None):
+        with self.job_lock:
+            self.stop_job(slot)
+            log_path = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", f"apex-analog-{slot}.log")
+            with open(log_path, "w") as log:
+                process = subprocess.Popen(self.spawn(argv), start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                           cwd=cwd if cwd and os.path.isdir(cwd) else None, env={**os.environ, "APEX_ANALOG_JOB": "1"})
+            self.jobs[slot] = {"process": process, "label": label, "argv": argv, "started": time.time(), "log": log_path}
+            deadline = time.monotonic() + 0.8
+            while time.monotonic() < deadline and process.poll() is None:  # most mistakes show up straight away
+                time.sleep(0.03)
+            ok = process.poll() is None or process.returncode == 0
+            if slot == "lights" and ok:
+                self._remember(lights=argv)
+            if slot == "recording":
+                self._remember(recording=True)
+            return {"ok": ok, "log": _read(log_path) or ""}
+
+    def stop_job(self, slot):
+        with self.job_lock:
+            job = self.jobs.pop(slot, None)
+            if job and job["process"].poll() is None:
+                job["process"].terminate()
+                try:
+                    job["process"].wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    job["process"].kill()
+                    job["process"].wait()
+            return bool(job)
+
+    def turn_off(self, slot):
+        with self.job_lock:
+            found = self.stop_job(slot)
+            if slot == "lights":
+                self._remember(lights=None)
+            if slot == "recording":
+                self._remember(recording=False)
+            return found
+
+    def status(self):
+        with self.job_lock:
+            jobs = {}
+            for slot, job in self.jobs.items():
+                running = job["process"].poll() is None
+                jobs[slot] = {"label": " ".join(job["argv"]), "running": running, "seconds": int(time.time() - job["started"]),
+                              "log": "" if running else (_read(job["log"]) or "")[-200:]}
+        connected = self.kb is not None
+        return {"pid": os.getpid(), "keyboard": connected, "firmware": self.kb.firmware if connected else None, "jobs": jobs}
+
+    # the connection to each program
+    def handle(self, op, data):
+        if op == OP_ASK:
+            return self.ask(data)
+        if op == OP_WRITE:
+            return self.write(data)
+        if op == OP_OPEN:
+            with self.lock:
+                kb = self.keyboard()
+                return json.dumps({"node": kb.node, "firmware": kb.firmware}).encode()
+        if op == OP_JOB:
+            request = json.loads(data)
+            return json.dumps(self.start_job(request["slot"], request["label"], request["argv"], request.get("cwd"))).encode()
+        if op == OP_OFF:
+            return json.dumps({"found": self.turn_off(data.decode())}).encode()
+        if op == OP_STATUS:
+            return json.dumps(self.status()).encode()
+        if op == OP_QUIT:
+            self.done.set()
+            return b"{}"
+        raise ApexError(f"unknown request {op}")
+
+    def serve(self, connection):
+        with connection:
+            try:
+                while True:
+                    op, size = _FRAME.unpack(_recv_exact(connection, _FRAME.size))
+                    data = _recv_exact(connection, size)
+                    try:
+                        status, reply = STATUS_OK, self.handle(op, data)
+                    except Disconnected as e:
+                        self.lost()
+                        status, reply = STATUS_LOST, str(e).encode()
+                    except NotFound as e:
+                        status, reply = STATUS_NOT_FOUND, str(e).encode()
+                    except AccessDenied as e:
+                        status, reply = STATUS_DENIED, str(e).encode()
+                    except (ApexError, ValueError) as e:
+                        status, reply = STATUS_ERROR, str(e).encode()
+                    connection.sendall(_FRAME.pack(status, len(reply)) + reply)
+            except OSError:
+                pass
+
+    def _accept(self):
+        while not self.done.is_set():
+            try:
+                connection, _ = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self.serve, args=(connection,), daemon=True).start()
+
+    def listen(self):
+        if os.path.exists(self.path):
+            try:
+                DaemonClient(self.path).close()
+                return False  # one is already running
+            except OSError:
+                os.remove(self.path)
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.server.bind(self.path)
+        os.chmod(self.path, 0o600)
+        self.server.listen(16)
+        threading.Thread(target=self._accept, daemon=True).start()
+        return True
+
+    def start_saved_jobs(self):
+        state = self._state()
+        lights = state.get("lights", DEFAULT_LIGHTS)
+        if lights:
+            self.start_job("lights", lights[0], lights)
+        if state.get("recording", True):
+            self.start_job("recording", "recording", ["record"])
+
+    def shutdown(self):
+        self.done.set()
+        with self.job_lock:
+            for slot in list(self.jobs):
+                self.stop_job(slot)
+        if self.server:
+            self.server.close()
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+        self.lost()
+
+
+def cmd_daemon(args):
+    daemon = Daemon()
+    if not daemon.listen():
+        return 0
+    try:
+        daemon.start_saved_jobs()
+        daemon.done.wait()
+    finally:
+        daemon.shutdown()
+    return 0
+
+
+def _job_call(client, op, value):
+    return json.loads(client.call(op, value if isinstance(value, bytes) else json.dumps(value).encode()))
+
+
+def _detach(args, argv):
+    """Hand a long-running command to the daemon, so the terminal comes straight back."""
+    client = daemon_client()
+    if client is None:
+        raise ApexError("Couldn't start the apex-analog daemon. Run the command with --watch to run it in this terminal.")
+    try:
+        result = _job_call(client, OP_JOB, {"slot": SLOTS[args.command], "label": args.command, "argv": argv, "cwd": os.getcwd()})
+    finally:
+        client.close()
+    if not result["ok"]:
+        raise ApexError(result["log"].strip().replace("apex-analog: ", "", 1) or "It stopped straight away.")
+    if result["log"].strip():
+        print(result["log"].strip())
+    print(f"Running in the background. Turn it off with: apex-analog off {args.command}")
+    return 0
+
+
+def cmd_off(args):
+    client = daemon_client(start=False)
+    if client is None:
+        print("The daemon isn't running, so nothing is on.")
+        return 0
+    try:
+        status = _job_call(client, OP_STATUS, b"")
+        slots = list(status["jobs"]) if args.name == "all" else [SLOTS.get(args.name, args.name)]
+        found = [slot for slot in slots if _job_call(client, OP_OFF, slot.encode())["found"]]
+    finally:
+        client.close()
+    print(f"Turned off: {' '.join(found)}" if found else f"{args.name} wasn't on.")
+    return 0
+
+
+def cmd_status(args):
+    client = daemon_client(start=False)
+    if client is None:
+        print("The daemon isn't running. Any apex-analog command starts it.")
+        return 0
+    try:
+        status = _job_call(client, OP_STATUS, b"")
+    finally:
+        client.close()
+    print(f"Daemon running, process {status['pid']}. Keyboard: {'connected, firmware ' + status['firmware'] if status['keyboard'] else 'not connected yet'}.")
+    if not status["jobs"]:
+        print("Nothing else is on.")
+    for slot, job in sorted(status["jobs"].items()):
+        minutes = job["seconds"] // 60
+        print(f"{slot:11}{'on' if job['running'] else 'STOPPED':8}{job['label']}  ({minutes} min)" + (f"\n           {job['log'].strip()}" if job["log"].strip() else ""))
+    return 0
+
+
+def cmd_stop(args):
+    client = daemon_client(start=False)
+    if client is None:
+        print("Nothing to stop.")
+        return 0
+    try:
+        client.call(OP_QUIT)
+    except ApexError:
+        pass
+    finally:
+        client.close()
+    deadline = time.monotonic() + 5.0
+    while os.path.exists(_socket_path()) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    print("Stopped the daemon and everything it was running. Your normal lighting is back. Any apex-analog command starts it again.")
+    return 0
+
+
+def cmd_record(args):
+    """The always-on job behind apex-analog profile."""
+    while True:
+        try:
+            with Keyboard() as kb:
+                press_points = {k: v["press"] for k, v in kb.actuation().items()}
+            break
+        except (NotFound, AccessDenied, Disconnected):
+            time.sleep(5)
+    recorder = TypingRecorder(press_points)
+    try:
+        _loop(args.hz or 60, None, None, recorder.update)
+    finally:
+        recorder.save()
+    return 0
+
+
+HELP_TEXT = """apex-analog: see how far every key is pressed on an Apex Pro Gen 3, and use it for anything.
+
+A small daemon owns the keyboard, and it starts by itself. Commands marked * run in the background and give
+your terminal back, and several can run at once. Add --watch to keep one in the terminal instead.
+
+  See what's happening
+    bars                 live bars for every key you press (just apex-analog does this too)
+    status               what's on right now
+    info                 the keyboard, your access, and every key's settings
+    health               check every switch for drift and noise
+    profile              how you type, and what it means for actuation. Always recording
+    magnet               every sensor, for playing with a magnet
+
+  Use the keys
+  * gamepad              W S A D as an analog controller
+  * map RULE...          any key to a controller, pedals, the mouse, a keystroke, a macro, or a command
+  * midi                 play it as an instrument
+  * type                 press deep for capitals
+    macro add|record|run save and replay keystrokes. Fire one with: map J=macro:NAME@3.0
+    typeprint            experiment: recognise you by how you press
+
+  Lighting and screen
+  * lights               glow with depth. --keep stays over normal lighting. --off goes back to normal
+                         --effect ripple, music, stats, rev or heatmap
+  * auto                 switch presets and lighting by the focused window
+  * oled                 key depth on the keyboard's own screen
+    paint                set key colours from any program
+
+  Keyboard settings, no GG needed
+    actuation KEYS MM    where keys fire, like: actuation WASD 1.2
+    rapid KEYS on|off    the keyboard's own rapid tap
+    preset save|use NAME keep setups on this computer
+    save                 write the current settings to the keyboard's flash, so they survive a replug
+
+  Wire it into your own thing
+    stream               one JSON line per update, to a pipe or terminal
+  * stream --udp, --osc, --serve   the same over the network, on chosen keys
+  * overlay              key pressure as an OBS browser source
+
+  Turn things off
+    off NAME             one thing: gamepad, lights, overlay, oled, stream, recording, or all
+    stop                 the daemon and everything it runs
+    autostart on|off     start the daemon at login
+
+Details on any command: apex-analog help COMMAND
+"""
+
+
+def cmd_help(args):
+    if not args.topic:
+        print(HELP_TEXT, end="")
+        return 0
+    commands = build_parser().command_parsers
+    if args.topic not in commands:
+        raise ValueError(f"No command called {args.topic!r}. See them all with: apex-analog help")
+    commands[args.topic].print_help()
+    return 0
+
+
+def bar_lines(pressed, settings, columns, rows):
+    """Every pressed key, in as many columns as it takes to fit the terminal."""
+    if not pressed:
+        return ["Press a key slowly."]
+    rows = max(1, rows)
+    count = math.ceil(len(pressed) / rows)
+    width = columns // count
+    bar = max(6, min(40, width - 17))
+    cells = [f"{name:7}|{_bar(mm, settings[name]['press'], bar)}| {mm:3.1f} mm" for mm, name in pressed]
+    return ["".join(cell.ljust(width) for cell in cells[row::rows]).rstrip() for row in range(min(rows, len(cells)))]
+
+
 # ---- command line ----------------------------------------------------------------------------------------------------
 
 def _say(message):
@@ -2572,10 +3052,8 @@ def cmd_bars(args):
                 rate, scans, last = scans / (now - last), 0, now
             pressed = sorted(((mm, name) for name, mm in depths.items() if mm > 0), reverse=True)
             lines = [f"apex-analog  {len(depths)} keys, {rate:.0f} updates/s, | marks where the key actuates. Ctrl-C quits.", ""]
-            for mm, name in pressed[:16]:
-                lines.append(f"{name:7}|{_bar(mm, settings[name]['press'])}| {mm:3.1f} mm")
-            if not pressed:
-                lines.append("Press a key slowly.")
+            size = shutil.get_terminal_size()
+            lines += bar_lines(pressed, settings, size.columns, size.lines - 3)
             screen.draw(lines)
 
 
@@ -2603,7 +3081,8 @@ def _selected_keys(args):
 
 def _loop(hz, keys, holder, on_frame, lights=None):
     """Read, map, send. Comes back after an unplug or a suspend, and lets go of every output while the keyboard is away."""
-    Keyboard().close()  # a problem at the start should be reported, not waited on
+    if not _in_job():
+        Keyboard().close()  # a problem at the start should be reported. A job has no one to report to, so it just waits
     waiting = False
     while True:
         try:
@@ -2632,7 +3111,7 @@ def _loop(hz, keys, holder, on_frame, lights=None):
                     if lights:
                         lights.stop(kb)
         except (Disconnected, NotFound, AccessDenied) as e:
-            if isinstance(e, AccessDenied) and not waiting:
+            if isinstance(e, AccessDenied) and not waiting and not _in_job():
                 raise
             if holder:
                 holder.release()
@@ -2689,6 +3168,12 @@ def _lights_from(args):
 
 def cmd_lights(args):
     if args.off:
+        client = daemon_client(start=False)
+        if client:
+            try:
+                client.call(OP_OFF, b"lights")
+            finally:
+                client.close()
         with Keyboard() as kb:
             kb.clear_colors()
         print("Back to your normal lighting.")
@@ -2906,38 +3391,12 @@ def cmd_autostart(args):
         with open(path) as f:
             print("On: " + next((l[5:].strip() for l in f if l.startswith("Exec=")), "unknown"))
         return 0
-    command = args.command_args or ["lights", "--keep"]
+    command = args.command_args or ["daemon"]
     program = shutil.which("apex-analog") or os.path.abspath(__file__)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write(f"[Desktop Entry]\nType=Application\nName=apex-analog\nComment=Key depth for the Apex Pro Gen 3\nExec={program} {' '.join(command)}\nTerminal=false\n")
     print(f"At your next login it will run: apex-analog {' '.join(command)}")
-    print("While it runs, stop it with apex-analog stop before using another apex-analog command.")
-    return 0
-
-
-def _running(pid):
-    """A finished process stays listed until its parent collects it, so a zombie doesn't count."""
-    stat = _read(f"/proc/{pid}/stat")
-    return bool(stat) and stat.rsplit(")", 1)[-1].split()[0] != "Z"
-
-
-def cmd_stop(args):
-    path = _pid_path()
-    pid = None
-    if os.path.exists(path):
-        with open(path) as f:
-            text = f.read().strip()
-        pid = int(text) if text.isdigit() else None
-    cmdline = _read(f"/proc/{pid}/cmdline") if pid else None
-    if not cmdline or "apex" not in cmdline or pid == os.getpid():
-        print("Nothing to stop.")
-        return 0
-    os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + 2.0
-    while _running(pid) and time.monotonic() < deadline:
-        time.sleep(0.05)
-    print("Stopped." if not _running(pid) else f"Asked it to stop, but process {pid} is still running.")
     return 0
 
 
@@ -3054,7 +3513,8 @@ def cmd_map(args):
     sinks = _network_sinks(args)
     explicit = _selected_keys(args)
     maps = args.maps or (["drive"] if args.command == "gamepad" else [])
-    Keyboard().close()  # say what's wrong with the keyboard before creating virtual devices
+    if not _in_job():
+        Keyboard().close()  # say what's wrong with the keyboard before creating virtual devices
     mapper = Mapper(maps, args.deadzone, args.full, args.curve, args.rapid, args.mouse_speed, args.wheel_speed,
                     args.tap_rate, args.run_rate, not args.no_swallow, args.pause_key)
     read = sorted({*mapper.keys, *(explicit or [])}, key=lambda n: BY_NAME[n][0]) if args.keys != "all" else None
@@ -3085,7 +3545,8 @@ def _parse_pairs(items, label):
 
 
 def cmd_midi(args):
-    Keyboard().close()
+    if not _in_job():
+        Keyboard().close()
     ccs = {key: int(value) for key, value in _parse_pairs(args.cc, "--cc").items()}
     instrument = MidiInstrument(args.layout, args.octave, args.channel, args.note_at, args.aftertouch, args.soft, args.hard, ccs,
                                 swallow=not args.no_swallow, pause_key=args.pause_key)
@@ -3102,7 +3563,8 @@ def _type_lines(typer, rate):
 
 
 def cmd_type(args):
-    Keyboard().close()
+    if not _in_job():
+        Keyboard().close()
     typer = PressureTyper(args.at, args.deep, args.hold, _parse_pairs(args.combo, "--combo"), args.pause_key)
     _drive(typer, args.hz or 300, typer.keys, _type_lines)
 
@@ -3165,41 +3627,49 @@ def cmd_typeprint(args):
 
 def cmd_profile(args):
     path = _state_path("typing-profile.json")
-    if args.reset:
-        if os.path.exists(path):
-            os.remove(path)
-        print("Cleared.")
+    if args.off or args.on or args.reset:
+        client = daemon_client()
+        if client is None:
+            raise ApexError("Couldn't reach the apex-analog daemon.")
+        try:
+            client.call(OP_OFF, b"recording")
+            if args.reset and os.path.exists(path):
+                os.remove(path)
+            if not args.off:
+                _job_call(client, OP_JOB, {"slot": "recording", "label": "recording", "argv": ["record"]})
+        finally:
+            client.close()
+        print("Cleared. Recording again." if args.reset else "Recording on." if args.on else "Recording off.")
         return 0
-    data = {}
-    if os.path.exists(path):
-        with open(path) as f:
-            data = json.load(f)
-    profile = TypingProfile(data)
-    if args.report:
-        with Keyboard() as kb:
-            settings = kb.actuation()
-        print("\n".join(profile.report(statistics.median(s["press"] for s in settings.values()))))
-        return 0
-    log = _PressLog()
-    started, saved = time.monotonic(), time.monotonic()
     with Keyboard() as kb:
         settings = kb.actuation()
-        _say("Recording how you press, as per-key totals only, never the order of keys. Type normally. Ctrl-C stops and shows the report.")
-        try:
-            for depths in kb.stream(args.hz or 150):
-                now = time.monotonic()
-                for press in log.update(depths, now):
-                    profile.add(press, settings.get(press.key, {}).get("press"))
-                if now - saved >= 30:
-                    _write_private(path, {"keys": profile.keys})
-                    saved = now
-                if args.minutes and now - started >= args.minutes * 60:
-                    break
-        except KeyboardInterrupt:
-            pass
-    _write_private(path, {"keys": profile.keys})
-    print("\n".join(profile.report(statistics.median(s["press"] for s in settings.values()))))
+    print("\n".join(TypingProfile(_load_json(path)).report(statistics.median(s["press"] for s in settings.values()))))
     return 0
+
+
+class TypingRecorder:
+    """Adds finished presses to the saved per-key totals, writing them out every so often."""
+
+    def __init__(self, press_points, path=None, every=30.0):
+        self.path = path or _state_path("typing-profile.json")
+        self.press_points, self.every = press_points, every
+        self.profile = TypingProfile(_load_json(self.path))
+        self.log = _PressLog()
+        self.saved = time.monotonic()
+        self.unsaved = False
+
+    def update(self, depths, now):
+        for press in self.log.update(depths, now):
+            self.profile.add(press, self.press_points.get(press.key))
+            self.unsaved = True
+        if self.unsaved and now - self.saved >= self.every:
+            self.save()
+            self.saved = now
+
+    def save(self):
+        if self.unsaved:
+            _write_private(self.path, {"keys": self.profile.keys})
+            self.unsaved = False
 
 
 def cmd_health(args):
@@ -3441,12 +3911,30 @@ def build_parser():
     au.add_argument("--hz", type=float, help="updates per second")
     au.set_defaults(func=cmd_auto)
 
-    st = commands.add_parser("autostart", help="run something at login. With nothing else named, the white press glow")
+    dm = commands.add_parser("daemon", help="the background process every command goes through. It starts by itself")
+    dm.set_defaults(func=cmd_daemon)
+
+    rc = commands.add_parser("record")  # the job behind profile
+    rc.add_argument("--hz", type=float)
+    rc.set_defaults(func=cmd_record)
+
+    sa = commands.add_parser("status", help="see what's on")
+    sa.set_defaults(func=cmd_status)
+
+    of = commands.add_parser("off", help="turn one thing off: gamepad, lights, overlay, oled, stream, recording, or all")
+    of.add_argument("name")
+    of.set_defaults(func=cmd_off)
+
+    hp = commands.add_parser("help", help="everything it can do, or the details of one command")
+    hp.add_argument("topic", nargs="?")
+    hp.set_defaults(func=cmd_help)
+
+    st = commands.add_parser("autostart", help="start the daemon at login, which brings back your lights and recording")
     st.add_argument("action", choices=("on", "off", "status"))
     st.add_argument("command_args", nargs=argparse.REMAINDER, metavar="...", help="what to run, like: lights --effect ripple")
     st.set_defaults(func=cmd_autostart)
 
-    sp = commands.add_parser("stop", help="stop whichever apex-analog is running")
+    sp = commands.add_parser("stop", help="stop the daemon and everything it runs")
     sp.set_defaults(func=cmd_stop)
 
     mc = commands.add_parser("macro", help="save, record and run keystroke sequences, and fire them from any key with macro:NAME")
@@ -3467,11 +3955,10 @@ def build_parser():
     tp.add_argument("action", choices=("enroll", "check", "forget"), help="enroll: type a set phrase 8 times. check: try to pass. forget: delete it")
     tp.set_defaults(func=cmd_typeprint)
 
-    pf = commands.add_parser("profile", help="learn how you type, as per-key totals only, and what that means for actuation")
-    pf.add_argument("--minutes", type=float, help="stop after this long (default: until Ctrl-C)")
-    pf.add_argument("--report", action="store_true", help="show what's recorded without recording more")
-    pf.add_argument("--reset", action="store_true", help="delete what's recorded")
-    pf.add_argument("--hz", type=float, help="updates per second")
+    pf = commands.add_parser("profile", help="how you type, as per-key totals only, and what that means for actuation. Records all the time")
+    pf.add_argument("--off", action="store_true", help="stop recording")
+    pf.add_argument("--on", action="store_true", help="start recording again")
+    pf.add_argument("--reset", action="store_true", help="delete what's recorded and start over")
     pf.set_defaults(func=cmd_profile)
 
     h = commands.add_parser("health", help="check every switch for drift, noise and short range")
@@ -3488,13 +3975,50 @@ def build_parser():
     i = commands.add_parser("info", help="the keyboard, your access, and every key's actuation settings")
     i.add_argument("--json", action="store_true")
     i.set_defaults(func=cmd_info)
+    for name, sub in commands.choices.items():
+        if name in SLOTS:
+            sub.add_argument("--watch", action="store_true", help="stay in this terminal, showing what it's doing, instead of running in the background")
+    parser.command_parsers = commands.choices
     return parser
 
 
+NEEDS_NO_DAEMON = {"daemon", "stop", "status", "off", "autostart", "macro", "help"}
+
+
+def _leave_with_the_daemon():
+    """A job ends cleanly if the daemon that started it goes away for any reason."""
+    parent = os.getppid()
+
+    def watch():
+        while os.getppid() == parent:
+            time.sleep(2)
+        os.kill(os.getpid(), signal.SIGTERM)
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def _runs_as_a_job(args):
+    if args.command not in SLOTS or _in_job() or getattr(args, "watch", False):
+        return False
+    if args.command == "stream" and not (args.udp or args.osc or args.serve):
+        return False  # its output is the point: it prints to this terminal or pipe
+    if args.command == "lights" and args.off:
+        return False
+    return True
+
+
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = build_parser().parse_args(raw)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    if _in_job():
+        _leave_with_the_daemon()
     try:
+        if _runs_as_a_job(args):
+            return _detach(args, raw)
+        if args.command not in NEEDS_NO_DAEMON and not _in_job():
+            client = daemon_client()  # start it if needed, so this and everything after it go through one owner
+            if client:
+                client.close()
         return args.func(args) or 0
     except KeyboardInterrupt:
         return 0
