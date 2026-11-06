@@ -111,6 +111,7 @@ def main():
     render(window, os.path.join(out, prefix + "mouse.png"))
     window.tabs.setCurrentIndex(1)
     window.keyboard_page.screen_timer.stop()
+    window.keyboard_page.poll_screen()
     window.keyboard_page.pick(["W", "A", "S", "D"])
     if not real:
         window.keyboard_page.report.setText("61 keys checked. Rest offset 10 to 32 counts, noise up to 1.8, typical range 2488.\nNothing looks wrong.")
