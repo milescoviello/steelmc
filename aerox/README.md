@@ -14,7 +14,7 @@ Configure a SteelSeries Aerox 9 Wireless on Linux with no vendor software, from 
 
 This links `aerox` and `aerox-gui` into `~/.local/bin`, adds an application menu entry, and installs a udev rule. The rule opens only the mouse's vendor interface. The interfaces that carry clicks and keystrokes stay closed.
 
-The command line needs only Python. The GUI also needs PySide6, and its keyboard page needs `apex-analog` on your PATH.
+The command line needs only Python. The GUI also needs PySide6, and its keyboard page needs `apex-analog` on your PATH and `apex-oledd` running.
 
 ## GUI
 
@@ -22,7 +22,9 @@ Run `aerox-gui`, or find "SteelSeries settings" in your application menu.
 
 Changes apply as you make them, but last only until the mouse powers off. **Save to mouse** writes them to its flash, and **Undo changes** goes back to how things were when the page loaded. The keyboard page works the same way, with **Save to keyboard**.
 
-While the keyboard page is showing, each key fills as you press it and shows its depth in millimetres. It sinks once it passes the point where it fires.
+While the keyboard page is showing, each key fills as you press it and shows its depth in millimetres. It sinks once it passes the point where it fires. Drag across keys to pick several at once, or drag from an empty spot to box them.
+
+The keyboard page also mirrors what's on the keyboard's screen, and can pin what it shows, turn it off, or send it a message, through [apex-oled](https://github.com/milescoviello/apex-oled). The screen needs an `apex-oled` with the `frame` command.
 
 ## Command line
 
@@ -66,6 +68,7 @@ Changing the polling rate makes the dongle re-sync its radio, so the mouse drops
 - **Actions that GG runs on Windows.** GG can attach software actions to a button, like its "switch apps" action or repeating clicks. These aren't on the mouse, so they do nothing on Linux. Alt+Tab works as a normal key binding instead, and on any computer.
 - **Angle snapping and GG's acceleration settings.** What they map to on the mouse isn't known yet.
 - **Macros.**
+- **The keyboard's volume wheel and media button.** They're shown, but they keep what the keyboard does with them: volume, mute, and play or pause.
 
 ## Tested
 

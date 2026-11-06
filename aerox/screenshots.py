@@ -4,6 +4,7 @@
     python3 screenshots.py OUTDIR          sample data, no devices touched
     python3 screenshots.py OUTDIR --real   reads from the real mouse and keyboard, changes nothing
 """
+import base64
 import os
 import sys
 
@@ -63,6 +64,20 @@ def sample_keyboard():
     }
 
 
+def sample_screen():
+    """A plausible frame for the docs: two bars and a line of text, packed the way the panel takes it."""
+    fb = bytearray(640)
+    for x in range(4, 124):
+        fb[x] = 0x7E if x < 70 else 0x42
+        fb[128 + x] = 0x7E if x < 96 else 0x42
+    return base64.b64encode(bytes(fb)).decode()
+
+
+class FakeOled:
+    def frame(self):
+        return {"ok": True, "fb": sample_screen(), "source": "idle", "blanked": False, "blank_reason": None, "released": False, "forced_mode": None}
+
+
 class FakeMouse:
     def read(self):
         return sample_mouse()
@@ -88,12 +103,14 @@ def main():
     app = QApplication([])
     gui.style_app(app)
     inline = (Inline(), Inline())
-    window = gui.MainWindow(None if real else FakeMouse(), None if real else FakeKeyboard(), inline, confirm=lambda *a: False)
+    window = gui.MainWindow(None if real else FakeMouse(), None if real else FakeKeyboard(), inline, confirm=lambda *a: False,
+                            oled=None if real else FakeOled())
     window.load()
     prefix = "real-" if real else "sample-"
     window.mouse_page.poller.stop()
     render(window, os.path.join(out, prefix + "mouse.png"))
     window.tabs.setCurrentIndex(1)
+    window.keyboard_page.screen_timer.stop()
     window.keyboard_page.pick(["W", "A", "S", "D"])
     if not real:
         window.keyboard_page.report.setText("61 keys checked. Rest offset 10 to 32 counts, noise up to 1.8, typical range 2488.\nNothing looks wrong.")

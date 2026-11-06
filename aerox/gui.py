@@ -6,22 +6,25 @@ safety checks stay in one place. Device calls run off the GUI thread, because a 
 mouse takes seconds to fail.
 """
 import atexit
+import base64
 import json
 import os
 import queue
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 
-from PySide6.QtCore import QObject, QProcess, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QProcess, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFrame, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QMainWindow, QMessageBox, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox,
+    QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QRubberBand, QSizePolicy, QSlider,
+    QSpinBox,
     QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -75,6 +78,9 @@ QPushButton#primary:hover {{ background: #3a60dc; }}
 QPushButton:disabled, QPushButton#primary:disabled, QComboBox:disabled, QSpinBox:disabled {{
     background: #2a2c2f; color: #71767c; border-top-color: #2a2c2f;
 }}
+QLineEdit {{ background: {EDGE}; border: 1px solid {EDGE}; border-bottom-color: {LIGHT}; padding: 4px 6px; min-height: 19px; }}
+QLineEdit:focus {{ border-color: {ACCENT}; }}
+QLineEdit:disabled {{ color: #71767c; }}
 QComboBox QAbstractItemView {{ background: {WELL}; border: 1px solid {EDGE}; selection-background-color: #2f53c9; }}
 QComboBox::drop-down {{ border: 0; width: 22px; }}
 QComboBox::down-arrow {{ image: url(@@DOWN@@); width: 9px; height: 6px; }}
@@ -133,7 +139,8 @@ KEY_LABELS = {"BKSP": "Backspace", "TAB": "Tab", "CAPS": "Caps", "ENTER": "Enter
               "LCTRL": "Ctrl", "RCTRL": "Ctrl", "LGUI": "Meta", "RGUI": "Meta", "LALT": "Alt", "RALT": "Alt",
               "SPACE": "Space", "ESC": "Esc", "PRTSC": "PrtSc", "SCRLK": "ScrLk", "PAUSE": "Pause", "INSERT": "Ins",
               "HOME": "Home", "PGUP": "PgUp", "DELETE": "Del", "END": "End", "PGDN": "PgDn", "UP": "Up", "DOWN": "Down",
-              "LEFT": "Left", "RIGHT": "Right"}
+              "LEFT": "Left", "RIGHT": "Right", "KP_NUM": "Num", "KP_DIV": "/", "KP_MUL": "*", "KP_SUB": "-", "KP_ADD": "+",
+              "KP_ENTER": "Enter", "KP_DOT": ".", **{f"KP{n}": str(n) for n in range(10)}}
 # An ANSI plate in key widths. None = a gap. These keys have no sensor unless `info` lists them.
 PLATE = [
     [("ESC", 1), (None, 1), ("F1", 1), ("F2", 1), ("F3", 1), ("F4", 1), (None, .5), ("F5", 1), ("F6", 1), ("F7", 1), ("F8", 1),
@@ -146,6 +153,39 @@ PLATE = [
      ("RCTRL", 1.25), (None, .25), ("LEFT", 1), ("DOWN", 1), ("RIGHT", 1)],
 ]
 # Label, the command, and the default colour of a pressed key where the effect has one.
+NUMPAD_X = 18.5
+# The numpad, as (name, column, row, width, height), counting from the number row.
+NUMPAD = [
+    ("KP_NUM", 0, 0, 1, 1), ("KP_DIV", 1, 0, 1, 1), ("KP_MUL", 2, 0, 1, 1), ("KP_SUB", 3, 0, 1, 1),
+    ("KP7", 0, 1, 1, 1), ("KP8", 1, 1, 1, 1), ("KP9", 2, 1, 1, 1), ("KP_ADD", 3, 1, 1, 2),
+    ("KP4", 0, 2, 1, 1), ("KP5", 1, 2, 1, 1), ("KP6", 2, 2, 1, 1),
+    ("KP1", 0, 3, 1, 1), ("KP2", 1, 3, 1, 1), ("KP3", 2, 3, 1, 1), ("KP_ENTER", 3, 3, 1, 2),
+    ("KP0", 0, 4, 2, 1), ("KP_DOT", 2, 4, 1, 1),
+]
+PLATE_WIDTH = NUMPAD_X + 4
+PLATE_HEIGHT = 6.25
+
+
+def plate_layout():
+    """Every key as (name, x, y, width, height), in key widths. The F row sits a quarter key above the rest."""
+    keys = []
+    y = 0.0
+    for index, row_keys in enumerate(PLATE):
+        x = 0.0
+        for name, width in row_keys:
+            if name is not None:
+                keys.append((name, x, y, width, 1))
+            x += width
+        y += 1.25 if index == 0 else 1
+    keys += [(name, NUMPAD_X + x, 1.25 + row_y, w, h) for name, x, row_y, w, h in NUMPAD]
+    return keys
+
+
+# What the screen can be pinned to. The daemon's own names, in the order its hotkey cycles them.
+SCREEN_MODES = [("Automatic", "auto"), ("System stats", "idle"), ("Lyrics", "lyrics"), ("Local model stats", "qwen"), ("Game stats", "game")]
+SCREEN_SOURCES = {"notify": "a message", "idle": "system stats", "lyrics": "lyrics", "qwen": "local model stats",
+                  "game": "game stats", "video": "a video"}
+SCREEN_WIDTH, SCREEN_HEIGHT = 128, 40
 EFFECTS = [
     ("Your normal lighting", None, None),
     ("Keys glow as you press, over normal lighting", ["lights", "--keep"], "ffffff"),
@@ -382,6 +422,63 @@ class DepthStream(QObject):
             self.start()
 
 
+class OledDevice:
+    """Talks to the apex-oledd daemon, which owns the keyboard's screen."""
+
+    def __init__(self, path=None):
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+        self.path = path or os.path.join(runtime, "apex-oledd.sock")
+
+    def send(self, message):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            try:
+                s.connect(self.path)
+                s.sendall((json.dumps(message) + "\n").encode())
+                data = b""
+                while b"\n" not in data:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+            except OSError:
+                raise KeyboardError("apex-oledd isn't running, so the screen can't be reached.") from None
+        try:
+            return json.loads(data or b"{}")
+        except ValueError:
+            raise KeyboardError("apex-oledd sent a reply this app can't read.") from None
+
+    def frame(self):
+        """What's on the screen, and why. A daemon too old to say gets `outdated`."""
+        reply = self.send({"cmd": "frame"})
+        if reply.get("ok"):
+            return reply
+        status = self.send({"cmd": "status"})
+        return {**status, "fb": None, "outdated": True}
+
+    def set_mode(self, mode):
+        return self.send({"cmd": "action", "action": f"mode:{mode}"})
+
+    def toggle_power(self):
+        return self.send({"cmd": "action", "action": "blank"})
+
+    def show_message(self, text, secs=5):
+        return self.send({"cmd": "notify", "lines": [text], "secs": secs, "align": "center"})
+
+
+def oled_image(framebuffer):
+    """Unpack the panel's format: 5 pages of 128 columns, one byte each, bit N = the pixel N rows down that page."""
+    pixels = bytearray(SCREEN_WIDTH * SCREEN_HEIGHT)
+    for page in range(SCREEN_HEIGHT // 8):
+        for x in range(SCREEN_WIDTH):
+            byte = framebuffer[page * SCREEN_WIDTH + x]
+            if byte:
+                for bit in range(8):
+                    if byte >> bit & 1:
+                        pixels[(page * 8 + bit) * SCREEN_WIDTH + x] = 255
+    return QImage(bytes(pixels), SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH, QImage.Format_Grayscale8).copy()
+
+
 def parse_jobs(status):
     """Lines like `lights     on      lights --keep  (135 min)`."""
     jobs = []
@@ -473,6 +570,159 @@ class KeyCap(QAbstractButton):
         elif self.hasFocus():
             p.setPen(QPen(QColor(ACCENT), 1))
             p.drawRect(r.adjusted(0, 0, -1, -1))
+
+
+class OledView(QWidget):
+    """What's on the keyboard's screen, sharp at a whole-number zoom."""
+
+    def __init__(self, zoom=1, parent=None):
+        super().__init__(parent)
+        self.zoom = zoom
+        self.image = None
+
+    def set_image(self, image):
+        self.image = image
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#000000"))
+        if self.image is not None:
+            width, height = SCREEN_WIDTH * self.zoom, SCREEN_HEIGHT * self.zoom
+            p.drawImage(QRect((self.width() - width) // 2, (self.height() - height) // 2, width, height), self.image)
+
+
+class WheelPart(QWidget):
+    """The volume wheel, with the ridges of the real one."""
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        r = self.rect()
+        p.fillRect(r, QColor(EDGE))
+        inner = r.adjusted(2, 1, -2, -1)
+        p.fillRect(inner, QColor("#2b2d30"))
+        for y in range(inner.top() + 1, inner.bottom(), 3):
+            p.fillRect(QRect(inner.left(), y, inner.width(), 1), QColor(LIGHT))
+
+
+class MediaButtonPart(QWidget):
+    """The button under the wheel, with the bar printed on the real one."""
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        r = self.rect()
+        p.fillRect(r, QColor(EDGE))
+        p.fillRect(r.adjusted(1, 1, -1, -2), QColor(CAP))
+        p.fillRect(QRect(r.width() // 2 - 8, r.height() // 2 - 1, 16, 2), QColor(MUTED))
+
+
+class KeyPlate(QWidget):
+    """The whole keyboard, to scale. Click a key to pick it, drag across keys to pick them all,
+    or drag from an empty spot to box them."""
+
+    picked = Signal()
+    STEP = 6  # pixels between checks along a drag, so a fast one can't jump over a key
+
+    def __init__(self, unit, parent=None):
+        super().__init__(parent)
+        self.caps = {}
+        self.drag_mode = None
+        self.paint_to = True
+        self.drag_from = self.drag_last = QPoint()
+        self.before = set()
+        self.band = QRubberBand(QRubberBand.Rectangle, self)
+
+        def area(x, y, w, h):
+            return QRect(round(x * unit), round(y * unit), round(w * unit) - 3, round(h * unit) - 3)
+
+        for name, x, y, w, h in plate_layout():
+            cap = KeyCap(KEY_LABELS.get(name, name), parent=self, inert=True)
+            cap.key_name = name
+            cap.setGeometry(area(x, y, w, h))
+            cap.installEventFilter(self)
+            cap.clicked.connect(lambda *_: self.picked.emit())  # Space on a focused key
+            self.caps[name] = cap
+        self.screen = OledView(1, self)
+        self.screen.setGeometry(area(NUMPAD_X, 0, 3, 1))
+        self.screen.setToolTip("The keyboard's screen, live")
+        self.wheel = WheelPart(self)
+        self.wheel.setGeometry(area(NUMPAD_X + 3, 0, 1, .58))
+        self.wheel.setToolTip("Volume wheel: scroll for volume, press to mute")
+        self.media = MediaButtonPart(self)
+        self.media.setGeometry(area(NUMPAD_X + 3, .62, 1, .38))
+        self.media.setToolTip("Play or pause")
+        self.setFixedSize(round(PLATE_WIDTH * unit), round(PLATE_HEIGHT * unit))
+        self.band.raise_()
+
+    def cap_at(self, point):
+        return next((c for c in self.caps.values() if not c.inert and c.geometry().contains(point)), None)
+
+    def set_picked(self, cap, on):
+        if cap.isChecked() != on:
+            cap.setChecked(on)
+            return True
+        return False
+
+    def begin_drag(self, point):
+        cap = self.cap_at(point)
+        if cap:
+            self.drag_mode = "paint"
+            self.paint_to = not cap.isChecked()  # starting on a picked key un-picks as you go
+            self.drag_last = point
+            self.set_picked(cap, self.paint_to)
+            self.picked.emit()
+        else:
+            self.drag_mode = "box"
+            self.drag_from = point
+            self.before = {n for n, c in self.caps.items() if c.isChecked()}
+
+    def continue_drag(self, point):
+        changed = False
+        if self.drag_mode == "paint":
+            delta = point - self.drag_last
+            steps = max(1, delta.manhattanLength() // self.STEP)
+            for i in range(1, steps + 1):
+                cap = self.cap_at(self.drag_last + delta * (i / steps))
+                if cap:
+                    changed = self.set_picked(cap, self.paint_to) or changed
+            self.drag_last = point
+        elif self.drag_mode == "box":
+            box = QRect(self.drag_from, point).normalized()
+            self.band.setGeometry(box)
+            self.band.show()
+            for name, cap in self.caps.items():
+                if not cap.inert:
+                    changed = self.set_picked(cap, name in self.before or cap.geometry().intersects(box)) or changed
+        if changed:
+            self.picked.emit()
+
+    def end_drag(self):
+        self.drag_mode = None
+        self.band.hide()
+
+    def eventFilter(self, cap, event):
+        """A key takes the mouse when pressed, even a disabled one, so keys pass it up here and a drag can cross them."""
+        kind = event.type()
+        if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseMove, QEvent.MouseButtonRelease):
+            point = cap.mapToParent(event.position().toPoint())
+            if kind == QEvent.MouseMove:
+                self.continue_drag(point)
+            elif kind == QEvent.MouseButtonRelease:
+                self.end_drag()
+            elif event.button() == Qt.LeftButton:
+                self.begin_drag(point)
+            return True
+        return False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.begin_drag(event.position().toPoint())
+
+    def mouseMoveEvent(self, event):
+        self.continue_drag(event.position().toPoint())
+
+    def mouseReleaseEvent(self, event):
+        self.end_drag()
 
 
 class BatteryMeter(QWidget):
@@ -1079,12 +1329,18 @@ class MousePage(QWidget):
 
 
 class KeyboardPage(QWidget):
-    UNIT = 52
+    UNIT = 46
+    SCREEN_POLL_MS = 400
 
-    def __init__(self, device, runner, confirm=ask, parent=None):
+    def __init__(self, device, runner, confirm=ask, parent=None, oled=None, oled_runner=None):
         super().__init__(parent)
         self.setObjectName("page")
         self.device, self.runner, self.confirm = device, runner, confirm
+        self.oled, self.oled_runner = oled, oled_runner or runner
+        self.screen_busy = False
+        self.screen_fb = None
+        self.screen_timer = QTimer(self, interval=self.SCREEN_POLL_MS)
+        self.screen_timer.timeout.connect(self.poll_screen)
         self.loading = False
         self.keys = {}
         self.caps = {}
@@ -1102,10 +1358,13 @@ class KeyboardPage(QWidget):
                 self.stream = DepthStream(command(), self)
                 self.stream.changed.connect(self.show_depths)
             self.stream.start()
+        self.screen_timer.start()
+        self.poll_screen()
 
     def hideEvent(self, event):
         super().hideEvent(event)
         self.stop_stream()
+        self.screen_timer.stop()
 
     def stop_stream(self):
         if self.stream:
@@ -1139,6 +1398,7 @@ class KeyboardPage(QWidget):
         controls = QHBoxLayout()
         controls.setSpacing(10)
         controls.addWidget(self.build_actuation(), 5)
+        controls.addWidget(self.build_screen(), 4)
         controls.addWidget(self.build_lighting(), 4)
         controls.addWidget(self.build_setups(), 4)
         body.addLayout(controls, 1)
@@ -1151,26 +1411,35 @@ class KeyboardPage(QWidget):
         root.addLayout(row(self.status, self.save_button))
 
     def build_plate(self):
-        plate = QWidget()
-        u = self.UNIT
-        y = 0
-        total_width = 0
-        for index, keys in enumerate(PLATE):
-            x = 0.0
-            for name, width in keys:
-                if name is not None:
-                    cap = KeyCap(KEY_LABELS.get(name, name), parent=plate, inert=True)
-                    cap.key_name = name
-                    cap.setGeometry(round(x * u), y, round(width * u) - 3, u - 3)
-                    cap.clicked.connect(self.selection_changed)
-                    self.caps[name] = cap
-                x += width
-            total_width = max(total_width, x)
-            y += u + (round(u * .25) if index == 0 else 0)
-        plate.setFixedSize(round(total_width * u), y)
+        self.plate = KeyPlate(self.UNIT)
+        self.caps = self.plate.caps
+        self.plate.picked.connect(self.selection_changed)
         frame = well()
-        frame.layout().addWidget(plate, 0, Qt.AlignHCenter)
+        frame.layout().addWidget(self.plate, 0, Qt.AlignHCenter)
         return frame
+
+    def build_screen(self):
+        self.screen_zoom = OledView(2)
+        self.screen_zoom.setFixedHeight(SCREEN_HEIGHT * 2 + 8)
+        self.screen_state = muted("")
+        self.screen_state.setWordWrap(True)
+        self.screen_mode = QComboBox()
+        for label, mode in SCREEN_MODES:
+            self.screen_mode.addItem(label, mode)
+        self.screen_mode.activated.connect(self.mode_picked)
+        self.screen_power = QPushButton("Turn screen off")
+        self.screen_power.clicked.connect(self.toggle_screen)
+        self.screen_text = QLineEdit()
+        self.screen_text.setPlaceholderText("Show a message")
+        self.screen_text.returnPressed.connect(self.send_message)
+        self.screen_send = QPushButton("Show")
+        self.screen_send.clicked.connect(self.send_message)
+        self.screen_controls = [self.screen_mode, self.screen_power, self.screen_text, self.screen_send]
+        panel = well(self.screen_zoom, self.screen_state, self.screen_mode, self.screen_power,
+                     row(self.screen_text, self.screen_send), muted("Wheel: volume, press to mute."), muted("Button: play or pause."),
+                     title="Screen")
+        panel.layout().addStretch(1)
+        return panel
 
     def build_actuation(self):
         self.selection_label = QLabel("Pick keys to change")
@@ -1199,10 +1468,14 @@ class KeyboardPage(QWidget):
         typing.clicked.connect(lambda: self.show_report("profile"))
         self.report = muted("")
         self.report.setWordWrap(True)
+        pick_hint = muted("Drag across keys to pick several, or drag from an empty spot to box them.")
+        pick_hint.setWordWrap(True)
+        fill_hint = muted("Shading shows where a key fires. Keys fill as you press them.")
+        fill_hint.setWordWrap(True)
         self.report.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        panel = well(self.selection_label, row(*pick, None), row(muted("Fires at"), self.depth, self.depth_label),
+        panel = well(self.selection_label, row(*pick, None), pick_hint, row(muted("Fires at"), self.depth, self.depth_label),
                      row(self.set_depth, None), row(self.rapid_on, self.rapid_off, None),
-                     muted("Shading shows where a key fires. Keys fill as you press them."),
+                     fill_hint,
                      row(check, typing, None), self.report)
         panel.layout().addStretch(1)
         self.selection_changed()
@@ -1210,6 +1483,8 @@ class KeyboardPage(QWidget):
 
     def build_lighting(self):
         self.effect = QComboBox()
+        self.effect.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.effect.setMinimumContentsLength(14)
         for label, args, _ in EFFECTS:
             self.effect.addItem(label, args)
         self.effect.currentIndexChanged.connect(self.effect_picked)
@@ -1220,12 +1495,13 @@ class KeyboardPage(QWidget):
         self.feature_list = QVBoxLayout()
         for name, label, hint in FEATURES:
             box = QCheckBox(label)
+            box.setStyleSheet("QCheckBox { spacing: 6px; }")
             box.setToolTip(hint)
             box.clicked.connect(lambda checked=False, n=name: self.toggle_feature(n, checked))
             self.feature_boxes[name] = box
             self.feature_list.addWidget(box)
         self.effect_picked()
-        panel = well(self.effect, row(muted("Pressed key"), self.effect_color, None, apply_effect), title="Lighting")
+        panel = well(self.effect, row(muted("Pressed key"), self.effect_color, None), apply_effect, title="Lighting")
         features_title = QLabel("Features")
         features_title.setObjectName("title")
         panel.layout().addWidget(features_title)
@@ -1236,6 +1512,8 @@ class KeyboardPage(QWidget):
     def build_setups(self):
         self.preset = QComboBox()
         self.preset.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.preset.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.preset.setMinimumContentsLength(8)
         use = QPushButton("Use")
         use.clicked.connect(self.use_preset)
         save_as = QPushButton("Save as new")
@@ -1245,7 +1523,7 @@ class KeyboardPage(QWidget):
         self.jobs_label = muted("")
         self.jobs_label.setWordWrap(True)
         self.turn_off = QVBoxLayout()
-        panel = well(row(self.preset, use), row(save_as, delete, None), title="Setups on this computer")
+        panel = well(row(self.preset, use), row(save_as, delete, None), title="Saved setups")
         running = QLabel("Running now")
         running.setObjectName("title")
         panel.layout().addWidget(running)
@@ -1340,6 +1618,73 @@ class KeyboardPage(QWidget):
         self.effect_color.setEnabled(default is not None)
         if default and not self.loading:
             self.effect_color.set_color(default)
+
+    # The screen
+
+    def poll_screen(self):
+        if self.oled is None:
+            self.screen_lost(KeyboardError("apex-oled isn't set up here."))
+            return
+        if not self.screen_busy:
+            self.screen_busy = True
+            self.oled_runner.submit(self.oled.frame, self.show_screen, self.screen_lost)
+
+    def show_screen(self, state):
+        self.screen_busy = False
+        for control in self.screen_controls:
+            control.setEnabled(True)
+        fb = None if state.get("blanked") else state.get("fb")
+        if fb != self.screen_fb:
+            self.screen_fb = fb
+            image = oled_image(base64.b64decode(fb)) if fb else None
+            self.plate.screen.set_image(image)
+            self.screen_zoom.set_image(image)
+        forced = state.get("forced_mode")
+        self.screen_mode.setCurrentIndex(max(0, self.screen_mode.findData(forced or "auto")))
+        manual = state.get("blanked") and state.get("blank_reason") == "manual"
+        self.screen_power.setText("Turn screen on" if manual else "Turn screen off")
+        self.screen_state.setText(self.describe_screen(state, manual))
+
+    @staticmethod
+    def describe_screen(state, manual):
+        if state.get("outdated"):
+            return "Restart apex-oledd to see the screen here."
+        if state.get("released"):
+            return "Another program is drawing on it."
+        if manual:
+            return "Turned off."
+        if state.get("blanked"):
+            return "Dark until you're back."
+        forced = state.get("forced_mode")
+        if forced:
+            return f"Pinned to {SCREEN_SOURCES.get(forced, forced)}: nothing else can take the screen."
+        source = state.get("source")
+        return f"Showing {SCREEN_SOURCES.get(source, source)}." if source else ""
+
+    def screen_lost(self, error):
+        self.screen_busy = False
+        self.screen_fb = None
+        self.plate.screen.set_image(None)
+        self.screen_zoom.set_image(None)
+        for control in self.screen_controls:
+            control.setEnabled(False)
+        self.screen_state.setText(str(error))
+
+    def screen_command(self, call):
+        self.oled_runner.submit(call, lambda _: self.poll_screen(), self.screen_lost)
+
+    def mode_picked(self, *_):
+        mode = self.screen_mode.currentData()
+        self.screen_command(lambda: self.oled.set_mode(mode))
+
+    def toggle_screen(self):
+        self.screen_command(self.oled.toggle_power)
+
+    def send_message(self):
+        text = self.screen_text.text().strip()
+        if text:
+            self.screen_text.clear()
+            self.screen_command(lambda: self.oled.show_message(text))
 
     # Selecting keys
 
@@ -1440,12 +1785,13 @@ class KeyboardPage(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask):
+    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None):
         super().__init__()
         self.setWindowTitle("SteelSeries settings")
-        runners = runners or (Runner(), Runner())
+        runners = runners or (Runner(), Runner(), Runner())
         self.mouse_page = MousePage(mouse or MouseDevice(), runners[0], confirm)
-        self.keyboard_page = KeyboardPage(keyboard or KeyboardDevice(), runners[1], confirm)
+        self.keyboard_page = KeyboardPage(keyboard or KeyboardDevice(), runners[1], confirm, oled=oled or (OledDevice() if keyboard is None else None),
+                                          oled_runner=runners[-1])
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
         tabs.tabBar().setDrawBase(False)
@@ -1453,7 +1799,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.keyboard_page, "Keyboard")
         self.setCentralWidget(tabs)
         self.tabs = tabs
-        self.setMinimumSize(QSize(1000, 780))
+        self.setMinimumSize(QSize(1100, 800))
 
     def load(self):
         self.mouse_page.refresh()

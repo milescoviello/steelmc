@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """GUI tests. Nothing goes on screen, and no device is touched: fakes stand in for both."""
+import base64
 import importlib.util
+import json
 import os
+import socket
 import stat
 import tempfile
+import threading
 import time
 import unittest
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"  # never on screen, whatever the session is
 
-from PySide6.QtCore import QEventLoop, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -440,6 +445,316 @@ class KeyboardPageTest(unittest.TestCase):
         self.device.fail = None
         self.page.retry.click()
         self.assertTrue(self.page.content.isEnabled())
+
+
+class DragSelect(unittest.TestCase):
+    def setUp(self):
+        self.device = FakeKeyboard()
+        self.page = gui.KeyboardPage(self.device, Inline(), yes)
+        self.page.refresh()
+        self.plate = self.page.plate
+        self.pressed_on = None
+
+    def center(self, name):
+        return self.page.caps[name].geometry().center()
+
+    def event(self, widget, kind, plate_point, button=Qt.LeftButton):
+        """Mouse events go to whichever widget took the press, in its own coordinates, as in real use."""
+        local = QPointF(widget.mapFrom(self.plate, plate_point)) if widget is not self.plate else QPointF(plate_point)
+        pressed = Qt.NoButton if kind == QEvent.MouseButtonRelease else Qt.LeftButton
+        QApplication.sendEvent(widget, QMouseEvent(kind, local, local, button, pressed, Qt.NoModifier))
+
+    def drag(self, *names):
+        """Press on the first key, then move across the others, then let go."""
+        start = self.page.caps[names[0]]
+        self.event(start, QEvent.MouseButtonPress, self.center(names[0]))
+        for name in names[1:]:
+            self.event(start, QEvent.MouseMove, self.center(name), Qt.NoButton)
+        self.event(start, QEvent.MouseButtonRelease, self.center(names[-1]))
+
+    def picked(self):
+        return set(self.page.selected_keys())
+
+    def test_a_click_still_toggles_one_key(self):
+        self.drag("J")
+        self.assertEqual(self.picked(), {"J"})
+        self.drag("J")
+        self.assertEqual(self.picked(), set())
+
+    def test_drag_across_keys_picks_them_all(self):
+        self.drag("W", "A", "S", "D")
+        self.assertEqual(self.picked(), {"W", "A", "S", "D"})
+        self.assertEqual(self.page.set_depth.text(), "Set 4 keys to 1.0 mm")
+
+    def test_a_fast_drag_doesnt_jump_over_keys(self):
+        self.drag("Q", "P")
+        self.assertEqual(self.picked(), set("QWERTYUIOP"))
+
+    def test_starting_on_a_picked_key_unpicks(self):
+        self.page.pick(list("QWERTY"))
+        self.drag("W", "R")
+        self.assertEqual(self.picked(), {"Q", "T", "Y"})
+
+    def test_keys_without_sensors_stay_out(self):
+        self.drag("1", "F1")
+        self.assertEqual(self.picked(), {"1"})
+        self.assertFalse(self.page.caps["F1"].isChecked())
+
+    def test_moving_without_a_press_does_nothing(self):
+        self.event(self.page.caps["W"], QEvent.MouseMove, self.center("E"), Qt.NoButton)
+        self.assertEqual(self.picked(), set())
+
+    def test_right_button_doesnt_pick(self):
+        self.event(self.page.caps["W"], QEvent.MouseButtonPress, self.center("W"), Qt.RightButton)
+        self.assertEqual(self.picked(), set())
+
+    def test_box_from_an_empty_spot(self):
+        empty = self.page.caps["UP"].geometry().center()  # no sensor, so it counts as empty
+        self.event(self.plate, QEvent.MouseButtonPress, empty)
+        self.event(self.plate, QEvent.MouseMove, self.center("H"), Qt.NoButton)
+        self.assertFalse(self.plate.band.isHidden())
+        self.assertLessEqual({"H", "J", "ENTER", "RSHIFT"}, self.picked())
+        self.assertNotIn("F", self.picked())
+        self.event(self.plate, QEvent.MouseButtonRelease, self.center("H"))
+        self.assertTrue(self.plate.band.isHidden())
+
+    def test_a_box_keeps_what_was_picked_and_can_shrink(self):
+        self.page.pick(["Q"])
+        start = self.page.caps["UP"].geometry().center()
+        self.event(self.plate, QEvent.MouseButtonPress, start)
+        self.event(self.plate, QEvent.MouseMove, self.center("H"), Qt.NoButton)
+        self.assertIn("H", self.picked())
+        self.event(self.plate, QEvent.MouseMove, self.center("L"), Qt.NoButton)
+        self.assertNotIn("H", self.picked())
+        self.assertIn("Q", self.picked())
+        self.event(self.plate, QEvent.MouseButtonRelease, self.center("L"))
+
+    def test_a_press_on_an_empty_spot_changes_nothing(self):
+        self.page.pick(["Q"])
+        point = self.page.caps["UP"].geometry().center()
+        self.event(self.plate, QEvent.MouseButtonPress, point)
+        self.event(self.plate, QEvent.MouseButtonRelease, point)
+        self.assertEqual(self.picked(), {"Q"})
+
+    def test_a_press_on_a_key_without_a_sensor_reaches_the_plate(self):
+        cap = self.page.caps["UP"]
+        point = cap.geometry().center()
+        self.event(cap, QEvent.MouseButtonPress, point)
+        self.assertEqual(self.plate.drag_mode, "box")
+        self.plate.end_drag()
+
+
+class WholeKeyboard(unittest.TestCase):
+    def setUp(self):
+        self.page = gui.KeyboardPage(FakeKeyboard(), Inline(), yes)
+        self.plate = self.page.plate
+
+    def test_numpad_is_there(self):
+        for name in ("KP_NUM", "KP_DIV", "KP_MUL", "KP_SUB", "KP_ADD", "KP_ENTER", "KP_DOT", *(f"KP{n}" for n in range(10))):
+            self.assertIn(name, self.page.caps)
+        self.assertEqual(self.page.caps["KP7"].title, "7")
+        self.assertGreater(self.page.caps["KP_ADD"].height(), self.page.caps["KP7"].height() * 1.5)
+        self.assertGreater(self.page.caps["KP0"].width(), self.page.caps["KP1"].width() * 1.5)
+
+    def test_every_part_fits_and_nothing_overlaps(self):
+        parts = [*self.page.caps.values(), self.plate.screen, self.plate.wheel, self.plate.media]
+        for part in parts:
+            self.assertTrue(self.plate.rect().contains(part.geometry()), getattr(part, "title", part))
+        for i, a in enumerate(parts):
+            for b in parts[i + 1:]:
+                self.assertFalse(a.geometry().intersects(b.geometry()), f"{getattr(a, 'title', a)} and {getattr(b, 'title', b)}")
+
+    def test_the_real_corner(self):
+        screen, wheel, media = self.plate.screen.geometry(), self.plate.wheel.geometry(), self.plate.media.geometry()
+        self.assertLess(screen.right(), wheel.left())
+        self.assertLess(wheel.bottom(), media.top())
+        self.assertEqual(wheel.left(), media.left())
+        self.assertEqual(screen.left(), self.page.caps["KP_NUM"].x())
+        self.assertEqual(wheel.left(), self.page.caps["KP_SUB"].x())
+
+    def test_the_screen_fits_a_panels_worth_of_pixels(self):
+        self.assertGreaterEqual(self.plate.screen.width(), gui.SCREEN_WIDTH)
+        self.assertGreaterEqual(self.plate.screen.height(), gui.SCREEN_HEIGHT)
+
+    def test_fits_the_window(self):
+        self.assertLessEqual(self.plate.width() + 52, gui.MainWindow(FakeMouse(), FakeKeyboard(), (Inline(), Inline()), yes).minimumWidth())
+
+
+class FakeOled:
+    def __init__(self):
+        self.calls = []
+        self.state = {"ok": True, "fb": None, "source": "idle", "blanked": False, "blank_reason": None, "released": False, "forced_mode": None}
+        self.fail = None
+
+    def frame(self):
+        if self.fail:
+            raise self.fail
+        return self.state
+
+    def set_mode(self, mode):
+        self.calls.append(("mode", mode))
+
+    def toggle_power(self):
+        self.calls.append(("power",))
+
+    def show_message(self, text):
+        self.calls.append(("message", text))
+
+
+class Screen(unittest.TestCase):
+    def setUp(self):
+        self.oled = FakeOled()
+        self.page = gui.KeyboardPage(FakeKeyboard(), Inline(), yes, oled=self.oled)
+        self.page.poll_screen()
+
+    def test_pixels_land_in_the_right_place(self):
+        fb = bytearray(640)
+        fb[1 * 128 + 3] = 1 << 2  # page 1, column 3, bit 2 = row 10
+        image = gui.oled_image(bytes(fb))
+        self.assertEqual((image.width(), image.height()), (128, 40))
+        self.assertEqual(image.pixelColor(3, 10).value(), 255)
+        self.assertEqual(image.pixelColor(3, 9).value(), 0)
+        self.assertEqual(image.pixelColor(4, 10).value(), 0)
+
+    def test_shows_on_the_plate_and_the_panel(self):
+        self.oled.state["fb"] = base64.b64encode(bytes([255]) * 640).decode()
+        self.page.poll_screen()
+        self.assertIsNotNone(self.page.plate.screen.image)
+        self.assertIsNotNone(self.page.screen_zoom.image)
+        self.assertFalse(self.page.plate.screen.grab().isNull())
+        self.assertEqual(self.page.screen_state.text(), "Showing system stats.")
+
+    def test_a_dark_panel_looks_dark(self):
+        self.oled.state.update(fb=base64.b64encode(bytes([255]) * 640).decode())
+        self.page.poll_screen()
+        self.oled.state.update(blanked=True, blank_reason="away")
+        self.page.poll_screen()
+        self.assertIsNone(self.page.plate.screen.image)
+        self.assertEqual(self.page.screen_state.text(), "Dark until you're back.")
+        self.assertEqual(self.page.screen_power.text(), "Turn screen off")
+
+    def test_turned_off_by_hand(self):
+        self.oled.state.update(blanked=True, blank_reason="manual")
+        self.page.poll_screen()
+        self.assertEqual(self.page.screen_power.text(), "Turn screen on")
+        self.page.screen_power.click()
+        self.assertEqual(self.oled.calls, [("power",)])
+
+    def test_a_pinned_mode_says_so(self):
+        self.oled.state["forced_mode"] = "lyrics"
+        self.page.poll_screen()
+        self.assertEqual(self.page.screen_mode.currentData(), "lyrics")
+        self.assertIn("Pinned to lyrics", self.page.screen_state.text())
+
+    def test_showing_the_pinned_mode_sends_nothing(self):
+        self.oled.state["forced_mode"] = "lyrics"
+        self.page.poll_screen()
+        self.assertEqual(self.oled.calls, [])
+
+    def test_picking_a_mode(self):
+        self.page.screen_mode.setCurrentIndex(self.page.screen_mode.findData("game"))
+        self.page.screen_mode.activated.emit(self.page.screen_mode.currentIndex())
+        self.assertEqual(self.oled.calls, [("mode", "game")])
+
+    def test_a_message(self):
+        self.page.screen_text.setText("  hello  ")
+        self.page.screen_send.click()
+        self.assertEqual(self.oled.calls, [("message", "hello")])
+        self.assertEqual(self.page.screen_text.text(), "")
+
+    def test_an_empty_message_sends_nothing(self):
+        self.page.screen_text.setText("   ")
+        self.page.screen_send.click()
+        self.assertEqual(self.oled.calls, [])
+
+    def test_a_program_holding_the_panel(self):
+        self.oled.state["released"] = True
+        self.page.poll_screen()
+        self.assertIn("Another program", self.page.screen_state.text())
+
+    def test_an_older_daemon_says_how_to_fix_it(self):
+        self.oled.state.update(outdated=True)
+        self.page.poll_screen()
+        self.assertIn("Restart apex-oledd", self.page.screen_state.text())
+
+    def test_daemon_gone_and_back(self):
+        self.oled.fail = gui.KeyboardError("apex-oledd isn't running, so the screen can't be reached.")
+        self.page.poll_screen()
+        self.assertFalse(self.page.screen_mode.isEnabled())
+        self.assertIn("isn't running", self.page.screen_state.text())
+        self.oled.fail = None
+        self.page.poll_screen()
+        self.assertTrue(self.page.screen_mode.isEnabled())
+
+    def test_polls_dont_pile_up(self):
+        class Holding:
+            def __init__(self):
+                self.jobs = []
+
+            def submit(self, call, done=None, failed=None):
+                self.jobs.append((call, done))
+
+        held = Holding()
+        page = gui.KeyboardPage(FakeKeyboard(), Inline(), yes, oled=self.oled, oled_runner=held)
+        page.poll_screen()
+        page.poll_screen()
+        self.assertEqual(len(held.jobs), 1)
+        call, done = held.jobs[0]
+        done(call())
+        page.poll_screen()
+        self.assertEqual(len(held.jobs), 2)
+
+    def test_no_daemon_configured(self):
+        page = gui.KeyboardPage(FakeKeyboard(), Inline(), yes)
+        page.poll_screen()
+        self.assertFalse(page.screen_mode.isEnabled())
+
+
+class OledSocket(unittest.TestCase):
+    def serve(self, replies):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        path = os.path.join(d.name, "s.sock")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(4)
+        self.addCleanup(server.close)
+        seen = []
+
+        def run():
+            for reply in replies:
+                conn, _ = server.accept()
+                with conn:
+                    seen.append(json.loads(conn.recv(4096)))
+                    conn.sendall((json.dumps(reply) + "\n").encode())
+
+        threading.Thread(target=run, daemon=True).start()
+        return gui.OledDevice(path), seen
+
+    def test_frame(self):
+        device, seen = self.serve([{"ok": True, "fb": "AA==", "source": "idle"}])
+        self.assertEqual(device.frame()["source"], "idle")
+        self.assertEqual(seen, [{"cmd": "frame"}])
+
+    def test_an_older_daemon_falls_back_to_status(self):
+        device, seen = self.serve([{"ok": False, "error": "unknown command"}, {"ok": True, "source": "lyrics"}])
+        state = device.frame()
+        self.assertTrue(state["outdated"])
+        self.assertEqual(state["source"], "lyrics")
+        self.assertEqual([m["cmd"] for m in seen], ["frame", "status"])
+
+    def test_commands(self):
+        device, seen = self.serve([{"ok": True}] * 3)
+        device.set_mode("lyrics")
+        device.toggle_power()
+        device.show_message("hi")
+        self.assertEqual(seen[0], {"cmd": "action", "action": "mode:lyrics"})
+        self.assertEqual(seen[1], {"cmd": "action", "action": "blank"})
+        self.assertEqual(seen[2]["lines"], ["hi"])
+
+    def test_no_daemon(self):
+        with self.assertRaisesRegex(gui.KeyboardError, "isn't running"):
+            gui.OledDevice("/nonexistent/s.sock").frame()
 
 
 class Helpers(unittest.TestCase):
