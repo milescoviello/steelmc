@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SteelSeries settings: one window for the Aerox 9 Wireless and the Apex Pro Gen 3, no GG needed.
+"""SteelMC: one window for an Aerox 9 Wireless and an Apex Pro Gen 3, no GG needed.
 
 The mouse goes through aerox.py. The keyboard goes through the apex-analog command, so its
 safety checks stay in one place. Device calls run off the GUI thread, because a sleeping
@@ -28,7 +28,8 @@ from PySide6.QtWidgets import (
     QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
-import aerox
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "aerox"))
+import aerox  # noqa: E402
 
 CHASSIS = "#26282b"
 WELL = "#1b1d1f"
@@ -1881,7 +1882,7 @@ class KeyboardPage(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None):
         super().__init__()
-        self.setWindowTitle("SteelSeries settings")
+        self.setWindowTitle("SteelMC")
         runners = runners or (Runner(), Runner(), Runner())
         self.mouse_page = MousePage(mouse or MouseDevice(), runners[0], confirm)
         self.keyboard_page = KeyboardPage(keyboard or KeyboardDevice(), runners[1], confirm, oled=oled or (OledDevice() if keyboard is None else None),
@@ -1906,7 +1907,7 @@ class MainWindow(QMainWindow):
 
 def arrow_images():
     """QSS needs image files for arrows, so draw hard little triangles into a temp folder."""
-    folder = tempfile.mkdtemp(prefix="aerox-gui-")
+    folder = tempfile.mkdtemp(prefix="steelmc-")
     atexit.register(shutil.rmtree, folder, ignore_errors=True)
     paths = {}
     shapes = {"DOWN": ((0, 0), (9, 0), (4.5, 6)), "UP": ((0, 6), (9, 6), (4.5, 0))}
@@ -1944,8 +1945,8 @@ def style_app(app):
 
 def main(argv=None):
     app = QApplication(argv if argv is not None else sys.argv)
-    app.setApplicationName("SteelSeries settings")
-    app.setDesktopFileName("net.local.aerox-gui")
+    app.setApplicationName("SteelMC")
+    app.setDesktopFileName("net.local.steelmc")
     style_app(app)
     window = MainWindow()
     window.show()

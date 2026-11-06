@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=SteelSeries settings
+Name=SteelMC
 Comment=Configure an Aerox 9 Wireless mouse and an Apex Pro Gen 3 keyboard
-Exec=aerox-gui
+Exec=steelmc
 Icon=input-mouse
 Terminal=false
 Categories=Settings;HardwareSettings;

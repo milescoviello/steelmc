@@ -18,8 +18,8 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-import aerox
 import gui
+import aerox
 import screenshots
 
 app = QApplication.instance() or QApplication([])
@@ -866,9 +866,10 @@ class Helpers(unittest.TestCase):
     def test_key_args_are_comma_safe(self):
         self.assertEqual(gui.KeyboardDevice.key_args(["W", ",", "-", "SPACE"]), "W,COMMA,MINUS,SPACE")
 
-    @unittest.skipUnless(os.path.exists(os.path.expanduser("~/apex-analog/apex_analog.py")), "apex-analog isn't here")
+    APEX_ANALOG = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "apex-analog", "apex_analog.py")
+
     def test_apex_analog_understands_every_key_we_send(self):
-        spec = importlib.util.spec_from_file_location("apex_analog", os.path.expanduser("~/apex-analog/apex_analog.py"))
+        spec = importlib.util.spec_from_file_location("apex_analog", self.APEX_ANALOG)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         names = [n for row in gui.PLATE for n, _ in row if n and n in module.BY_NAME]

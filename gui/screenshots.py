@@ -13,8 +13,8 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"  # never on screen, whatever the ses
 from PySide6.QtGui import QColor, QFont, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
-import aerox
 import gui
+import aerox
 
 
 class Inline:
