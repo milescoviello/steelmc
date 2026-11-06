@@ -72,6 +72,8 @@ class FakeKeyboard:
         return self.data
 
     def __getattr__(self, name):
+        if name == "stream_command":
+            raise AttributeError(name)
         def record(*args):
             self.calls.append((name, *args))
         return record
@@ -296,7 +298,7 @@ class KeyboardPageTest(unittest.TestCase):
 
     def test_caps_show_depth(self):
         self.assertEqual(self.page.caps["W"].detail, "1.0 R")
-        self.assertAlmostEqual(self.page.caps["W"].fill, 0.25)
+        self.assertAlmostEqual(self.page.caps["W"].fill, 1.08 / 4)
         self.assertEqual(self.page.caps["J"].detail, "1.8")
         self.assertEqual(self.page.caps["SPACE"].detail, "3.0")
 
@@ -381,9 +383,9 @@ class KeyboardPageTest(unittest.TestCase):
         self.assertIn("Nothing", self.page.jobs_label.text())
 
     def test_presets(self):
-        self.page.preset.setCurrentText("beamng")
+        self.page.preset.setCurrentText("gaming")
         self.page.use_preset()
-        self.assertEqual(self.device.calls, [("use_preset", "beamng")])
+        self.assertEqual(self.device.calls, [("use_preset", "gaming")])
 
     def test_delete_asks_first(self):
         self.page.confirm = no
@@ -397,6 +399,32 @@ class KeyboardPageTest(unittest.TestCase):
         self.page.confirm = yes
         self.page.save_button.click()
         self.assertEqual(self.device.calls, [("save",)])
+
+    def test_keys_fill_as_you_press(self):
+        cap = self.page.caps["W"]  # fires at 1.08 mm
+        self.page.show_depths({"W": 0.5})
+        self.assertEqual(cap.live_mm, 0.5)
+        self.assertFalse(cap.fired())
+        self.page.show_depths({"W": 3.2, "J": 0.4})
+        self.assertTrue(cap.fired())
+        self.assertEqual(self.page.caps["J"].live_mm, 0.4)
+        self.assertFalse(cap.grab().isNull())
+
+    def test_keys_empty_when_released(self):
+        self.page.show_depths({"W": 3.2, "J": 0.4})
+        self.page.show_depths({"J": 0.2})
+        self.assertEqual(self.page.caps["W"].live_mm, 0.0)
+        self.assertEqual(self.page.caps["J"].live_mm, 0.2)
+        self.page.show_depths({})
+        self.assertEqual(self.page.caps["J"].live_mm, 0.0)
+
+    def test_a_key_without_a_sensor_or_a_name_we_dont_know_is_ignored(self):
+        self.page.show_depths({"ESC": 1.0, "NOPE": 1.0})
+        self.assertEqual(self.page.caps["ESC"].live_mm, 0.0)
+
+    def test_pressing_sends_nothing(self):
+        self.page.show_depths({"W": 3.2})
+        self.assertEqual(self.device.calls, [])
 
     def test_reports(self):
         self.device.report = lambda name: f"{name} says fine"
@@ -500,6 +528,97 @@ class KeyboardCommand(unittest.TestCase):
         data = device.read()
         self.assertEqual(data["presets"], ["one", "two"])
         self.assertEqual(data["jobs"], [])
+
+
+class Stream(unittest.TestCase):
+    def script(self, body):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        path = os.path.join(d.name, "fake-stream")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n" + body)
+        os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
+        return path
+
+    def wait(self, until, seconds=3):
+        end = time.monotonic() + seconds
+        while time.monotonic() < end and not until():
+            app.processEvents()
+            time.sleep(0.005)
+        return until()
+
+    def test_frames_arrive_and_only_changes_are_sent(self):
+        path = self.script('echo "{}"\necho "{}"\necho \'{"W": 1.5}\'\nsleep 5\n')
+        stream = gui.DepthStream([path])
+        seen = []
+        stream.changed.connect(seen.append)
+        stream.start()
+        self.assertTrue(self.wait(lambda: seen))
+        self.assertEqual(seen, [{"W": 1.5}])
+        stream.stop()
+        self.assertEqual(seen, [{"W": 1.5}, {}])
+        self.assertIsNone(stream.process)
+
+    def test_a_half_written_line_waits_for_the_rest(self):
+        path = self.script('printf \'{"W": 1\'\nsleep 0.1\nprintf \'.5}\\n\'\nsleep 5\n')
+        stream = gui.DepthStream([path])
+        seen = []
+        stream.changed.connect(seen.append)
+        stream.start()
+        self.assertTrue(self.wait(lambda: seen))
+        self.assertEqual(seen, [{"W": 1.5}])
+        stream.stop()
+
+    def test_garbage_is_ignored(self):
+        path = self.script('echo "not json"\necho \'{"W": 2.0}\'\nsleep 5\n')
+        stream = gui.DepthStream([path])
+        seen = []
+        stream.changed.connect(seen.append)
+        stream.start()
+        self.assertTrue(self.wait(lambda: {"W": 2.0} in seen))
+        stream.stop()
+
+    def test_a_dead_stream_lets_go_of_held_keys_and_retries(self):
+        path = self.script('echo \'{"W": 2.0}\'\n')
+        stream = gui.DepthStream([path])
+        stream.RETRY_MS = 10
+        seen = []
+        stream.changed.connect(seen.append)
+        stream.start()
+        self.assertTrue(self.wait(lambda: seen.count({"W": 2.0}) >= 2), seen)
+        self.assertIn({}, seen)
+        stream.stop()
+
+    def test_stopped_means_stopped(self):
+        path = self.script('echo \'{"W": 2.0}\'\n')
+        stream = gui.DepthStream([path])
+        stream.RETRY_MS = 10
+        stream.start()
+        stream.stop()
+        for _ in range(10):
+            app.processEvents()
+            time.sleep(0.005)
+        self.assertIsNone(stream.process)
+
+    def test_not_installed_is_quiet(self):
+        stream = gui.DepthStream(["/nonexistent/apex-analog"])
+        stream.start()
+        self.assertIsNone(stream.process)
+        stream.stop()
+
+    def test_runs_only_while_the_page_shows(self):
+        path = self.script('sleep 30\n')
+        device = FakeKeyboard()
+        device.stream_command = lambda: [path]
+        page = gui.KeyboardPage(device, Inline(), yes)
+        page.refresh()
+        page.show()
+        app.processEvents()
+        self.assertIsNotNone(page.stream.process)
+        page.hide()
+        app.processEvents()
+        self.assertIsNone(page.stream.process)
+        self.assertEqual(device.calls, [])
 
 
 class RunnerThread(unittest.TestCase):

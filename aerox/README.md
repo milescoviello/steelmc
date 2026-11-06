@@ -22,6 +22,8 @@ Run `aerox-gui`, or find "SteelSeries settings" in your application menu.
 
 Changes apply as you make them, but last only until the mouse powers off. **Save to mouse** writes them to its flash, and **Undo changes** goes back to how things were when the page loaded. The keyboard page works the same way, with **Save to keyboard**.
 
+While the keyboard page is showing, each key fills as you press it and shows its depth in millimetres. It sinks once it passes the point where it fires.
+
 ## Command line
 
 | Command | Does |
@@ -62,7 +64,7 @@ Changing the polling rate makes the dongle re-sync its radio, so the mouse drops
 
 - **Lighting effects.** Zone colours here are temporary. The stored effects use a format that's only partly decoded, and a bad one makes the mouse reset its lighting.
 - **Actions that GG runs on Windows.** GG can attach software actions to a button, like its "switch apps" action or repeating clicks. These aren't on the mouse, so they do nothing on Linux. Alt+Tab works as a normal key binding instead, and on any computer.
-- **Angle snapping and GG's acceleration settings.** I couldn't find what they map to on the mouse.
+- **Angle snapping and GG's acceleration settings.** What they map to on the mouse isn't known yet.
 - **Macros.**
 
 ## Tested

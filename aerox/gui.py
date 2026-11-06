@@ -16,7 +16,7 @@ import sys
 import tempfile
 import threading
 
-from PySide6.QtCore import QObject, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import (
@@ -36,7 +36,8 @@ EDGE = "#0f1011"
 LIGHT = "#4d5156"
 TEXT = "#eceef0"
 MUTED = "#a6abb1"
-ACCENT = "#5480ff"  # his desktop's selection blue, lifted to read on dark
+ACCENT = "#5480ff"
+ACCENT_DIM = "#37509f"  # a key on its way down, before it fires
 WARN = "#e3a53a"
 BAD = "#f4806b"
 
@@ -267,6 +268,9 @@ class KeyboardDevice:
             raise KeyboardError(lines[-1] if lines else f"apex-analog {args[0]} failed.")
         return done.stdout
 
+    def stream_command(self):
+        return [self.exe, "stream", "--hz", "60"]
+
     def read(self):
         info = json.loads(self.run("info", "--json"))
         status = self.run("status")
@@ -311,6 +315,73 @@ class KeyboardDevice:
         return self.run(name, timeout=40).strip().split("\n\n")[0]
 
 
+class DepthStream(QObject):
+    """Live key depths from `apex-analog stream`. Runs only while something is watching."""
+
+    changed = Signal(dict)
+    RETRY_MS = 3000
+
+    def __init__(self, command, parent=None):
+        super().__init__(parent)
+        self.command = command
+        self.process = None
+        self.wanted = False
+        self.buffer = b""
+        self.last = {}
+
+    def start(self):
+        self.wanted = True
+        if self.process or not shutil.which(self.command[0]):
+            return
+        self.buffer = b""
+        process = QProcess(self)
+        process.setStandardErrorFile(QProcess.nullDevice())
+        process.readyReadStandardOutput.connect(self._read)
+        process.finished.connect(self._finished)
+        process.start(self.command[0], self.command[1:])
+        self.process = process
+
+    def stop(self):
+        self.wanted = False
+        process, self.process = self.process, None
+        if process:
+            process.readyReadStandardOutput.disconnect(self._read)
+            process.finished.disconnect(self._finished)
+            process.kill()
+            process.waitForFinished(500)
+            process.deleteLater()
+        self._publish({})
+
+    def _read(self):
+        if not self.process:  # stopping: killing the process can flush one last read
+            return
+        self.buffer += bytes(self.process.readAllStandardOutput())
+        *lines, self.buffer = self.buffer.split(b"\n")
+        if not lines:
+            return
+        try:  # only the newest frame matters: older ones are already out of date
+            self._publish(json.loads(lines[-1]))
+        except ValueError:
+            pass
+
+    def _publish(self, depths):
+        if depths != self.last:
+            self.last = depths
+            self.changed.emit(depths)
+
+    def _finished(self, *_):
+        process, self.process = self.process, None
+        if process:
+            process.deleteLater()
+        self._publish({})  # a dead stream mustn't leave keys looking held down
+        if self.wanted:
+            QTimer.singleShot(self.RETRY_MS, self._retry)
+
+    def _retry(self):
+        if self.wanted:
+            self.start()
+
+
 def parse_jobs(status):
     """Lines like `lights     on      lights --keep  (135 min)`."""
     jobs = []
@@ -330,6 +401,8 @@ class KeyCap(QAbstractButton):
         self.fill = None
         self.marked = False
         self.inert = inert
+        self.live_mm = 0.0  # how far the key is pressed right now
+        self.fires_at = None
         self.setCheckable(True)
         self.setEnabled(not inert)
         self.setFocusPolicy(Qt.NoFocus if inert else Qt.StrongFocus)
@@ -339,10 +412,18 @@ class KeyCap(QAbstractButton):
         self.detail, self.fill, self.marked = detail, fill, marked
         self.update()
 
+    def set_live(self, mm):
+        if mm != self.live_mm:
+            self.live_mm = mm
+            self.update()
+
+    def fired(self):
+        return self.fires_at is not None and self.live_mm >= self.fires_at
+
     def paintEvent(self, event):
         p = QPainter(self)
         r = self.rect()
-        sunk = self.isChecked() or self.isDown()
+        sunk = self.isChecked() or self.isDown() or self.fired()
         p.fillRect(r, QColor(EDGE))
         if self.inert:
             p.fillRect(r.adjusted(1, 1, -1, -1), QColor("#222427"))
@@ -363,7 +444,10 @@ class KeyCap(QAbstractButton):
             shade.setAlpha(80)
             height = round(face.height() * max(0.0, min(1.0, self.fill)))
             p.fillRect(QRect(face.left(), face.top(), face.width(), height), shade)
-            p.fillRect(QRect(face.left(), face.top() + height, face.width(), 1), QColor(ACCENT))
+            if self.live_mm:
+                pressed = round(face.height() * min(1.0, self.live_mm / TRAVEL_MM))
+                p.fillRect(QRect(face.left(), face.top(), face.width(), pressed), QColor(ACCENT if self.fired() else ACCENT_DIM))
+            p.fillRect(QRect(face.left(), face.top() + height, face.width(), 1), QColor(TEXT if self.live_mm else ACCENT))
         if not sunk:
             p.fillRect(QRect(face.left(), face.top(), face.width(), 1), QColor(LIGHT))
         color = QColor(TEXT if self.isEnabled() else "#71767c")
@@ -373,12 +457,13 @@ class KeyCap(QAbstractButton):
         p.setFont(heading)
         inner = face.adjusted(7, 4, -5, -3)
         p.drawText(inner, Qt.AlignLeft | Qt.AlignTop, self.title)
-        if self.detail:
+        detail = f"{self.live_mm:.1f}" if self.live_mm else self.detail
+        if detail:
             small = QFont(self.font())
             small.setPointSizeF(self.font().pointSizeF() - 1)
             p.setFont(small)
-            p.setPen(QColor(TEXT if self.marked else MUTED) if self.isEnabled() else color)
-            text = p.fontMetrics().elidedText(self.detail, Qt.ElideRight, inner.width())
+            p.setPen(QColor(TEXT if self.marked or self.live_mm else MUTED) if self.isEnabled() else color)
+            text = p.fontMetrics().elidedText(detail, Qt.ElideRight, inner.width())
             p.drawText(inner, Qt.AlignLeft | Qt.AlignBottom, text)
         if self.marked and self.isEnabled():
             p.fillRect(QRect(face.right() - 8, face.top() + 5, 4, 4), QColor(WARN))
@@ -1005,7 +1090,34 @@ class KeyboardPage(QWidget):
         self.caps = {}
         self.settings = {}
         self.feature_boxes = {}
+        self.pressed = set()
+        self.stream = None
         self.build()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        command = getattr(self.device, "stream_command", None)
+        if command:
+            if self.stream is None:
+                self.stream = DepthStream(command(), self)
+                self.stream.changed.connect(self.show_depths)
+            self.stream.start()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.stop_stream()
+
+    def stop_stream(self):
+        if self.stream:
+            self.stream.stop()
+
+    def show_depths(self, depths):
+        """Fill each key to how far it's pressed. Keys that came up since last time go back to empty."""
+        for name in self.pressed | set(depths):
+            cap = self.caps.get(name)
+            if cap and not cap.inert:
+                cap.set_live(depths.get(name, 0.0))
+        self.pressed = set(depths)
 
     def build(self):
         root = QVBoxLayout(self)
@@ -1090,7 +1202,7 @@ class KeyboardPage(QWidget):
         self.report.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         panel = well(self.selection_label, row(*pick, None), row(muted("Fires at"), self.depth, self.depth_label),
                      row(self.set_depth, None), row(self.rapid_on, self.rapid_off, None),
-                     muted("Shading shows where a key fires: deeper shading, further down."),
+                     muted("Shading shows where a key fires. Keys fill as you press them."),
                      row(check, typing, None), self.report)
         panel.layout().addStretch(1)
         self.selection_changed()
@@ -1164,7 +1276,8 @@ class KeyboardPage(QWidget):
                 cap.setFocusPolicy(Qt.StrongFocus)
                 mm = self.key_depth(key)
                 rapid = key["mode"] != 0
-                cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=mm / TRAVEL_MM, marked=rapid)
+                cap.fires_at = key["press"]
+                cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid)
                 cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else ""))
             else:
                 cap.inert = True
@@ -1345,6 +1458,10 @@ class MainWindow(QMainWindow):
     def load(self):
         self.mouse_page.refresh()
         self.keyboard_page.refresh()
+
+    def closeEvent(self, event):
+        self.keyboard_page.stop_stream()
+        super().closeEvent(event)
 
 
 def arrow_images():

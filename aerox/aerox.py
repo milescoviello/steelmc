@@ -69,7 +69,7 @@ TIMER_MAX_MS = 1200000
 ANY = None  # takes no arguments
 
 # Every read this tool can send, with the arguments it may carry. Each handler was read in
-# the firmware and touches no flash (notes in ~/aerox-re/FINDINGS.md, kept out of this repo).
+# the firmware and touches no flash.
 # Bit 7 set does NOT mean "read" on this device: 0x91/0xD1 look like reads but wipe settings.
 # So these are lists of known bytes and must never become a range or a mask.
 #

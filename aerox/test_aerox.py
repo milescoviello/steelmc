@@ -15,7 +15,7 @@ from unittest import mock
 
 import aerox
 
-# Things the firmware says must never be sent casually. Notes: ~/aerox-re/FINDINGS.md, kept out of this repo.
+# Things the firmware says must never be sent casually.
 NEVER = {
     0x01, 0x41,              # reboot, maybe into the bootloader
     0x02, 0x42, 0x03, 0x43,  # erase and write the update partition
@@ -416,7 +416,7 @@ class Decoding(unittest.TestCase):
         self.assertEqual(by_name["side 12"], "=")
         self.assertEqual(by_name["wheel up"], "scroll-up")
 
-    def test_his_real_bindings(self):
+    def test_bindings_read_from_a_real_mouse(self):
         records = bytearray(b"".join(aerox.DEFAULTS))
         records[25:30] = bytes.fromhex("0600000000")
         records[45:50] = bytes.fromhex("002e000000")

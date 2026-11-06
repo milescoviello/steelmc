@@ -59,7 +59,7 @@ def sample_keyboard():
         "info": {"firmware": "0416", "keys": keys},
         "jobs": [{"name": "lights", "on": True, "command": "lights --keep", "age": "135 min"},
                  {"name": "recording", "on": True, "command": "record", "age": "135 min"}],
-        "presets": ["before-first-flash", "beamng"],
+        "presets": ["gaming", "typing"],
     }
 
 
@@ -97,13 +97,16 @@ def main():
     window.keyboard_page.pick(["W", "A", "S", "D"])
     if not real:
         window.keyboard_page.report.setText("61 keys checked. Rest offset 10 to 32 counts, noise up to 1.8, typical range 2488.\nNothing looks wrong.")
+        window.keyboard_page.show_depths({"F": 3.2, "J": 0.7})
     render(window, os.path.join(out, prefix + "keyboard.png"))
+    window.keyboard_page.show_depths({})
     if not real:
         window.tabs.setCurrentIndex(0)
         window.mouse_page.select_button("side 12")
         render(window, os.path.join(out, "sample-mouse-editing.png"))
         window.mouse_page.lost(aerox.MouseUnreachable("The mouse isn't connected. It's off, asleep or out of range: move it and retry."))
         render(window, os.path.join(out, "sample-mouse-asleep.png"))
+    window.close()
 
 
 if __name__ == "__main__":
