@@ -76,6 +76,7 @@ QPushButton:pressed {{ background: {CAP_LIP}; border-top-color: {EDGE}; }}
 QPushButton:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {ACCENT}; }}
 QPushButton#primary {{ background: #2f53c9; border-top-color: {ACCENT}; font-weight: 600; }}
 QPushButton#primary:hover {{ background: #3a60dc; }}
+QPushButton#segment:checked {{ background: {CAP_LIP}; border-color: {ACCENT}; border-bottom: 2px solid {ACCENT}; font-weight: 600; }}
 QPushButton:disabled, QPushButton#primary:disabled, QComboBox:disabled, QSpinBox:disabled {{
     background: #2a2c2f; color: #71767c; border-top-color: #2a2c2f;
 }}
@@ -201,6 +202,14 @@ SHORTCUT_TAKEN = {"Q", "I", "O", "T", "LGUI", "SS"}
 SHORTCUT_KINDS = [("Press keys", "keys", "ctrl+c"), ("Type text", "text", "hello"), ("Run a command", "command", "firefox"),
                   ("Volume up", "volume+", ""), ("Volume down", "volume-", ""), ("Brightness up", "brightness+", ""),
                   ("Brightness down", "brightness-", "")]
+# Rebinding keys on the keyboard itself, through apex-analog bind.
+BIND_ACTION_KINDS = [kind for kind in ACTION_KINDS if kind[1] != "dpi"]
+BIND_LAYERS = [("Normally", "base"), ("While the SteelSeries key is held", "ss"), ("On a deeper press", "deep")]
+OTHER_CONTROLS = [("Wheel up", "WHEEL_UP"), ("Wheel down", "WHEEL_DOWN"), ("Wheel press", "WHEEL_PRESS"),
+                  ("Button under the wheel", "MEDIA_BUTTON"), ("Tilt left", "TILT_LEFT"), ("Tilt right", "TILT_RIGHT")]
+CONTROL_LABELS = {name: label for label, name in OTHER_CONTROLS}
+CAP_MEDIA = {"play-pause": "Play", "next": "Next", "previous": "Prev", "stop": "Stop", "mute": "Mute", "volume-up": "Vol+",
+             "volume-down": "Vol-"}
 FEATURES = [
     ("gamepad", "W, A, S, D as an analog controller", "While this is on, those keys stop typing."),
     ("oled", "Key depth on the keyboard's screen", "Shows how far each key is pressed on the small display."),
@@ -222,6 +231,35 @@ def pretty_action(action):
     if "+" not in action:
         return f"Key {action.upper() if len(action) == 1 else action.capitalize()}"
     return "+".join(part.upper() if len(part) == 1 else part.capitalize() for part in action.split("+"))
+
+
+def binding_label(entry, layer):
+    """What to print on a keycap for its binding on this layer. Empty when it does what's printed on it."""
+    action = entry["action"]
+    if entry["default"] and (layer == "base" or action == "none"):
+        return ""
+    if action.startswith("builtin:"):
+        return "Fn"  # one of the keyboard's own functions, as GG calls this layer
+    if action.startswith("raw:"):
+        return "Custom"
+    if action.startswith("media:"):
+        return CAP_MEDIA.get(action[6:], action[6:])
+    label = pretty_action(action)
+    return label[4:] if label.startswith("Key ") else label
+
+
+def binding_changes(before, after):
+    """[(key, action, layer)] that puts `after` back to `before`, both as `apex-analog bindings --json` gives them."""
+    items = []
+    for layer, entries in before["layers"].items():
+        for key, entry in entries.items():
+            if after["layers"].get(layer, {}).get(key, {}).get("raw") != entry["raw"] and not entry["action"].startswith("raw:"):
+                items.append((key, entry["action"], layer))
+    for layer, entries in before.get("wheel", {}).items():
+        for key, entry in entries.items():
+            if after.get("wheel", {}).get(layer, {}).get(key, {}).get("raw") != entry["raw"] and not entry["action"].startswith("raw:"):
+                items.append((key, entry["action"], layer))
+    return items
 
 
 def timer_label(ms):
@@ -321,7 +359,22 @@ class KeyboardDevice:
         info = json.loads(self.run("info", "--json"))
         status = self.run("status")
         presets = [line.strip() for line in self.run("preset", "list").splitlines() if line.strip()]
-        return {"info": info, "jobs": parse_jobs(status), "presets": presets, "shortcuts": self.shortcuts()}
+        return {"info": info, "jobs": parse_jobs(status), "presets": presets, "shortcuts": self.shortcuts(), "bindings": self.bindings()}
+
+    def bindings(self):
+        try:
+            return json.loads(self.run("bindings", "--json"))
+        except (KeyboardError, ValueError):  # an apex-analog from before bindings
+            return None
+
+    def bind(self, keys, action, layer):
+        for key in keys:
+            self.run("bind", KEY_ARGS.get(key, key), action, "--layer", layer)
+
+    def restore_bindings(self, items):
+        """Put keys back as they were: [(key, action, layer)]."""
+        for key, action, layer in items:
+            self.run("bind", KEY_ARGS.get(key, key), action, "--layer", layer)
 
     def shortcuts(self):
         try:
@@ -599,6 +652,64 @@ class KeyCap(QAbstractButton):
         elif self.hasFocus():
             p.setPen(QPen(QColor(ACCENT), 1))
             p.drawRect(r.adjusted(0, 0, -1, -1))
+
+
+class ActionPicker(QWidget):
+    """What a button or key should do: a kind, then the details for it. Takes and gives the text aerox and apex-analog parse."""
+
+    def __init__(self, kinds, parent=None):
+        super().__init__(parent)
+        self.kind = QComboBox()
+        for label, value in kinds:
+            self.kind.addItem(label, value)
+        self.kind.currentIndexChanged.connect(self.show_kind)
+        self.keys_edit = QComboBox()
+        self.keys_edit.setEditable(True)
+        self.keys_edit.setInsertPolicy(QComboBox.NoInsert)
+        self.keys_edit.addItems(KEY_PRESETS)
+        self.keys_edit.lineEdit().setPlaceholderText("alt+tab")
+        self.mouse_number = QComboBox()
+        for n in range(1, 9):
+            self.mouse_number.addItem(f"Button {n}", f"mouse{n}")
+        self.media_key = QComboBox()
+        for value, label in MEDIA_LABELS.items():
+            self.media_key.addItem(label, f"media:{value}")
+        self.kind_fields = QStackedWidget()
+        for widget in (self.keys_edit, self.mouse_number, self.media_key, QWidget()):
+            self.kind_fields.addWidget(widget)
+        self.kind_fields.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.kind_fields.setFixedHeight(32)
+        layout = row(self.kind, self.kind_fields)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
+
+    def set_action(self, action):
+        if action.startswith("mouse"):
+            kind = "mouse"
+            self.mouse_number.setCurrentIndex(self.mouse_number.findData(action))
+        elif action.startswith("media:"):
+            kind = "media"
+            self.media_key.setCurrentIndex(max(0, self.media_key.findData(action)))
+        elif self.kind.findData(action) >= 0:
+            kind = action
+        else:
+            kind = "keys"
+            self.keys_edit.setCurrentText(action)
+        self.kind.setCurrentIndex(self.kind.findData(kind))
+        self.show_kind()
+
+    def show_kind(self, *_):
+        self.kind_fields.setCurrentIndex({"keys": 0, "mouse": 1, "media": 2}.get(self.kind.currentData(), 3))
+
+    def action_text(self):
+        kind = self.kind.currentData()
+        if kind == "keys":
+            return self.keys_edit.currentText().strip()
+        if kind == "mouse":
+            return self.mouse_number.currentData()
+        if kind == "media":
+            return self.media_key.currentData()
+        return kind
 
 
 class OledView(QWidget):
@@ -980,35 +1091,16 @@ class MousePage(QWidget):
     def build_editor(self):
         self.editing = QLabel("Pick a button above")
         self.editing.setObjectName("title")
-        self.kind = QComboBox()
-        for label, value in ACTION_KINDS:
-            self.kind.addItem(label, value)
-        self.kind.currentIndexChanged.connect(self.show_kind)
-        self.keys_edit = QComboBox()
-        self.keys_edit.setEditable(True)
-        self.keys_edit.setInsertPolicy(QComboBox.NoInsert)
-        self.keys_edit.addItems(KEY_PRESETS)
-        self.keys_edit.lineEdit().setPlaceholderText("alt+tab")
-        self.mouse_number = QComboBox()
-        for n in range(1, 9):
-            self.mouse_number.addItem(f"Button {n}", f"mouse{n}")
-        self.media_key = QComboBox()
-        for value, label in MEDIA_LABELS.items():
-            self.media_key.addItem(label, f"media:{value}")
-        self.kind_fields = QStackedWidget()
-        self.kind_fields.addWidget(self.keys_edit)
-        self.kind_fields.addWidget(self.mouse_number)
-        self.kind_fields.addWidget(self.media_key)
-        self.kind_fields.addWidget(QWidget())
-        self.kind_fields.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.kind_fields.setFixedHeight(32)
+        self.picker = ActionPicker(ACTION_KINDS)
+        self.kind, self.keys_edit = self.picker.kind, self.picker.keys_edit
+        self.mouse_number, self.media_key = self.picker.mouse_number, self.picker.media_key
         self.bind_button = QPushButton("Bind")
         self.bind_button.clicked.connect(self.bind)
         self.default_button = QPushButton("Reset to default")
         self.default_button.clicked.connect(self.reset_button)
         self.bind_button.setEnabled(False)
         self.default_button.setEnabled(False)
-        return well(self.editing, row(self.kind, self.kind_fields), row(None, self.default_button, self.bind_button))
+        return well(self.editing, self.picker, row(None, self.default_button, self.bind_button))
 
     def build_right(self):
         panels = QVBoxLayout()
@@ -1288,33 +1380,10 @@ class MousePage(QWidget):
         self.show_action(action)
 
     def show_action(self, action):
-        if action.startswith("mouse"):
-            kind = "mouse"
-            self.mouse_number.setCurrentIndex(self.mouse_number.findData(action))
-        elif action.startswith("media:"):
-            kind = "media"
-            self.media_key.setCurrentIndex(max(0, self.media_key.findData(action)))
-        elif action in ("dpi", "scroll-up", "scroll-down", "tilt-left", "tilt-right", "none"):
-            kind = action
-        else:
-            kind = "keys"
-            self.keys_edit.setCurrentText(action)
-        self.kind.setCurrentIndex(self.kind.findData(kind))
-        self.show_kind()
-
-    def show_kind(self, *_):
-        kind = self.kind.currentData()
-        self.kind_fields.setCurrentIndex({"keys": 0, "mouse": 1, "media": 2}.get(kind, 3))
+        self.picker.set_action(action)
 
     def action_text(self):
-        kind = self.kind.currentData()
-        if kind == "keys":
-            return self.keys_edit.currentText()
-        if kind == "mouse":
-            return self.mouse_number.currentData()
-        if kind == "media":
-            return self.media_key.currentData()
-        return kind
+        return self.picker.action_text()
 
     def bind(self):
         if not self.selected:
@@ -1377,6 +1446,11 @@ class KeyboardPage(QWidget):
         self.feature_boxes = {}
         self.pressed = set()
         self.stream = None
+        self.shortcuts = {}
+        self.mode = "actuation"
+        self.bindings = None  # as apex-analog bindings --json gives them
+        self.bindings_original = None  # as they were when the page first loaded, for undo
+        self.bind_control = None  # a control that isn't on the plate, like the wheel
         self.build()
 
     def showEvent(self, event):
@@ -1426,7 +1500,7 @@ class KeyboardPage(QWidget):
         body.addWidget(self.build_plate())
         controls = QHBoxLayout()
         controls.setSpacing(10)
-        controls.addWidget(self.build_actuation(), 5)
+        controls.addWidget(self.build_left(), 5)
         controls.addWidget(self.build_screen(), 4)
         controls.addWidget(self.build_lighting(), 4)
         controls.addWidget(self.build_setups(), 4)
@@ -1467,6 +1541,58 @@ class KeyboardPage(QWidget):
         panel = well(self.screen_zoom, self.screen_state, self.screen_mode, self.screen_power,
                      row(self.screen_text, self.screen_send), muted("Wheel: volume, press to mute."), muted("Button: play or pause."),
                      title="Screen")
+        panel.layout().addStretch(1)
+        return panel
+
+    def build_left(self):
+        """Actuation or bindings: the same keys, picked on the plate, with a different panel under them."""
+        self.mode_buttons = {}
+        group = QButtonGroup(self)
+        for mode, label in (("actuation", "Actuation"), ("bindings", "Bindings")):
+            button = QPushButton(label)
+            button.setObjectName("segment")
+            button.setCheckable(True)
+            button.clicked.connect(lambda checked=False, m=mode: self.set_mode(m))
+            group.addButton(button)
+            self.mode_buttons[mode] = button
+        self.mode_buttons["actuation"].setChecked(True)
+        self.mode_stack = QStackedWidget()
+        self.mode_stack.addWidget(self.build_actuation())
+        self.mode_stack.addWidget(self.build_bindings())
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addLayout(row(self.mode_buttons["actuation"], self.mode_buttons["bindings"], None))
+        layout.addWidget(self.mode_stack, 1)
+        return box
+
+    def build_bindings(self):
+        self.bind_title = QLabel("Pick a key to rebind")
+        self.bind_title.setObjectName("title")
+        self.bind_layer = QComboBox()
+        for label, layer in BIND_LAYERS:
+            self.bind_layer.addItem(label, layer)
+        self.bind_layer.currentIndexChanged.connect(self.layer_changed)
+        self.bind_other = QComboBox()
+        self.bind_other.addItem("Or pick another control", None)
+        for label, name in OTHER_CONTROLS:
+            self.bind_other.addItem(label, name)
+        self.bind_other.activated.connect(self.other_picked)
+        self.bind_picker = ActionPicker(BIND_ACTION_KINDS)
+        self.bind_apply = QPushButton("Bind")
+        self.bind_apply.clicked.connect(self.apply_binding)
+        self.bind_reset = QPushButton("Reset to default")
+        self.bind_reset.clicked.connect(self.reset_binding)
+        self.bind_undo = QPushButton("Undo binding changes")
+        self.bind_undo.clicked.connect(self.undo_bindings)
+        self.bind_note = muted("")
+        self.bind_note.setWordWrap(True)
+        hint = muted("Bindings live on the keyboard itself, so they work with no software running. They last until you unplug it, "
+                     "and Save to keyboard keeps them. For text, commands or macros, use Shortcuts.")
+        hint.setWordWrap(True)
+        panel = well(self.bind_title, self.bind_layer, self.bind_other, self.bind_picker,
+                     row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, None))
         panel.layout().addStretch(1)
         return panel
 
@@ -1599,34 +1725,92 @@ class KeyboardPage(QWidget):
         self.connection.setText("Apex Pro Gen 3")
         self.firmware.setText(f"firmware {info['firmware']}, {len(info['keys'])} keys with sensors")
         self.settings = info["keys"]
-        for name, cap in self.caps.items():
-            key = self.settings.get(name)
-            if key:
-                cap.inert = False
-                cap.setEnabled(True)
-                cap.setFocusPolicy(Qt.StrongFocus)
-                mm = self.key_depth(key)
-                rapid = key["mode"] != 0
-                cap.fires_at = key["press"]
-                shortcut = data.get("shortcuts", {}).get(name)
-                cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid or bool(shortcut))
-                cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else "") + (f". With the SteelSeries key: {shortcut}" if shortcut else ""))
-            else:
-                cap.inert = True
-                cap.setEnabled(False)
-                cap.setChecked(False)
+        self.shortcuts = data.get("shortcuts", {})
+        self.bindings = data.get("bindings")
+        if self.bindings and self.bindings_original is None:
+            self.bindings_original = self.bindings
+        self.mode_buttons["bindings"].setEnabled(self.bindings is not None)
+        self.mode_buttons["bindings"].setToolTip("" if self.bindings is not None else "This needs a newer apex-analog.")
+        if self.bindings is None and self.mode == "bindings":
+            self.set_mode("actuation")
+        self.show_caps()
         current = self.preset.currentText()
         self.preset.clear()
         self.preset.addItems(data["presets"])
         if current in data["presets"]:
             self.preset.setCurrentText(current)
         self.show_jobs(data["jobs"])
-        self.shortcuts = data.get("shortcuts", {})
         self.shortcut_list.setText("\n".join(f"{KEY_LABELS.get(k, k)}: {v}" for k, v in sorted(self.shortcuts.items())))
         self.loading = False
         self.selection_changed()
         if not self.status.text():
             self.status.say("Changes apply right away. Save to keep them after a replug.")
+
+    def set_cap_live(self, cap, live):
+        cap.inert = not live
+        cap.setEnabled(live)
+        cap.setFocusPolicy(Qt.StrongFocus if live else Qt.NoFocus)
+        if not live:
+            cap.setChecked(False)
+
+    def show_caps(self):
+        if self.mode == "bindings" and self.bindings:
+            self.show_binding_caps()
+        else:
+            self.show_actuation_caps()
+
+    def show_actuation_caps(self):
+        for name, cap in self.caps.items():
+            key = self.settings.get(name)
+            self.set_cap_live(cap, bool(key))
+            if key:
+                mm = self.key_depth(key)
+                rapid = key["mode"] != 0
+                cap.fires_at = key["press"]
+                shortcut = self.shortcuts.get(name)
+                cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid or bool(shortcut))
+                cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else "") + (f". With the SteelSeries key: {shortcut}" if shortcut else ""))
+            else:
+                cap.set_detail("")
+                cap.setToolTip("")
+
+    def bind_layer_name(self):
+        return self.bind_layer.currentData()
+
+    def binding_entry(self, name, layer=None):
+        """This key's binding on the picked layer, or None if it can't have one there."""
+        layer = layer or self.bind_layer_name()
+        if not self.bindings:
+            return None
+        if name in ("WHEEL_UP", "WHEEL_DOWN"):
+            return self.bindings.get("wheel", {}).get(layer, {}).get(name)
+        return self.bindings["layers"].get(layer, {}).get(name)
+
+    def show_binding_caps(self):
+        layer = self.bind_layer_name()
+        for name, cap in self.caps.items():
+            entry = self.binding_entry(name, layer)
+            self.set_cap_live(cap, entry is not None)
+            if entry:
+                cap.set_detail(binding_label(entry, layer), fill=None, marked=not entry["default"])
+                action = "one of the keyboard's own functions" if entry["action"].startswith("builtin:") else entry["action"]
+                cap.setToolTip(f"{BIND_LAYERS[self.bind_layer.currentIndex()][0]}: {action}" + ("" if entry["default"] else " (changed)"))
+            else:
+                cap.set_detail("")
+                cap.setToolTip("No sensor, so no deeper press" if layer == "deep" else "")
+
+    def set_mode(self, mode):
+        if mode == "bindings" and not self.bindings:
+            mode = "actuation"
+        self.mode = mode
+        self.mode_buttons[mode].setChecked(True)
+        self.mode_stack.setCurrentIndex(0 if mode == "actuation" else 1)
+        for cap in self.caps.values():
+            cap.setChecked(False)
+        self.bind_control = None
+        self.bind_other.setCurrentIndex(0)
+        self.show_caps()
+        self.selection_changed()
 
     def lost(self, error):
         self.content.setEnabled(False)
@@ -1769,6 +1953,88 @@ class KeyboardPage(QWidget):
             self.depth.setValue(DEPTHS.index(self.key_depth(self.settings[chosen[0]])))
         self.show_set_label()
         self.show_shortcut_key()
+        if chosen and hasattr(self, "bind_other"):
+            self.bind_control = None
+            self.bind_other.setCurrentIndex(0)
+        self.show_binding_target()
+
+    # Bindings
+
+    def bind_targets(self):
+        return [self.bind_control] if self.bind_control else self.selected_keys()
+
+    def target_label(self, names):
+        if len(names) > 6:
+            return f"{len(names)} keys"
+        return " ".join(CONTROL_LABELS.get(n) or KEY_LABELS.get(n, n) for n in names)
+
+    def bind_refusal(self, names):
+        """Why these can't be bound on this layer, or None."""
+        layer = self.bind_layer_name()
+        if not names:
+            return None
+        if layer == "base" and "SS" in names and self.bindings and self.bindings.get("layer_key") == "SS":
+            return "The SteelSeries key turns on its layer while held, so bind it while held instead: that fires on each press."
+        missing = [n for n in names if self.binding_entry(n) is None]
+        if missing:
+            return f"{self.target_label(missing)} can't do anything on a deeper press: no sensor." if layer == "deep" else f"{self.target_label(missing)} can't be bound."
+        return None
+
+    def show_binding_target(self):
+        if not hasattr(self, "bind_apply"):
+            return
+        names = self.bind_targets()
+        refusal = self.bind_refusal(names)
+        when = BIND_LAYERS[self.bind_layer.currentIndex()][0]
+        self.bind_title.setText(f"{self.target_label(names)}, {when[:1].lower()}{when[1:]}" if names else "Pick a key to rebind")
+        ok = bool(names) and refusal is None and bool(self.bindings)
+        self.bind_apply.setEnabled(ok)
+        self.bind_reset.setEnabled(ok)
+        note = refusal or ""
+        if not note and self.bind_layer_name() == "deep":
+            note = "A deeper press only works on keys that have a second actuation point."
+        self.bind_note.setText(note)
+        if ok:
+            entry = self.binding_entry(names[0])
+            action = entry["action"]
+            if not (action.startswith("builtin:") or action.startswith("raw:")):
+                self.bind_picker.set_action(action)
+        self.bind_undo.setEnabled(bool(self.bindings_original and self.bindings and binding_changes(self.bindings_original, self.bindings)))
+
+    def layer_changed(self, *_):
+        if self.mode == "bindings":
+            self.show_caps()
+        self.show_binding_target()
+
+    def other_picked(self, *_):
+        self.bind_control = self.bind_other.currentData()
+        if self.bind_control:
+            for cap in self.caps.values():
+                cap.setChecked(False)
+        self.selection_changed()
+
+    def apply_binding(self):
+        names, action, layer = self.bind_targets(), self.bind_picker.action_text(), self.bind_layer_name()
+        if not names or self.bind_refusal(names):
+            return
+        if not action:
+            self.status.say("Say what it should do first.", "bad")
+            return
+        self.apply(lambda: self.device.bind(names, action, layer), f"{self.target_label(names)} now does {pretty_action(action)}.")
+
+    def reset_binding(self):
+        names, layer = self.bind_targets(), self.bind_layer_name()
+        if names and not self.bind_refusal(names):
+            self.apply(lambda: self.device.bind(names, "default", layer), f"{self.target_label(names)} is back to normal.")
+
+    def undo_bindings(self):
+        if not (self.bindings_original and self.bindings):
+            return
+        items = binding_changes(self.bindings_original, self.bindings)
+        if not items:
+            self.status.say("Nothing to undo.")
+            return
+        self.apply(lambda: self.device.restore_bindings(items), "Bindings are back to how they were when this page opened.")
 
     def shortcut_target(self):
         """The one picked key a shortcut can go on, or None."""

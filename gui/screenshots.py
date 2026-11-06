@@ -52,6 +52,29 @@ NAMES = ["`", *"1234567890-=", "TAB", *"QWERTYUIOP[]\\", "CAPS", *"ASDFGHJKL;'",
          "LCTRL", "LGUI", "LALT", "SPACE", "RALT", "RGUI", "SS", "RCTRL", "BKSP"]
 
 
+BUILTINS = {"Q": "builtin:10", "T": "builtin:8", "I": "builtin:7", "O": "builtin:6", "LGUI": "builtin:5",
+            "F9": "builtin:1", "F10": "builtin:2:1", "F11": "builtin:3:1", "F12": "builtin:4:1"}
+
+
+def sample_bindings():
+    """What apex-analog bindings --json says, with Caps Lock as Esc and SteelSeries + J as play or pause."""
+    names = [name for name, *_ in gui.plate_layout()] + ["WHEEL_PRESS", "MEDIA_BUTTON", "TILT_LEFT", "TILT_RIGHT"]
+
+    def entry(action, raw, default=True):
+        return {"action": action, "raw": raw, "default": default}
+    base = {n: entry(n.lower(), f"base-{n}") for n in names}
+    base.update(WHEEL_PRESS=entry("media:mute", "61e2000000"), MEDIA_BUTTON=entry("media:play-pause", "61cd000000"),
+                TILT_RIGHT=entry("media:next", "61b5000000"), TILT_LEFT=entry("media:previous", "61b6000000"),
+                CAPS=entry("esc", "5129000000", False))
+    ss = {n: entry(BUILTINS.get(n, "none"), f"ss-{n}" if n in BUILTINS else "0000000000") for n in names}
+    ss["J"] = entry("media:play-pause", "61cd000000", False)
+    deep = {n: entry("none", "0000000000") for n in names if n in NAMES}
+    none = entry("none", "0000000000")
+    wheel = {"base": {"WHEEL_UP": entry("media:volume-up", "61e9000000"), "WHEEL_DOWN": entry("media:volume-down", "61ea000000")},
+             "ss": {"WHEEL_UP": none, "WHEEL_DOWN": none}}
+    return {"layer_key": "SS", "layers": {"base": base, "ss": ss, "deep": deep}, "wheel": wheel}
+
+
 def sample_keyboard():
     keys = {n: {"press": 1.89, "release": 1.8, "mode": 0} for n in NAMES}
     for n in "WASD":
@@ -62,6 +85,7 @@ def sample_keyboard():
         "jobs": [{"name": "lights", "on": True, "command": "lights --keep", "age": "135 min"},
                  {"name": "recording", "on": True, "command": "record", "age": "135 min"}],
         "presets": ["gaming", "typing"],
+        "bindings": sample_bindings(),
     }
 
 

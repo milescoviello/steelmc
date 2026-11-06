@@ -622,6 +622,96 @@ class DragSelect(unittest.TestCase):
         self.plate.end_drag()
 
 
+class BindingsMode(unittest.TestCase):
+    def setUp(self):
+        self.device = FakeKeyboard()
+        self.page = gui.KeyboardPage(self.device, Inline(), yes)
+        self.page.refresh()
+        self.page.mode_buttons["bindings"].click()
+
+    def layer(self, name):
+        self.page.bind_layer.setCurrentIndex(self.page.bind_layer.findData(name))
+
+    def test_every_bindable_key_can_be_picked(self):
+        caps = self.page.caps
+        for name in ("ESC", "F5", "KP7", "KP_ENTER", "UP", "CAPS", "SS"):
+            self.assertFalse(caps[name].inert, name)
+        self.assertEqual(caps["CAPS"].detail, "Esc")
+        self.assertTrue(caps["CAPS"].marked)
+        self.assertEqual(caps["A"].detail, "")
+        self.assertIsNone(caps["A"].fill)
+        QTest.mouseClick(caps["KP7"], Qt.LeftButton)
+        self.assertEqual(self.page.selected_keys(), ["KP7"])
+        self.assertEqual(self.device.calls, [])
+
+    def test_each_layer_shows_its_own(self):
+        self.layer("ss")
+        self.assertEqual(self.page.caps["Q"].detail, "Fn")
+        self.assertFalse(self.page.caps["Q"].marked)
+        self.assertEqual(self.page.caps["J"].detail, "Play")
+        self.assertEqual(self.page.bind_title.text(), "Pick a key to rebind")
+        QTest.mouseClick(self.page.caps["J"], Qt.LeftButton)
+        self.assertEqual(self.page.bind_title.text(), "J, while the SteelSeries key is held")
+        self.assertTrue(self.page.caps["J"].marked)
+        self.layer("deep")
+        self.assertTrue(self.page.caps["ESC"].inert)
+        self.assertFalse(self.page.caps["W"].inert)
+
+    def test_bind_a_key(self):
+        QTest.mouseClick(self.page.caps["CAPS"], Qt.LeftButton)
+        self.assertEqual(self.page.bind_picker.action_text(), "esc")
+        self.page.bind_picker.set_action("ctrl+c")
+        self.page.bind_apply.click()
+        self.assertEqual(self.device.calls[0], ("bind", ["CAPS"], "ctrl+c", "base"))
+        self.page.bind_reset.click()
+        self.assertEqual(self.device.calls[1], ("bind", ["CAPS"], "default", "base"))
+
+    def test_steelseries_key_only_while_held(self):
+        QTest.mouseClick(self.page.caps["SS"], Qt.LeftButton)
+        self.assertFalse(self.page.bind_apply.isEnabled())
+        self.assertIn("while held", self.page.bind_note.text())
+        self.layer("ss")
+        self.assertTrue(self.page.bind_apply.isEnabled())
+        self.page.bind_picker.set_action("media:mute")
+        self.page.bind_apply.click()
+        self.assertEqual(self.device.calls[0], ("bind", ["SS"], "media:mute", "ss"))
+
+    def test_controls_off_the_plate(self):
+        QTest.mouseClick(self.page.caps["A"], Qt.LeftButton)
+        self.page.bind_other.setCurrentIndex(self.page.bind_other.findData("WHEEL_UP"))
+        self.page.bind_other.activated.emit(self.page.bind_other.currentIndex())
+        self.assertEqual(self.page.selected_keys(), [])
+        self.assertIn("Wheel up", self.page.bind_title.text())
+        self.assertEqual(self.page.bind_picker.action_text(), "media:volume-up")
+        self.page.bind_picker.set_action("media:next")
+        self.page.bind_apply.click()
+        self.assertEqual(self.device.calls[0], ("bind", ["WHEEL_UP"], "media:next", "base"))
+        self.layer("deep")
+        self.assertFalse(self.page.bind_apply.isEnabled())
+
+    def test_undo_puts_back_what_was_there_when_it_opened(self):
+        self.assertFalse(self.page.bind_undo.isEnabled())
+        changed = json.loads(json.dumps(self.device.data["bindings"]))
+        changed["layers"]["base"]["CAPS"] = {"action": "capslock", "raw": "5139000000", "default": True}
+        changed["layers"]["ss"]["K"] = {"action": "f13", "raw": "5168000000", "default": False}
+        self.device.data = {**self.device.data, "bindings": changed}
+        self.page.refresh()
+        self.assertTrue(self.page.bind_undo.isEnabled())
+        self.page.bind_undo.click()
+        self.assertEqual(self.device.calls[0], ("restore_bindings", [("CAPS", "esc", "base"), ("K", "none", "ss")]))
+
+    def test_back_to_actuation(self):
+        self.page.mode_buttons["actuation"].click()
+        self.assertTrue(self.page.caps["ESC"].inert)
+        self.assertEqual(self.page.caps["W"].detail, "1.0 R")
+
+    def test_an_older_apex_analog_hides_bindings(self):
+        self.device.data = {**self.device.data, "bindings": None}
+        self.page.refresh()
+        self.assertFalse(self.page.mode_buttons["bindings"].isEnabled())
+        self.assertEqual(self.page.mode, "actuation")
+
+
 class WholeKeyboard(unittest.TestCase):
     def setUp(self):
         self.page = gui.KeyboardPage(FakeKeyboard(), Inline(), yes)
@@ -916,6 +1006,11 @@ class KeyboardCommand(unittest.TestCase):
         self.assertEqual(device.lights(None), "lights --off ")
         self.assertEqual(device.lights(["lights", "--keep"], "ffffff"), "lights --keep --color ffffff ")
         self.assertEqual(device.save(), "save --yes ")
+        device = self.script('printf "%s " "$@" >> "$0.log"\n')
+        device.bind(["`", "CAPS"], "esc", "base")
+        device.restore_bindings([("K", "none", "ss")])
+        with open(device.exe + ".log") as f:
+            self.assertEqual(f.read(), "bind GRAVE esc --layer base bind CAPS esc --layer base bind K none --layer ss ")
 
     def test_report_is_just_the_summary(self):
         device = self.script('printf "6909 presses.\\nTry 1.4 mm.\\n\\nkey  presses\\nSPACE 1406\\n"\n')
