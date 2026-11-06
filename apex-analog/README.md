@@ -120,9 +120,7 @@ These tools can see everything you type, so network outputs make you choose keys
 - **61 keys have sensors**, the main block. ESC, the F row, nav keys and arrows don't, so they can't report depth.
 - **One run at a time.** The keyboard's replies carry no ID, so two readers would mix them up. A second copy refuses to start. Give one run several outputs instead.
 - **Millimetres come from the firmware's own actuation table**, not a physical measurement.
-- **Online games:** virtual controllers and rapid-trigger keys can break the rules of games with anti-cheat. Check before using them there.
-- **BeamNG can rewrite its controller bindings.** In testing it saved `settings/inputmaps/xidevice.diff` while the controller was connected and dropped bindings for actions it couldn't load. What triggered the save isn't known, so back up that folder if you rely on bindings like those.
-- **Network and pipe rates:** 60 updates a second by default, `--hz` to change it. Reading every key tops out near 190 a second, and reading keys from two rows near 490. Mapping defaults to 120.
+- **Online games:** virtual controllers and rapid-trigger keys can break the rules of games with anti-cheat. Check before using them there.- **Network and pipe rates:** 60 updates a second by default, `--hz` to change it. Reading every key tops out near 190 a second, and reading keys from two rows near 490. Mapping defaults to 120.
 
 ## What's been tested
 
