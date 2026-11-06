@@ -87,7 +87,18 @@ class Safety(unittest.TestCase):
                 kb._ask([command])
 
     def test_allowlist_has_not_grown_by_accident(self):
-        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2})
+        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4})
+        self.assertEqual(set(a.BIND_COMMANDS), {0x63, 0x64})
+        self.assertEqual(set(a.BIND_CHECKS), set(a.BIND_COMMANDS))
+
+    def test_only_known_write_commands_can_be_sent(self):
+        kb = a.Keyboard.__new__(a.Keyboard)
+        kb.fd = None
+        known = {*a.LIGHT_COMMANDS, *a.SETTING_COMMANDS, a.SAVE_COMMAND, *a.BIND_COMMANDS}
+        for command in range(256):
+            if command not in known:
+                with self.assertRaisesRegex(ValueError, "refused"):
+                    kb._write([command])
 
     def test_stray_report_is_not_taken_for_sensor_data(self):
         self.assertFalse(a._valid_bank(bytes([7, 1]) + bytes(62)))
@@ -114,6 +125,207 @@ class Safety(unittest.TestCase):
         self.assertFalse(a.origin_allowed("https://evil.example"))
         self.assertFalse(a.origin_allowed("https://localhost.evil.example"))
         self.assertFalse(a.origin_allowed("null"))
+
+
+class SimulatedKeyboard:
+    """Answers the binding commands the way firmware 4.16.8 does, quirks included, standing in for the daemon. Anything else fails."""
+    # Keys the firmware's table can bind that apex-analog never names: they aren't on this board, or FB shares ENTER's entry.
+    UNNAMED = (0xF2, 0xF3, 0xF4, 0xF8, 0xFB)
+
+    def __init__(self):
+        hids = [*a.BIND_NAMES, *self.UNNAMED]
+        self.tables = {layer: {hid: a.default_binding(layer, hid) for hid in hids} for layer in (0, 1)}
+        self.tables[2] = {hid: bytes(5) for hid in a.DEEP_HIDS}
+        self.wheel = {layer: list(records) for layer, records in a.DEFAULT_WHEEL.items()}
+        self.layer_key = 0xF0
+        self.second_actuation = {a.BIND_HIDS["W"]}  # only keys with a second actuation point take a deeper press
+        self.sent = []
+
+    def close(self):
+        pass
+
+    def call(self, op, data=b""):
+        payload = bytes(data)
+        self.sent.append(payload)
+        if op == a.OP_ASK:
+            return self.ask(payload)
+        if op == a.OP_WRITE:
+            self.write(payload)
+            return b""
+        raise AssertionError(f"unexpected op {op}")
+
+    def table(self, layer_byte):
+        return 1 if layer_byte == 1 else 2 if layer_byte == 2 else 0  # any other byte lands on the normal layer
+
+    def ask(self, p):
+        if p[0] == 0xE0:
+            return bytes([self.layer_key]).ljust(64, b"\0")
+        if p[0] == 0xE4:
+            return b"".join(self.wheel[0 if p[1] == 0 else 1]).ljust(64, b"\0")
+        if p[0] == 0xE3:
+            table, count = self.tables[self.table(p[1])], p[2]
+            assert 1 <= count <= 10, p.hex()
+            out, request = b"", 3
+            for _ in range(count):
+                hid = p[request]
+                if self.table(p[1]) == 2 and hid not in a.DEEP_HIDS:
+                    raise AssertionError(f"asked layer 2 about {hid:#04x}: the firmware's reply would go out of step")
+                out += bytes([hid]) + table.get(hid, b"\xee" * 5)
+                request += 6
+            return out.ljust(64, b"\0")
+        raise AssertionError(f"unexpected read {p.hex(' ')}")
+
+    def write(self, p):
+        if p[0] == 0x63:
+            layer = self.table(p[1])
+            for i in range(p[2]):
+                hid, record = p[3 + 6 * i], p[4 + 6 * i:9 + 6 * i]
+                if layer == 2 and hid not in self.second_actuation:
+                    continue  # refused: no second actuation point
+                self.tables[layer][hid] = bytes(record)
+        elif p[0] == 0x64:
+            self.wheel[0 if p[1] == 0 else 1] = [bytes(p[2:7]), bytes(p[7:12])]
+        else:
+            raise AssertionError(f"unexpected write {p.hex(' ')}")
+
+
+RealKeyboard = a.Keyboard
+
+
+def simulated(sim=None):
+    kb = RealKeyboard.__new__(RealKeyboard)
+    kb.fd, kb.client = None, sim or SimulatedKeyboard()
+    return kb
+
+
+class Bindings(unittest.TestCase):
+    def test_actions_round_trip(self):
+        for text in ("esc", "ctrl+c", "ctrl+shift+z", "alt+tab", "f13", "kp-enter", "numlock", "media:mute", "media:volume-up",
+                     "mouse4", "scroll-up", "tilt-left", "none", "builtin:10", "builtin:2:1", "int3", "iso\\"):
+            record = a.parse_binding(text)
+            a._check_record(record)
+            self.assertEqual(a.describe_binding(record), text)
+        self.assertEqual(a.parse_binding("LCTRL+BKSP"), a.parse_binding("ctrl+backspace"))
+        self.assertEqual(a.parse_binding("lgui"), bytes([0x51, 0xE3, 0, 0, 0]))
+        self.assertEqual(a.parse_binding("caps"), bytes([0x51, 0x39, 0, 0, 0]))
+        for text in ("dpi", "builtin:9", "media:louder", "a+b+c+d+e", "nope"):
+            with self.assertRaises(ValueError):
+                a.parse_binding(text)
+
+    def test_same_actions_as_the_mouse(self):
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "aerox"))
+            import aerox
+        except ImportError:
+            self.skipTest("aerox isn't next to apex-analog")
+        finally:
+            sys.path.pop(0)
+        for text in ("alt+tab", "ctrl+shift+z", "meta", "printscreen", "f24", "mouse8", "media:play-pause", "scroll-down", "tilt-right", "none"):
+            self.assertEqual(a.parse_binding(text), aerox.parse_action(text), text)
+            self.assertEqual(a.describe_binding(a.parse_binding(text)), aerox.describe_action(aerox.parse_action(text)), text)
+        for usage, name in aerox.KEYS.items():
+            self.assertEqual(a.OUTPUT_KEYS[usage], name)
+
+    def test_names_cover_the_firmware_table_and_nothing_else(self):
+        self.assertEqual(len(a.BIND_HIDS), 116)
+        self.assertEqual(len(set(a.BIND_HIDS.values())), 116)
+        self.assertTrue(a.DEEP_HIDS <= set(a.BIND_NAMES))
+        self.assertNotIn(0xF1, a.DEEP_HIDS)
+        self.assertNotIn(0x65, a.BIND_NAMES)  # no Menu key in the firmware's table
+
+    def test_only_known_records_are_sent(self):
+        ok = [0x63, 0, 1, a.BIND_HIDS["CAPS"], *a.parse_binding("esc")]
+        a._check_bind(ok)
+        a._check_bind([0x63, 0, 1, 0xF0, 0x51, 0xF0, 0, 0, 0])  # SS's own default can always be put back
+        bad = {
+            "layer": [0x63, 3, 1, 0x39, 0x51, 0x29, 0, 0, 0],
+            "count": [0x63, 0, 0],
+            "too many": [0x63, 0, 11] + [0x39, 0x51, 0x29, 0, 0, 0] * 11,
+            "length": [0x63, 0, 2, 0x39, 0x51, 0x29, 0, 0, 0],
+            "unnamed key": [0x63, 0, 1, 0xF2, 0x51, 0x29, 0, 0, 0],
+            "no sensor": [0x63, 2, 1, 0x3A, 0x51, 0x29, 0, 0, 0],
+            "macro": [0x63, 0, 1, 0x39, 0x71, 0, 0, 1, 0],
+            "unknown flag": [0x63, 0, 1, 0x39, 0x30, 0, 0, 0, 0],
+            "buffer": [0x63, 0, 1, 0x39, 0x72, 5, 0, 0, 0],
+            "bitmap": [0x63, 0, 1, 0x39, 0x73, 1, 0, 0, 0],
+            "stray byte": [0x63, 0, 1, 0x39, 0x61, 0xE2, 0, 0, 7],
+            "unknown usage": [0x63, 0, 1, 0x39, 0x51, 0xF0, 0, 0, 0],
+            "made-up function": [0x63, 1, 1, 0x39, 0x62, 9, 0, 0, 0],
+            "empty keys": [0x63, 0, 1, 0x39, 0x51, 0, 0, 0, 0],
+        }
+        for why, payload in bad.items():
+            with self.assertRaisesRegex(ValueError, "refused", msg=why):
+                a._check_bind(payload)
+        a._check_wheel([0x64, 0, *a.parse_binding("media:next"), *a.parse_binding("media:previous")])
+        for payload in ([0x64, 2] + [0] * 10, [0x64, 0] + [0] * 9, [0x64, 1, 0x71, 0, 0, 1, 0] + [0] * 5):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                a._check_wheel(payload)
+
+    def test_reads_every_layer_in_tens(self):
+        sim = SimulatedKeyboard()
+        kb = simulated(sim)
+        base = kb.bindings(0)
+        self.assertEqual(len(base), 116)
+        self.assertEqual(base["CAPS"], bytes([0x51, 0x39, 0, 0, 0]))
+        self.assertEqual(a.describe_binding(base["WHEEL_PRESS"]), "media:mute")
+        self.assertEqual(a.describe_binding(kb.bindings(1)["Q"]), "builtin:10")
+        self.assertEqual(len(kb.bindings(2)), len(a.DEEP_HIDS))
+        self.assertTrue(all(p[2] <= 10 for p in sim.sent if p[0] == 0xE3))
+        with self.assertRaisesRegex(ValueError, "deeper press"):
+            kb.bindings(2, ["F1"])
+        self.assertEqual(kb.wheel(0), a.DEFAULT_WHEEL[0])
+        self.assertEqual(kb.layer_key(), 0xF0)
+
+    def test_report_marks_what_changed(self):
+        sim = SimulatedKeyboard()
+        sim.tables[0][0x39] = a.parse_binding("esc")
+        report = a.read_bindings(simulated(sim))
+        self.assertEqual(report["layer_key"], "SS")
+        self.assertEqual(report["layers"]["base"]["CAPS"], {"action": "esc", "raw": "5129000000", "default": False})
+        self.assertTrue(report["layers"]["base"]["A"]["default"])
+        self.assertEqual(report["wheel"]["base"]["WHEEL_UP"]["action"], "media:volume-up")
+        self.assertEqual(set(report["layers"]), {"base", "ss", "deep"})
+        self.assertEqual(set(report["wheel"]), {"base", "ss"})
+
+    def run_cli(self, sim, *argv):
+        a.Keyboard = lambda *_, **__: simulated(sim)
+        self.addCleanup(setattr, a, "Keyboard", RealKeyboard)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            args = a.build_parser().parse_args(list(argv))
+            args.func(args)
+        return out.getvalue()
+
+    def test_bind_and_put_back(self):
+        sim = SimulatedKeyboard()
+        said = self.run_cli(sim, "bind", "caps", "esc")
+        self.assertIn("CAPS now does esc normally", said)
+        self.assertEqual(sim.tables[0][0x39], a.parse_binding("esc"))
+        self.assertIn(bytes([0x63, 0, 1, 0x39, 0x51, 0x29, 0, 0, 0]), sim.sent)
+        self.run_cli(sim, "bind", "CAPS", "default")
+        self.assertEqual(sim.tables[0][0x39], bytes([0x51, 0x39, 0, 0, 0]))
+        self.run_cli(sim, "bind", "J", "media:play-pause", "--layer", "ss")
+        self.assertEqual(sim.tables[1][0x0D], a.parse_binding("media:play-pause"))
+        self.run_cli(sim, "bind", "WHEEL_DOWN", "media:next")
+        self.assertEqual(sim.wheel[0], [a.DEFAULT_WHEEL[0][0], a.parse_binding("media:next")])
+        self.run_cli(sim, "bind", "W", "e", "--layer", "deep")
+        self.assertEqual(sim.tables[2][0x1A], a.parse_binding("e"))
+        listing = self.run_cli(sim, "bindings")
+        self.assertRegex(listing, r"\n  J +media:play-pause +\(changed\)")
+        self.assertRegex(listing, r"\n  WHEEL_DOWN +media:next +\(changed\)")
+        self.assertRegex(listing, r"\n  Q +builtin:10\n")
+
+    def test_refusals_are_explained(self):
+        sim = SimulatedKeyboard()
+        with self.assertRaisesRegex(a.ApexError, "second actuation"):
+            self.run_cli(sim, "bind", "A", "b", "--layer", "deep")
+        with self.assertRaisesRegex(ValueError, "never fires"):
+            self.run_cli(sim, "bind", "SS", "f13")
+        with self.assertRaisesRegex(ValueError, "no sensor"):
+            self.run_cli(sim, "bind", "F5", "b", "--layer", "deep")
+        with self.assertRaisesRegex(ValueError, "no deeper press"):
+            self.run_cli(sim, "bind", "WHEEL_UP", "b", "--layer", "deep")
+        self.assertFalse([p for p in sim.sent if p[0] == 0x63 and p[1] == 2 and p[3] != 0x04])
 
 
 class Firmware(unittest.TestCase):

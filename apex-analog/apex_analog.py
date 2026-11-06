@@ -17,6 +17,7 @@
   apex-analog typeprint         experiment: recognise you by how you press keys
   apex-analog actuation W 1.0   set where keys actuate, no GG needed
   apex-analog rapid WASD on     turn the keyboard's rapid tap on or off per key
+  apex-analog bind CAPS esc     change what a key does, on the keyboard itself, so it works anywhere
   apex-analog preset save NAME  keep setups on this computer, then preset use NAME
   apex-analog save              write the current settings to the keyboard's flash
   apex-analog auto              switch presets and lighting by the focused window
@@ -30,8 +31,8 @@
       print(kb.read()["W"])     # millimetres
 
 A small daemon owns the keyboard and every command goes through it, so long-running ones return your terminal straight away
-and any number can run at once. Only sends the read commands in ALLOWED, plus LIGHT_COMMANDS when you ask for lights and SETTING_COMMANDS when you set
-actuation or rapid tap, and only to the firmware they were checked on. The one flash write, SAVE_COMMAND, runs only from
+and any number can run at once. Only sends the read commands in ALLOWED, plus LIGHT_COMMANDS when you ask for lights, SETTING_COMMANDS when you set
+actuation or rapid tap, and BIND_COMMANDS when you rebind a key, and only to the firmware they were checked on. The one flash write, SAVE_COMMAND, runs only from
 `apex-analog save` after you confirm it. No dependencies.
 """
 import argparse
@@ -73,6 +74,9 @@ ALLOWED = {
     0xB2: "each key's mode byte",
     0x9E: "whether the OLED's ACTUATION ICON is on",
     0xE2: "which saved config is active",
+    0xE0: "which key turns on the SteelSeries layer while it's held",
+    0xE3: "what up to 10 keys do, on one layer",
+    0xE4: "what the volume wheel does, on one layer",
 }
 
 # The only commands that change anything, sent only for lights. Each handler was read on both chips: they store colours in the
@@ -97,6 +101,12 @@ SETTING_COMMANDS = {
     0x32: "set the mode byte of up to 30 keys",
 }
 RAPID_TAP_MODE = 2  # the value the keyboard's own RAPID TAP menu sets
+# Change what keys do, on the keyboard itself, only when you ask. Each handler stores in memory and reaches no flash save,
+# so a replug undoes them unless you save. Every message is checked against BIND_CHECKS before it's sent.
+BIND_COMMANDS = {
+    0x63: "set what up to 10 keys do, on one layer",
+    0x64: "set what the volume wheel does, on one layer",
+}
 # The one command that writes flash: all current settings, over one of the five saved configs. Same code as the Save Config menu.
 SAVE_COMMAND = 0x09
 
@@ -127,6 +137,178 @@ ALIASES = {
 # Keys with an LED but no sensor, by HID usage.
 NO_SENSOR_HIDS = {"ESC": 0x29, **{f"F{i}": 0x39 + i for i in range(1, 13)}, "PRTSC": 0x46, "SCRLK": 0x47, "PAUSE": 0x48, "INSERT": 0x49, "HOME": 0x4A,
                   "PGUP": 0x4B, "DELETE": 0x4C, "END": 0x4D, "PGDN": 0x4E, "RIGHT": 0x4F, "LEFT": 0x50, "DOWN": 0x51, "UP": 0x52, "MENU": 0x65}
+
+# ---- key bindings on the keyboard itself ------------------------------------------------------------------------------
+# Every key the firmware's own table lets you rebind, by name. Keys with a sensor can also take a second action on a deeper
+# press. The numpad and the controls around the wheel have no sensor. The wheel itself is bound separately, with 64.
+NUMPAD_HIDS = {"KP_NUM": 0x53, "KP_DIV": 0x54, "KP_MUL": 0x55, "KP_SUB": 0x56, "KP_ADD": 0x57, "KP_ENTER": 0x58,
+               **{f"KP{n}": 0x58 + n for n in range(1, 10)}, "KP0": 0x62, "KP_DOT": 0x63, "KP_COMMA": 0x85}
+WHEEL_KEY_HIDS = {"WHEEL_PRESS": 0xF1, "MEDIA_BUTTON": 0xF5, "TILT_RIGHT": 0xF6, "TILT_LEFT": 0xF7}
+BIND_HIDS = {**{name: hid for name, (_, hid, _) in BY_NAME.items()},
+             **{name: hid for name, hid in NO_SENSOR_HIDS.items() if name != "MENU"}, **NUMPAD_HIDS, **WHEEL_KEY_HIDS}
+BIND_NAMES = {hid: name for name, hid in BIND_HIDS.items()}
+DEEP_HIDS = {hid for _, hid, _ in BY_NAME.values()}
+LAYERS = {"base": 0, "ss": 1, "deep": 2}
+LAYER_NAMES = {code: name for name, code in LAYERS.items()}
+LAYER_LABELS = {0: "normally", 1: "while the SteelSeries key is held", 2: "on a deeper press"}
+WHEEL_DIRECTIONS = ("WHEEL_UP", "WHEEL_DOWN")
+
+# What a key can send: keyboard usages by name, spelled as aerox spells them so both tools take the same actions.
+OUTPUT_KEYS = {0x04 + i: chr(ord("a") + i) for i in range(26)}
+OUTPUT_KEYS.update({0x1E + i: str((i + 1) % 10) for i in range(10)})
+OUTPUT_KEYS.update({0x3A + i: f"f{i + 1}" for i in range(12)})
+OUTPUT_KEYS.update({0x68 + i: f"f{i + 13}" for i in range(12)})
+OUTPUT_KEYS.update(zip(range(0x28, 0x39), ("enter", "esc", "backspace", "tab", "space", "-", "=", "[", "]", "\\", "#", ";", "'", "`",
+                                           ",", ".", "/")))
+OUTPUT_KEYS.update(zip(range(0x46, 0x53), ("printscreen", "scrolllock", "pause", "insert", "home", "pageup", "delete", "end",
+                                           "pagedown", "right", "left", "down", "up")))
+OUTPUT_KEYS[0x39] = "capslock"
+OUTPUT_KEYS.update(zip(range(0xE0, 0xE8), ("ctrl", "shift", "alt", "meta", "rctrl", "rshift", "ralt", "rmeta")))
+OUTPUT_KEYS.update({0x53: "numlock", 0x54: "kp/", 0x55: "kp*", 0x56: "kp-", 0x57: "kp+", 0x58: "kp-enter",
+                    **{0x58 + n: f"kp{n}" for n in range(1, 10)}, 0x62: "kp0", 0x63: "kp.", 0x85: "kp,", 0x64: "iso\\", 0x65: "menu",
+                    **{0x86 + n: f"int{n}" for n in range(1, 6)}})
+OUTPUT_ALIASES = {"control": "ctrl", "win": "meta", "super": "meta", "return": "enter", "escape": "esc", "del": "delete",
+                  "pgup": "pageup", "pgdn": "pagedown", "prtsc": "printscreen"}
+OUTPUT_USAGES = {name: usage for usage, name in OUTPUT_KEYS.items()}
+# apex-analog's own key names work too: LCTRL, LGUI, BKSP, CAPS, KP_ENTER.
+for _name, _hid in BIND_HIDS.items():
+    if _hid in OUTPUT_KEYS and _name.lower() not in OUTPUT_USAGES:
+        OUTPUT_ALIASES.setdefault(_name.lower(), OUTPUT_KEYS[_hid])
+del _name, _hid
+MEDIA_USAGES = {0xB5: "next", 0xB6: "previous", 0xB7: "stop", 0xCD: "play-pause", 0xE2: "mute", 0xE9: "volume-up", 0xEA: "volume-down"}
+MEDIA_NAMES = {name: code for code, name in MEDIA_USAGES.items()}
+SIMPLE_BINDINGS = {"none": 0x00, "scroll-up": 0x31, "scroll-down": 0x32, "tilt-left": 0x33, "tilt-right": 0x34}
+SIMPLE_NAMES = {code: name for name, code in SIMPLE_BINDINGS.items()}
+KEYS_KIND, MEDIA_KIND, BUILTIN_KIND = 0x51, 0x61, 0x62
+# The keyboard's own functions, as its defaults put them on the SteelSeries layer: (function, when) -> the key they start on.
+# "When" is 0 on press, 1 while held. Only these can be sent, so they can be moved or put back, never invented.
+BUILTINS = {(1, 0): "F9", (2, 1): "F10", (3, 1): "F11", (4, 1): "F12", (5, 0): "LGUI", (6, 0): "O", (7, 0): "I", (8, 0): "T",
+            (10, 0): "Q"}
+
+
+def default_binding(layer, hid):
+    """What a key does out of the box on each layer, from the firmware's restore-defaults code."""
+    if layer == 0:
+        special = {0xF1: (MEDIA_KIND, 0xE2), 0xF5: (MEDIA_KIND, 0xCD), 0xF6: (MEDIA_KIND, 0xB5), 0xF7: (MEDIA_KIND, 0xB6)}
+        return bytes(special.get(hid, (KEYS_KIND, hid))).ljust(5, b"\0")
+    if layer == 1:
+        for (function, when), name in BUILTINS.items():
+            if BIND_HIDS[name] == hid:
+                return bytes([BUILTIN_KIND, function, when, 0, 0])
+    return bytes(5)
+
+
+DEFAULT_WHEEL = {0: (bytes([MEDIA_KIND, 0xE9, 0, 0, 0]), bytes([MEDIA_KIND, 0xEA, 0, 0, 0])), 1: (bytes(5), bytes(5))}
+
+
+def describe_binding(record):
+    """A binding as the text parse_binding takes, so what's printed can be typed back in."""
+    record = bytes(record)
+    kind = record[0]
+    if 0x01 <= kind <= 0x08 and not any(record[1:]):
+        return f"mouse{kind}"
+    if kind in SIMPLE_NAMES and not any(record[1:]):
+        return SIMPLE_NAMES[kind]
+    if kind == KEYS_KIND:
+        keys = [OUTPUT_KEYS.get(k, f"{k:#04x}") for k in record[1:] if k]
+        return "+".join(keys) if keys else "none"
+    if kind == MEDIA_KIND and not any(record[2:]):
+        return "media:" + MEDIA_USAGES.get(record[1], f"{record[1]:#04x}")
+    if kind == BUILTIN_KIND and (record[1], record[2]) in BUILTINS and not any(record[3:]):
+        return f"builtin:{record[1]}" + (f":{record[2]}" if record[2] else "")
+    return "raw:" + record.hex()
+
+
+def parse_binding(text):
+    """Turn `esc`, `ctrl+c`, `media:mute`, `mouse4`, `scroll-up`, `builtin:10` or `none` into the keyboard's 5-byte record."""
+    t = text.strip().lower()
+    if t == "nothing":
+        t = "none"
+    if t in SIMPLE_BINDINGS:
+        return bytes([SIMPLE_BINDINGS[t], 0, 0, 0, 0])
+    match = re.fullmatch(r"mouse ?([1-8])", t)
+    if match:
+        return bytes([int(match.group(1)), 0, 0, 0, 0])
+    if t.startswith("media:"):
+        name = t[6:]
+        if name not in MEDIA_NAMES:
+            raise ValueError(f"Unknown media action {name!r}. Choose from: {', '.join(MEDIA_NAMES)}.")
+        return bytes([MEDIA_KIND, MEDIA_NAMES[name], 0, 0, 0])
+    match = re.fullmatch(r"builtin:(\d+)(?::(\d+))?", t)
+    if match:
+        key = (int(match.group(1)), int(match.group(2) or 0))
+        if key not in BUILTINS:
+            raise ValueError("The keyboard's own functions can only be moved, not made up. Known: "
+                             + ", ".join(f"builtin:{f}" + (f":{w}" if w else "") + f" (normally SS+{k})" for (f, w), k in BUILTINS.items()))
+        return bytes([BUILTIN_KIND, key[0], key[1], 0, 0])
+    if t.startswith("keys:"):
+        t = t[5:]
+    names = [OUTPUT_ALIASES.get(n.strip(), n.strip()) for n in re.split(r"\+(?!$)", t)]
+    if not 1 <= len(names) <= 4:
+        raise ValueError("A key can send up to 4 keys at once.")
+    unknown = [n for n in names if n not in OUTPUT_USAGES]
+    if unknown:
+        raise ValueError(f"Unknown key or action: {', '.join(unknown)}.")
+    return bytes([KEYS_KIND, *(OUTPUT_USAGES[n] for n in names)]).ljust(5, b"\0")
+
+
+def _check_record(record):
+    """Only records whose effect was read in the firmware's key handling, with nothing stray in the unused bytes."""
+    record = bytes(record)
+    if len(record) != 5:
+        raise ValueError(f"a binding is 5 bytes, not {len(record)}")
+    kind, rest = record[0], record[1:]
+    if kind == 0x00 or 0x01 <= kind <= 0x08 or kind in SIMPLE_NAMES:
+        ok = not any(rest)
+    elif kind == KEYS_KIND:
+        ok = any(rest) and all(k == 0 or k in OUTPUT_KEYS for k in rest)
+    elif kind == MEDIA_KIND:
+        ok = rest[0] in MEDIA_USAGES and not any(rest[1:])
+    elif kind == BUILTIN_KIND:
+        ok = (rest[0], rest[1]) in BUILTINS and not any(rest[2:])
+    else:
+        ok = False
+    if not ok:
+        raise ValueError(f"refused to send binding {record.hex(' ')}: not a kind this tool knows is safe")
+
+
+def _check_bind(payload):
+    """63 <layer> <n> [<hid> <record>]... The firmware writes the normal layer for any layer byte but 1 or 2, so only 0-2 pass."""
+    if len(payload) < 3 or payload[1] not in LAYER_NAMES:
+        raise ValueError("refused to send 63: the layer must be 0, 1 or 2")
+    count = payload[2]
+    if not 1 <= count <= 10 or len(payload) != 3 + 6 * count:
+        raise ValueError("refused to send 63: it takes 1 to 10 keys, 6 bytes each")
+    for i in range(count):
+        hid, record = payload[3 + 6 * i], payload[4 + 6 * i:9 + 6 * i]
+        if hid not in BIND_NAMES:
+            raise ValueError(f"refused to send 63: {hid:#04x} isn't a key that can be bound")
+        if payload[1] == 2 and hid not in DEEP_HIDS:
+            raise ValueError(f"refused to send 63: {BIND_NAMES[hid]} has no sensor, so no deeper press")
+        if bytes(record) != default_binding(payload[1], hid):  # putting a key back is always allowed
+            _check_record(record)
+
+
+def _check_wheel(payload):
+    """64 <layer> <up record> <down record>. Any layer byte but 0 writes the SteelSeries layer, so only 0 and 1 pass."""
+    if len(payload) != 12 or payload[1] not in (0, 1):
+        raise ValueError("refused to send 64: it takes layer 0 or 1, then two 5-byte bindings")
+    for record, default in zip((payload[2:7], payload[7:12]), DEFAULT_WHEEL[payload[1]]):
+        if bytes(record) != default:
+            _check_record(record)
+
+
+BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel}
+
+
+def bind_key(key):
+    """Accept caps, CAPS, f13... any key the keyboard can rebind, or WHEEL_UP and WHEEL_DOWN."""
+    name = key.upper() if len(key) > 1 or key.isalpha() else key
+    name = ALIASES.get(name, name)
+    if name in BIND_HIDS or name in WHEEL_DIRECTIONS:
+        return name
+    raise ValueError(f"{key!r} isn't a key the keyboard can rebind. Keys: " + " ".join(sorted(k for k in BIND_HIDS if not k.startswith("INT")))
+                     + " " + " ".join(WHEEL_DIRECTIONS))
 
 
 def _key_positions():
@@ -516,6 +698,55 @@ class Keyboard:
                 if time.monotonic() > deadline:
                     raise
 
+    def bindings(self, layer=0, keys=None):
+        """{'CAPS': b'\\x51\\x39\\0\\0\\0', ...}: what each key does on a layer. 0 is normal, 1 while the SteelSeries key is held,
+        2 on a deeper press. describe_binding turns a record into text."""
+        if layer not in LAYER_NAMES:
+            raise ValueError(f"layer must be 0, 1 or 2, not {layer!r}")
+        if keys is None:
+            names = [n for n, hid in BIND_HIDS.items() if layer != 2 or hid in DEEP_HIDS]
+        else:
+            names = [bind_key(k) for k in keys]
+            wheel = [n for n in names if n in WHEEL_DIRECTIONS]
+            if wheel:
+                raise ValueError("The wheel's bindings come from Keyboard.wheel().")
+        if layer == 2:
+            # The firmware's read goes out of step after a key without a sensor, so never ask about one on this layer.
+            flat = [n for n in names if BIND_HIDS[n] not in DEEP_HIDS]
+            if flat:
+                raise ValueError(f"No sensor, so no deeper press: {' '.join(flat)}")
+        out = {}
+        for start in range(0, len(names), 10):
+            part = names[start:start + 10]
+            hids = [BIND_HIDS[n] for n in part]
+            request = [0xE3, layer, len(part)] + [byte for hid in hids for byte in (hid, 0, 0, 0, 0, 0)]
+            reply = self._ask(request, lambda r, h=tuple(hids): len(r) >= 6 * len(h) and all(r[6 * i] == x for i, x in enumerate(h)))
+            for i, name in enumerate(part):
+                out[name] = bytes(reply[6 * i + 1:6 * i + 6])
+        return out
+
+    def set_bindings(self, layer, changes):
+        """Rebind keys on one layer: {'CAPS': parse_binding('esc')}. Stays in the keyboard's memory until save_to_keyboard."""
+        items = [(BIND_HIDS[bind_key(name)], bytes(record)) for name, record in changes.items()]
+        for start in range(0, len(items), 10):
+            part = items[start:start + 10]
+            self._write([0x63, layer, len(part)] + [byte for hid, record in part for byte in (hid, *record)])
+
+    def wheel(self, layer=0):
+        """(up, down): what turning the volume wheel does, normally (0) or while the SteelSeries key is held (1)."""
+        if layer not in (0, 1):
+            raise ValueError(f"the wheel has layer 0 or 1, not {layer!r}")
+        reply = self._ask([0xE4, layer], lambda r: len(r) >= 10)
+        return bytes(reply[:5]), bytes(reply[5:10])
+
+    def set_wheel(self, layer, up, down):
+        """Rebind the volume wheel. Stays in the keyboard's memory until save_to_keyboard."""
+        self._write([0x64, layer, *bytes(up), *bytes(down)])
+
+    def layer_key(self):
+        """The HID usage of the key that turns on the SteelSeries layer while held. 0xF0, the SteelSeries key, out of the box."""
+        return self._ask([0xE0])[0]
+
     def channels(self):
         """Filtered sensor value of all 70 channels, including those with no switch fitted."""
         out = {}
@@ -526,8 +757,11 @@ class Keyboard:
 
     def _write(self, payload):
         """Send a command that gets no reply, then give the keyboard time to act on it. One that arrives straight after appears to replace it."""
-        if not payload or (payload[0] not in LIGHT_COMMANDS and payload[0] not in SETTING_COMMANDS and payload[0] != SAVE_COMMAND):
+        if not payload or (payload[0] not in LIGHT_COMMANDS and payload[0] not in SETTING_COMMANDS and payload[0] != SAVE_COMMAND
+                           and payload[0] not in BIND_COMMANDS):
             raise ValueError(f"refused to send {payload[:1]!r}: not a known write command")
+        if payload[0] in BIND_CHECKS:
+            BIND_CHECKS[payload[0]](payload)
         if self.client is not None:
             self.client.call(OP_WRITE, bytes(payload))  # the daemon leaves the gap, so nobody else's command lands in it
             return
@@ -3002,6 +3236,8 @@ your terminal back, and several can run at once. Add --watch to keep one in the 
   Keyboard settings, no GG needed
     actuation KEYS MM    where keys fire, like: actuation WASD 1.2
     rapid KEYS on|off    the keyboard's own rapid tap
+    bind KEY ACTION      what a key does, on the keyboard itself, like: bind CAPS esc. --layer ss or deep too
+    bindings             what every key does
     preset save|use NAME keep setups on this computer
     save                 write the current settings to the keyboard's flash, so they survive a replug
 
@@ -3271,6 +3507,78 @@ def cmd_rapid(args):
         settings = kb.actuation()
     on = [n for n, s in settings.items() if s["mode"] == RAPID_TAP_MODE]
     print("Rapid tap on: " + (" ".join(on) if on else "no keys"))
+    return 0
+
+
+def _binding_entry(record, default):
+    return {"action": describe_binding(record), "raw": record.hex(), "default": record == default}
+
+
+def read_bindings(kb, layers=(0, 1, 2)):
+    """Everything bound on the keyboard, as `bindings --json` prints it."""
+    layer_key = kb.layer_key()
+    report = {"layer_key": BIND_NAMES.get(layer_key, f"{layer_key:#04x}"), "layers": {}, "wheel": {}}
+    for layer in layers:
+        report["layers"][LAYER_NAMES[layer]] = {name: _binding_entry(record, default_binding(layer, BIND_HIDS[name]))
+                                                for name, record in kb.bindings(layer).items()}
+        if layer in (0, 1):
+            report["wheel"][LAYER_NAMES[layer]] = {direction: _binding_entry(record, default) for direction, record, default
+                                                   in zip(WHEEL_DIRECTIONS, kb.wheel(layer), DEFAULT_WHEEL[layer])}
+    return report
+
+
+def cmd_bindings(args):
+    layers = tuple(LAYERS.values()) if args.layer == "all" else (LAYERS[args.layer],)
+    with Keyboard() as kb:
+        report = read_bindings(kb, layers)
+    if args.json:
+        print(json.dumps(report))
+        return 0
+    for layer in layers:
+        name = LAYER_NAMES[layer]
+        entries = {**report["layers"][name], **report["wheel"].get(name, {})}
+        shown = {k: v for k, v in entries.items() if args.full or not v["default"] or (layer == 1 and v["action"] != "none")}
+        print(f"{LAYER_LABELS[layer].capitalize()}:")
+        if not shown:
+            print("  every key does what it normally does" if layer == 0 else "  nothing bound")
+        for key, entry in shown.items():
+            print(f"  {key:13}{entry['action']}" + ("" if entry["default"] else "   (changed)"))
+    if report["layer_key"] != "SS":
+        print(f"The SteelSeries layer is on while {report['layer_key']} is held.")
+    return 0
+
+
+def cmd_bind(args):
+    layer = LAYERS[args.layer]
+    key = bind_key(args.key)
+    with Keyboard() as kb:
+        if key in WHEEL_DIRECTIONS:
+            if layer == 2:
+                raise ValueError("The wheel has no deeper press.")
+            records = list(kb.wheel(layer))
+            i = WHEEL_DIRECTIONS.index(key)
+            records[i] = DEFAULT_WHEEL[layer][i] if args.action == "default" else parse_binding(args.action)
+            kb.set_wheel(layer, *records)
+            time.sleep(0.1)
+            if list(kb.wheel(layer)) != records:
+                raise ApexError("Sent, but the wheel reads back differently.")
+            record = records[i]
+        else:
+            hid = BIND_HIDS[key]
+            if layer == 2 and hid not in DEEP_HIDS:
+                raise ValueError(f"{key} has no sensor, so it has no deeper press.")
+            if layer == 0 and hid == kb.layer_key():
+                raise ValueError(f"{key} turns on the SteelSeries layer while it's held, so a normal binding on it never fires. "
+                                 f"Bind it with --layer ss instead: that fires each time it's pressed.")
+            record = default_binding(layer, hid) if args.action == "default" else parse_binding(args.action)
+            kb.set_bindings(layer, {key: record})
+            time.sleep(0.1)
+            if kb.bindings(layer, [key])[key] != record:
+                if layer == 2:
+                    raise ApexError(f"The keyboard refused it: {key} needs a second actuation point before a deeper press can do anything.")
+                raise ApexError("Sent, but it reads back differently.")
+    print(f"{key} now does {describe_binding(record)} {LAYER_LABELS[layer]}, and the keyboard reads it back. "
+          f"It lasts until you unplug the keyboard. apex-analog save keeps it.")
     return 0
 
 
@@ -3989,6 +4297,25 @@ def build_parser():
     ra.add_argument("keys", nargs="?", help="W, WASD, W,A,SPACE, or all. Leave out to just see which keys have it on")
     ra.add_argument("state", nargs="?", choices=("on", "off"))
     ra.set_defaults(func=cmd_rapid)
+
+    bi = commands.add_parser("bindings", help="what every key does, set on the keyboard itself")
+    bi.add_argument("--layer", choices=("base", "ss", "deep", "all"), default="all",
+                    help="base: normally, ss: while the SteelSeries key is held, deep: on a deeper press, all (default)")
+    bi.add_argument("--full", action="store_true", help="list every key, not just the ones that do something special")
+    bi.add_argument("--json", action="store_true")
+    bi.set_defaults(func=cmd_bindings)
+
+    bd = commands.add_parser("bind", help="change what a key does, on the keyboard itself, so it works anywhere",
+                             description="Change what a key does, on the keyboard itself, so it works with no software running.",
+                             epilog="Actions: a key or up to 4 at once (esc, f13, ctrl+c, alt+tab, kp-enter), media:play-pause, media:next, "
+                                    "media:previous, media:stop, media:mute, media:volume-up, media:volume-down, mouse1 to mouse8, "
+                                    "scroll-up, scroll-down, tilt-left, tilt-right, none, or default to put it back. "
+                                    "It lasts until you unplug the keyboard. apex-analog save keeps it.")
+    bd.add_argument("key", help="CAPS, F1, KP_ENTER, WHEEL_PRESS, MEDIA_BUTTON, TILT_LEFT, TILT_RIGHT, WHEEL_UP, WHEEL_DOWN, or any other key")
+    bd.add_argument("action", help="esc, ctrl+c, media:mute, mouse4, none, default...")
+    bd.add_argument("--layer", choices=("base", "ss", "deep"), default="base",
+                    help="base: normally (default), ss: while the SteelSeries key is held, deep: on a deeper press")
+    bd.set_defaults(func=cmd_bind)
 
     pr = commands.add_parser("preset", help="keep named actuation and rapid tap setups on this computer")
     pr.add_argument("action", choices=("save", "use", "list", "delete"))
