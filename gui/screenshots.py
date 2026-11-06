@@ -76,10 +76,11 @@ def sample_bindings():
 
 
 def sample_keyboard():
-    keys = {n: {"press": 1.89, "release": 1.8, "mode": 0} for n in NAMES}
+    keys = {n: {"press": 1.89, "release": 1.8, "mode": 0, "deep": None} for n in NAMES}
     for n in "WASD":
-        keys[n] = {"press": 1.08, "release": 1.0, "mode": 2}
-    keys["SPACE"] = {"press": 3.0, "release": 3.0, "mode": 0}
+        keys[n] = {"press": 1.08, "release": 1.0, "mode": 2, "deep": None}
+    keys["SPACE"] = {"press": 3.0, "release": 3.0, "mode": 0, "deep": None}
+    keys["W"]["deep"] = 3.0
     return {
         "info": {"firmware": "0416", "keys": keys},
         "jobs": [{"name": "lights", "on": True, "command": "lights --keep", "age": "135 min"},

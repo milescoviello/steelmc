@@ -708,6 +708,20 @@ class BindingsMode(unittest.TestCase):
         self.page.bind_undo.click()
         self.assertEqual(self.device.calls[0], ("restore_bindings", [("CAPS", "esc", "base"), ("K", "none", "ss")]))
 
+    def test_where_the_deeper_press_starts(self):
+        self.assertFalse(self.page.deep_row.isVisibleTo(self.page))
+        self.layer("deep")
+        self.assertTrue(self.page.deep_row.isVisibleTo(self.page))
+        QTest.mouseClick(self.page.caps["W"], Qt.LeftButton)
+        self.assertIn("starts at 3.0 mm", self.page.bind_note.text())
+        self.assertEqual(self.page.deep_depth.currentData(), 3.0)
+        QTest.mouseClick(self.page.caps["W"], Qt.LeftButton)
+        QTest.mouseClick(self.page.caps["A"], Qt.LeftButton)
+        self.assertIn("very bottom", self.page.bind_note.text())
+        self.page.deep_depth.setCurrentIndex(self.page.deep_depth.findData(2.6))
+        self.page.deep_set.click()
+        self.assertEqual(self.device.calls[0], ("set_deep", ["A"], 2.6))
+
     def test_back_to_actuation(self):
         self.page.mode_buttons["actuation"].click()
         self.assertTrue(self.page.caps["ESC"].inert)
@@ -1017,8 +1031,9 @@ class KeyboardCommand(unittest.TestCase):
         device = self.script('printf "%s " "$@" >> "$0.log"\n')
         device.bind(["`", "CAPS"], "esc", "base")
         device.restore_bindings([("K", "none", "ss")])
+        device.set_deep(["W", ","], 3.0)
         with open(device.exe + ".log") as f:
-            self.assertEqual(f.read(), "bind GRAVE esc --layer base bind CAPS esc --layer base bind K none --layer ss ")
+            self.assertEqual(f.read(), "bind GRAVE esc --layer base bind CAPS esc --layer base bind K none --layer ss actuation W,COMMA 3 --deep ")
 
     def test_report_is_just_the_summary(self):
         device = self.script('printf "6909 presses.\\nTry 1.4 mm.\\n\\nkey  presses\\nSPACE 1406\\n"\n')

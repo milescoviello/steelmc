@@ -196,15 +196,20 @@ These live on the keyboard itself, so they work with no software running, in any
 ```
 apex-analog bind CAPS esc                       # Caps Lock becomes Esc
 apex-analog bind J media:play-pause --layer ss  # holding the SteelSeries key, J plays or pauses
-apex-analog bind W e --layer deep               # a deeper press on W sends E
+apex-analog actuation W 3.0 --deep              # W's deeper press starts at 3.0 mm
+apex-analog bind W e --layer deep               # and sends E
 apex-analog bind WHEEL_DOWN media:next          # the volume wheel skips tracks instead
 apex-analog bind CAPS default                   # put it back
 apex-analog bindings                            # what's been changed, on every layer
 ```
 
-Every key can be rebound, including the numpad, the F row, the wheel and the button under it. A key can send up to four keys at once (`ctrl+shift+t`), a media key, a mouse button, a scroll, or nothing. There are three layers: normally, while the SteelSeries key is held, and on a deeper press. A deeper press only works on a key with a second actuation point.
+Every key can be rebound, including the numpad, the F row, the wheel and the button under it. A key can send up to four keys at once (`ctrl+shift+t`), a media key, a mouse button, a scroll, or nothing. There are three layers: normally, while the SteelSeries key is held, and on a deeper press. Every key's deeper press starts at the very bottom until `actuation --deep` moves it, and it has to be deeper than where the key first fires.
 
-Holding the SteelSeries key is what turns on its layer, so it can only be bound with `--layer ss`, which fires each time it's pressed. The keyboard's own functions on that layer, like SteelSeries + Q for rapid tap, can be rebound too, and `default` puts them back.
+Holding the SteelSeries key is what turns on its layer, so there are three ways to give that key something to do:
+
+- `apex-analog shortcut add SS volume+`: fires on a quick tap with nothing else pressed, so holding it still works for combos. This one needs apex-analog running.
+- `apex-analog bind SS media:mute --layer ss`: on the keyboard itself, firing on every press, combos included.
+- `apex-analog layer-key SCRLK`: move the layer to another key, and then bind the SteelSeries key like any other. The keyboard's own functions on that layer, like SteelSeries + Q for rapid tap, can be rebound too, and `default` puts them back.
 
 Bindings stay in the keyboard's memory until you unplug it, like actuation. `apex-analog save` keeps them.
 
@@ -394,7 +399,7 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 - `lights --keep` and the glow in `lights` work on the real keyboard.
 - The daemon ran on the real keyboard with several jobs at once, replacing jobs, reporting mistakes, and recovering when killed. The daemon, glow and recording together used about 6% of one core, and about 8% with a controller on top. A real replug reconnected every job by itself.
 - Sent to the real keyboard and read back correctly: `actuation`, `rapid`, `preset use`, and `save` (the keyboard answered again after 0.5 s with its settings intact).
-- `bindings` read all three layers and the wheel on the real keyboard, and they matched the firmware's defaults. `bind` changed keys on the normal and SteelSeries layers and the wheel, read them back, and put them back. A real press of a rebound key, a deeper-press binding, and a binding kept through `save` and a replug haven't been tried yet.
+- `bindings` read all three layers and the wheel on the real keyboard, and they matched the firmware's defaults. `bind` changed keys on the normal and SteelSeries layers and the wheel, read them back, and put them back. Setting where a deeper press starts, a deeper-press binding, and moving the SteelSeries layer to another key and back were also sent and read back. A real press of a rebound key and a binding kept through `save` and a replug haven't been tried yet.
 - Ran on the real keyboard without errors, with key presses and music simulated: every lighting effect, `paint`, `auto`, `type`, `midi`, every `map` preset, and frames through the real `apex-oledd`. Whether they look and feel right still needs someone watching.
 - `rev` read real UDP packets in BeamNG's format from its own source, but hasn't received them from a running game. A `save` that changes a setting hasn't been followed by a replug yet.
 
@@ -402,7 +407,7 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 
 Unless you run something that sets colours or settings, this only reads the keyboard. Every command it can send is listed here, and each one's firmware handler was read first. Only `apex-analog save` reaches flash, and none of them reset the keyboard.
 
-These nine only copy memory into the reply:
+These ten only copy memory into the reply:
 
 | Send | Reply | |
 |---|---|---|
@@ -415,8 +420,9 @@ These nine only copy memory into the reply:
 | `E0` | 1 byte | which key turns on the SteelSeries layer while held |
 | `E3 <layer> <n> [<hid> 0 0 0 0 0]...` | `<hid>` and 5 bytes of binding, per key | what keys do on a layer: 0 normal, 1 SteelSeries, 2 deeper press |
 | `E4 <layer>` | two 5-byte bindings | what the wheel does on a layer |
+| `B3 <2> <n> [<hid> 0 0]...` | `<hid> <press> <release>`... | where each key's deeper press starts |
 
-These six change something in the keyboard's memory, and only when you ask:
+These eight change something in the keyboard's memory, and only when you ask:
 
 | Send | | Used by |
 |---|---|---|
@@ -426,6 +432,8 @@ These six change something in the keyboard's memory, and only when you ask:
 | `32 <n> [<hid> <mode>]...` | mode for up to 30 keys, 2 is rapid tap | `rapid`, `preset` |
 | `63 <layer> <n> [<hid> <binding>]...` | what up to 10 keys do on layer 0, 1 or 2 | `bind` |
 | `64 <layer> <up> <down>` | what the wheel does on layer 0 or 1 | `bind` |
+| `60 <hid>` | which key turns on the SteelSeries layer | `layer-key` |
+| `33 <2> <n> [<hid> <press> <release>]...` | where a deeper press starts, for up to 20 keys | `actuation --deep` |
 
 Before `63` or `64` goes out, each binding is checked: only layers 0 to 2 (the firmware treats any other layer byte as the normal one), keys the firmware's own table lists, and kinds of action whose effect was read in its key handling. On-board macros and the kinds that weren't traced are refused, though a key's own default can always be put back.
 

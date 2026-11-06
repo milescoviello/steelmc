@@ -414,6 +414,10 @@ class KeyboardDevice:
     def set_rapid(self, names, on):
         return self.run("rapid", self.key_args(names), "on" if on else "off")
 
+    def set_deep(self, names, mm):
+        """Where a deeper press starts. 0 puts it back at the bottom."""
+        return self.run("actuation", self.key_args(names), f"{mm:g}", "--deep")
+
     def lights(self, args, color=None):
         if args is None:
             return self.run("lights", "--off")
@@ -1593,11 +1597,22 @@ class KeyboardPage(QWidget):
         self.bind_undo.clicked.connect(self.undo_bindings)
         self.bind_note = muted("")
         self.bind_note.setWordWrap(True)
+        self.deep_depth = QComboBox()
+        self.deep_depth.addItem("the bottom (off)", 0.0)
+        for mm in DEPTHS:
+            self.deep_depth.addItem(f"{mm:.1f} mm", mm)
+        self.deep_set = QPushButton("Set")
+        self.deep_set.clicked.connect(self.apply_deep)
+        self.deep_row = QWidget()
+        deep_layout = row(muted("Deeper press starts at"), self.deep_depth, self.deep_set, None)
+        deep_layout.setContentsMargins(0, 0, 0, 0)
+        self.deep_row.setLayout(deep_layout)
         hint = muted("Bindings live on the keyboard itself, so they work with no software running. They last until you unplug it, "
                      "and Save to keyboard keeps them. For text, commands or macros, use Shortcuts.")
         hint.setWordWrap(True)
-        panel = well(self.bind_title, self.bind_layer, self.bind_other, self.bind_picker,
+        panel = well(self.bind_title, self.bind_layer, self.bind_other, self.deep_row, self.bind_picker,
                      row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, None))
+        self.deep_row.hide()
         panel.layout().addStretch(1)
         return panel
 
@@ -1995,9 +2010,19 @@ class KeyboardPage(QWidget):
         ok = bool(names) and refusal is None and bool(self.bindings)
         self.bind_apply.setEnabled(ok)
         self.bind_reset.setEnabled(ok)
+        deep = self.bind_layer_name() == "deep"
+        self.deep_row.setVisible(deep)
+        self.deep_set.setEnabled(ok and deep)
         note = refusal or ""
-        if not note and self.bind_layer_name() == "deep":
-            note = "A deeper press only works on keys that have a second actuation point."
+        if not note and deep and names:
+            points = {self.settings.get(n, {}).get("deep") for n in names}
+            if points == {None}:
+                note = "The deeper press starts at the very bottom until you set where it starts."
+            elif len(points) == 1:
+                note = f"The deeper press starts at {points.pop():.1f} mm."
+        if deep and len(names) == 1:
+            point = self.settings.get(names[0], {}).get("deep")
+            self.deep_depth.setCurrentIndex(max(0, self.deep_depth.findData(point if point else 0.0)))
         self.bind_note.setText(note)
         if ok:
             entry = self.binding_entry(names[0])
@@ -2031,6 +2056,13 @@ class KeyboardPage(QWidget):
         names, layer = self.bind_targets(), self.bind_layer_name()
         if names and not self.bind_refusal(names):
             self.apply(lambda: self.device.bind(names, "default", layer), f"{self.target_label(names)} is back to normal.")
+
+    def apply_deep(self):
+        names, mm = self.bind_targets(), self.deep_depth.currentData()
+        if not names or self.bind_refusal(names):
+            return
+        where = f"{mm:.1f} mm" if mm else "the bottom"
+        self.apply(lambda: self.device.set_deep(names, mm), f"The deeper press on {self.target_label(names)} starts at {where}.")
 
     def undo_bindings(self):
         if not (self.bindings_original and self.bindings):

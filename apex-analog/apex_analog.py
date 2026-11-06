@@ -4291,6 +4291,9 @@ def cmd_overlay(args):
 def cmd_info(args):
     with Keyboard() as kb:
         settings = kb.actuation()
+        deep = kb.deep_actuation()
+        for name, value in deep.items():
+            settings[name]["deep"] = min(LEVEL_TENTHS, key=lambda t: abs(t / 10 - value["release"])) / 10 if value else None
         depths = kb.read()
         report = {
             "keyboard": f"{VENDOR}:{PRODUCT}", "firmware": kb.firmware, "node": kb.node,
