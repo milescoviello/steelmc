@@ -1,0 +1,305 @@
+# apex-oled
+
+Drive the 128×40 OLED on a **SteelSeries Apex Pro Gen 3** keyboard from Linux.
+
+No SteelSeries GG, no hidapi, no kernel module, no root. Just Python and
+Pillow talking to `/dev/hidrawN`.
+
+```
+┌────────────────────────────────┐
+│ RAM ▓▓▓▓░░░░   VRM ▓░░░░░░░    │
+│ CPU    57c    2%       18W     │
+│ GPU    51c    1%       11W     │
+└────────────────────────────────┘
+```
+
+## The protocol
+
+This is the part worth reading if you're here to port it somewhere else.
+
+The keyboard exposes five HID interfaces. **Interface 1** (vendor usage page
+`0xFFC0`) declares a 642-byte *feature* report — that's the screen:
+
+```
+642 bytes = [0x61] + 640-byte framebuffer + [0x00]
+```
+
+640 bytes is 128×40 pixels at 1 bit each. The framebuffer is in SSD1306
+**page-major** order:
+
+```
+5 pages × 128 columns, one byte per column,
+bit N of that byte = the pixel at y = page*8 + N
+```
+
+**Plain row-major packing renders as garbage.** That's the one non-obvious
+detail — if pixels visibly change but look like noise, the transport is fine
+and the packing is wrong.
+
+Delivery is a `SET_REPORT` control transfer, done here with the
+`HIDIOCSFEATURE` ioctl directly on the hidraw node, so there's no hidapi
+dependency. hidraw expects a leading report-number byte, which is `0x00`
+because this descriptor declares no report IDs; the kernel strips it before
+the transfer.
+
+Identify the right node by matching the **report descriptor** rather than
+hardcoding `hidrawN` — the number moves across replugs:
+
+```
+06 c0 ff          Usage Page (Vendor 0xFFC0)
+  09 f2 96 82 02  Usage 0xF2, Report Count 0x0282   ← 642 bytes
+  b1 02           Feature
+```
+
+Verified on `1038:1640` (Apex Pro Gen 3, wired, full size). The Gen 3 TKL is
+`1038:1642` and prior art suggests the same framing; other Apex models use a
+`0x61` header with a 641-byte report.
+
+## Install
+
+Requires Python 3.11+ (for `tomllib`) and Pillow **built with freetype** —
+without it everything falls back to a 6×11 bitmap font and font sizes are
+ignored. On Gentoo that's `USE=truetype` on `dev-python/pillow`.
+
+### Any script
+
+DejaVu has no Japanese, Chinese, Thai, Devanagari or emoji, and Pillow does no
+font fallback, so on its own those draw as empty boxes. Text goes through a
+`FontChain` instead: each character gets the first face that has it — DejaVu,
+then `[fonts] fallback` (default Noto Sans CJK JP, Noto Emoji), then
+fontconfig's ranking of every installed font, preferring the per-script Noto
+Sans faces. Install fonts for the scripts you need (`media-fonts/noto`,
+`media-fonts/noto-cjk`, `media-fonts/noto-emoji`).
+
+Lines in scripts without spaces (Japanese, Chinese, Thai) wrap between
+characters, following Japanese kinsoku rules — `、。` and small kana never start
+a line. Korean wraps at its spaces.
+
+For Arabic letters to join and Indic vowel signs to sit in the right place,
+Pillow also needs **libraqm** (`USE=raqm` on Gentoo). Without it right-to-left
+text is still put in reading order, but unshaped. `apex-oled info` shows which
+you have.
+
+```bash
+git clone https://github.com/milescoviello/apex-oled ~/apex-oled
+~/apex-oled/install.sh
+```
+
+That symlinks the tools into `~/.local/bin`, installs a udev rule so you don't
+need root, and drops a config file and an autostart entry.
+
+## CLI
+
+```bash
+apex-oled text "line one" "line two"
+apex-oled image cover.png            # auto-resized and dithered
+apex-oled marquee "long scrolling text"
+apex-oled watch "sensors | grep Tctl" --interval 2
+journalctl -f | apex-oled pipe       # rolling tail on your keyboard
+apex-oled clear
+apex-oled info                       # device, protocol, daemon status
+```
+
+Also importable as a library:
+
+```python
+from importlib.machinery import SourceFileLoader
+apex = SourceFileLoader('apex', '/path/to/apex-oled').load_module()
+
+with apex.Display() as d:
+    d.text('hello', 'world')
+    d.show(some_pil_image)        # any PIL image, resized + dithered
+    d.send(raw_640_byte_fb)       # or drive it yourself
+```
+
+## Daemon
+
+`apex-oledd` owns the panel and arbitrates between *sources* by priority, so
+producers don't race to be the last writer:
+
+| source | priority | shows |
+|---|---|---|
+| `notify` | 100 | transient frames pushed by the CLI over a unix socket |
+| `game` | 30 | live **FPS** (via MangoHud), GPU/CPU load and temps, **swap in/out**, while gamemode runs or MangoHud is logging |
+| `video` | 28 | packed frames synced to a matching now-playing track |
+| `qwen` | 25 | local LLM (Strata or llama.cpp) prefill progress, live decode rate, context bar |
+| `lyrics` | 20 | current synced lyric, else a now-playing card |
+| `idle` | 0 | RAM/VRAM capacity bars over CPU and GPU rows |
+
+### FPS in the game view
+
+A game's frame rate is invisible from outside the process, so it comes from
+MangoHud's CSV log: with auto-logging on, MangoHud appends a row per interval
+and flushes it, and the daemon reads the newest row. Add to
+`~/.config/MangoHud/MangoHud.conf` (the folder must match `[game]
+mangohud_logs`; MangoHud expands only `~`, not `$XDG_RUNTIME_DIR`, so give the
+absolute path):
+
+```ini
+output_folder=/run/user/1000/mangohud
+autostart_log=1
+log_interval=500
+```
+
+`/run/user` is tmpfs, so nothing touches the disk; the daemon creates the
+folder and prunes logs older than two days. While logging, MangoHud draws a
+small dot in its overlay's corner. Games without MangoHud keep the no-FPS
+layout.
+
+### The local-LLM view
+
+A big prompt can take minutes to prefill before the first token, and that
+looks the same as a hang. This view shows the prefill's progress, rate and
+ETA, then the live decode rate, GPU, and how full the context window is. It
+takes the screen only while a turn is running and for a few seconds after.
+
+It reads [Strata](https://github.com/Niko1221/Strata) (`flashnext-serve`,
+which omp talks to) from its `/metrics` and `/health`, or llama-server
+through `qwen-status --json` and `/slots`. `[qwen] backend = "auto"` uses
+whichever is up. Strata unloads the model after a quiet spell, and the panel
+shows `loading` while a request waits for it to come back.
+
+A server that is simply off stays quiet. If one of `[qwen] clients` (default
+`omp`) is running while no server answers, its requests are failing. The
+panel then turns white and shows **MODEL DOWN** for two minutes. After that
+it gives the screen back, because a mostly-lit frame left up for hours would
+burn in.
+
+While the daemon runs, CLI writes route through it as expiring top-priority
+frames (`--notify SECS`, default 5). `--direct` bypasses it.
+
+Switch what it shows, from a shell or a desktop shortcut:
+
+```bash
+apex-oled mode --cycle          # auto -> idle -> lyrics -> qwen -> game
+apex-oled mode lyrics
+apex-oled blank
+```
+
+There is also an evdev hotkey listener (`[hotkeys]`, off by default). It can
+key on right Meta specifically - which evdev distinguishes from left Meta and
+desktop shortcut editors generally do not - but it can only *observe* the
+keyboard, so the bound key still reaches the focused window. A compositor
+shortcut running the commands above is the only way to actually swallow it.
+
+The panel goes dark when the session locks, and after `afk_minutes` (default
+5) without keyboard, mouse, touchpad or gamepad input; the first keypress
+lights it again. KDE never marks the session idle in logind and won't tell a
+Wayland client how long it has been idle, so this reads evdev directly -
+every device a person operates, not just the Apex, observed and never
+grabbed - which needs the `input` group. Synthetic input (ydotool, Sunshine
+streaming) is ignored by name via `afk_ignore`. A CLI notification still
+shows while away, then the panel goes dark again. `apex-oled info` shows the
+countdown.
+
+Adding a source is a subclass with `active()` and `render()`:
+
+```python
+class MySource(Source):
+    name = 'mine'
+    fps = 1.0
+
+    def active(self, now):
+        return something_is_happening()
+
+    def render(self, now):
+        img = Image.new('1', (WIDTH, HEIGHT), 0)
+        draw_text(img, (3, 0), 'hello', self.ctx.fonts.get(10))
+        return img
+```
+
+Then give it a priority in `[sources]`.
+
+The `lyrics` source reads a small JSON state file (default
+`~/.cache/nowplaying/state.json`) written by a separate now-playing daemon —
+mine is [nowplaying](https://github.com/milescoviello/nowplaying), which
+fingerprints audio and pulls synced lyrics from LRCLIB.
+It only needs a handful of keys — `title`, `artist`, `playing`, `duration`,
+`cover_file`, `lyrics_synced`, a `[[timestamp, text], ...]` lyrics list, and
+an *anchor* pair (`anchor_wall`, `anchor_pos`) giving track position at a
+wall-clock instant. Position is interpolated locally from that anchor, so the
+display stays smooth without polling anything. Point `NOWPLAYING_STATE` at
+whatever writes that shape.
+
+## Animation
+
+Any video can be pre-packed into raw frames and played back:
+
+```bash
+tools/video2fb clip.mp4 clip.fb --fit height   # or width / stretch
+apex-oled play clip.fb --loop
+```
+
+`play` asks the daemon to stand down for the duration and hands the panel back
+afterwards, including on Ctrl-C. The lease is time-limited, so a player that
+dies cannot keep the screen.
+
+The `video` source goes further: point it at a track title and it plays the
+frames *in sync with playback*, indexing them by the now-playing anchor rather
+than a local clock, so it follows pause, resume and seeking instead of
+drifting.
+
+```toml
+[video.tracks]
+"some song" = "~/.local/share/apex-oled/somesong.fb"
+```
+
+Frames are 640 bytes each - about 4 MB per three-minute clip at 30fps - and
+`mmap`ed rather than held resident.
+
+## Doom
+
+Yes. See [tools/doom](tools/doom/).
+
+## Design notes
+
+Things learned the hard way on a 128×40 one-bit panel:
+
+- **Derive row positions from font metrics**, never hardcode y. A 10px font
+  gives a 13px line, so three rows fit 40px exactly; 11px silently pushed the
+  bottom row off the panel.
+- **Wrap balanced, not greedy.** Greedy strands a lone word on the last row
+  and looks broken at this size.
+- **Prefer smaller type over motion.** Scrolling is a last resort — a long
+  lyric drops its title header and shrinks a step instead of marqueeing.
+- **Album art:** a fixed 128 threshold blanked 42 of 104 test covers — every
+  uniformly dark or bright one. Otsu's method per image took that to 27.
+  Covers are sharpened at target size first, because downscaling to 34px
+  destroys the edges 1-bit output depends on. Dithering loses to thresholding
+  at this scale every time: speckle reads as noise.
+- **Throughput is not the limit; tearing is.** The panel accepts frames at
+  ~989 fps (1.01 ms each, one USB frame interval), but it refreshes as a
+  rolling scan, so writing faster than the scan just overwrites rows midway
+  through being drawn. 30 fps is plenty.
+- **Burn-in is real.** The frame walks a slow ±2px orbit and the panel blanks
+  when the session locks or nobody has touched an input device for five
+  minutes. The desktop is no help with the second: logind's IdleHint stays
+  `no` forever under KDE, so absence is read from evdev.
+
+`apex-oledd --preview out.png` renders one frame to a 4× PNG without touching
+the panel — that's how to iterate on layout without squinting at a keyboard.
+
+## Tests
+
+```bash
+apex-oled-test          # 52 checks, no keyboard required
+```
+
+Covers the packing against a slow reference implementation, a pack/unpack
+round trip, balanced wrapping, truncation, bar edge cases, Otsu on dark and
+bright histograms, source activation and gating, hotkey binding and actions,
+the live decode rate, away-from-keyboard detection (which devices count,
+which events count, hotplug and unplug, against a fake sysfs and pipes rather
+than real `/dev/input`), what wins when blanking reasons overlap, and config
+fallback.
+
+## Prior art
+
+- [not-jan/apex-tux](https://github.com/not-jan/apex-tux) — Rust, covers
+  several Apex models and lists this PID
+- [SilasDaSilva/apex-pro-tkl-gen3-linux](https://github.com/SilasDaSilva/apex-pro-tkl-gen3-linux)
+  — Gen 3 TKL
+
+## License
+
+MIT

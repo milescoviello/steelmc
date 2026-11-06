@@ -1,0 +1,1325 @@
+#!/usr/bin/env python3
+"""apex-oled-test - self-contained checks for the OLED tooling.
+
+No pytest dependency and no keyboard required: everything here is pure
+rendering/packing logic. Run it after touching apex-oled or apex-oledd.
+
+    apex-oled-test          # run all, print a summary
+    apex-oled-test -v       # list every check
+"""
+import os
+import random
+import sys
+import tempfile
+import threading
+from importlib.machinery import SourceFileLoader
+
+from PIL import Image, ImageDraw
+
+_HERE = os.path.dirname(os.path.realpath(__file__))
+apex = SourceFileLoader('apex_oled', os.path.join(_HERE, 'apex-oled')).load_module()
+oledd = SourceFileLoader('apex_oledd', os.path.join(_HERE, 'apex-oledd')).load_module()
+
+W, H = apex.WIDTH, apex.HEIGHT
+FAILS, RUN = [], []
+
+
+def check(name):
+    def deco(fn):
+        RUN.append((name, fn))
+        return fn
+    return deco
+
+
+def eq(got, want, what=''):
+    if got != want:
+        raise AssertionError(f'{what}: got {got!r}, want {want!r}')
+
+
+# --- mirroring the panel ---------------------------------------------------
+
+@check('frame command reports what the panel shows')
+def _frame_command():
+    import base64
+    ctx = oledd.Context.__new__(oledd.Context)
+    ctx.last_fb, ctx.current_source, ctx.blanked = None, 'idle', False
+    ctx.blank_reason, ctx.released_until, ctx.forced_mode = None, 0.0, None
+    ctx.notify = None
+    server = oledd.Server.__new__(oledd.Server)
+    server.ctx = ctx
+    reply = server.handle({'cmd': 'frame'})
+    eq(reply['ok'], True, 'ok before any frame')
+    eq(reply['fb'], None, 'no frame yet')
+    ctx.last_fb = bytes(range(256)) * 2 + bytes(128)
+    reply = server.handle({'cmd': 'frame'})
+    eq(base64.b64decode(reply['fb']), ctx.last_fb, 'framebuffer')
+    eq(reply['source'], 'idle', 'source')
+    eq(reply['released'], False, 'released')
+
+
+# --- packing ---------------------------------------------------------------
+
+def _patterns():
+    random.seed(7)
+    imgs = []
+    noise = Image.new('1', (W, H), 0)
+    px = noise.load()
+    for y in range(H):
+        for x in range(W):
+            px[x, y] = random.randint(0, 1)
+    imgs.append(('noise', noise))
+
+    corners = Image.new('1', (W, H), 0)
+    p = corners.load()
+    for xy in ((0, 0), (W - 1, 0), (0, H - 1), (W - 1, H - 1)):
+        p[xy] = 1
+    imgs.append(('corners', corners))
+
+    for name, fn in (('rows', lambda x, y: y % 2),
+                     ('cols', lambda x, y: x % 2),
+                     ('diag', lambda x, y: (x + y) % 2),
+                     ('pageedge', lambda x, y: 1 if y % 8 in (0, 7) else 0)):
+        im = Image.new('1', (W, H), 0)
+        q = im.load()
+        for y in range(H):
+            for x in range(W):
+                q[x, y] = fn(x, y)
+        imgs.append((name, im))
+
+    blank = Image.new('1', (W, H), 0)
+    full = Image.new('1', (W, H), 1)
+    imgs += [('blank', blank), ('full', full)]
+
+    text = Image.new('1', (W, H), 0)
+    ImageDraw.Draw(text).text((2, 2), 'Testing 123', fill=1)
+    imgs.append(('text', text))
+    return imgs
+
+
+@check('pack() matches the reference implementation')
+def t_pack_matches_reference():
+    for name, img in _patterns():
+        a, b = apex.pack(img), apex.pack_reference(img)
+        eq(len(a), 640, f'{name} length')
+        if a != b:
+            i = next(i for i, (p, q) in enumerate(zip(a, b)) if p != q)
+            raise AssertionError(f'{name}: first differing byte at {i}')
+
+
+@check('unpack() round-trips pack()')
+def t_unpack_roundtrip():
+    for name, img in _patterns():
+        back = apex.unpack(apex.pack(img))
+        # Compare packed bits, not pixel ints: mode '1' stores an assigned 1
+        # as 1 but a decoded set pixel as 255, so getdata() would differ on
+        # images that are actually identical.
+        if back.tobytes() != img.tobytes():
+            raise AssertionError(f'{name}: round trip changed pixels')
+
+
+@check('pack() rejects wrong-sized framebuffers')
+def t_unpack_validates():
+    for bad in (b'', b'\x00' * 639, b'\x00' * 641):
+        try:
+            apex.unpack(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'accepted {len(bad)}-byte framebuffer')
+
+
+@check('pack() resizes and dithers non-native input')
+def t_pack_resizes():
+    eq(len(apex.pack(Image.new('RGB', (640, 200), (128, 128, 128)))), 640,
+       'resized RGB input')
+
+
+# --- text layout -----------------------------------------------------------
+
+@check('wrap() balances rather than packing greedily')
+def t_wrap_balanced():
+    font = oledd.Fonts(oledd.DEFAULTS).get(12)
+    rows = oledd.wrap('Blow by blow and go away', 124, font, lines=2)
+    if rows is None:
+        raise AssertionError('failed to wrap a line that fits')
+    eq(len(rows), 2, 'row count')
+    wa, wb = (oledd.text_width(r, font) for r in rows)
+    # greedy would leave a stray last word; balanced keeps the halves close
+    if abs(wa - wb) > max(wa, wb) * 0.5:
+        raise AssertionError(f'rows badly unbalanced: {rows}')
+
+
+@check('wrap() returns None when it cannot fit')
+def t_wrap_gives_up():
+    font = oledd.Fonts(oledd.DEFAULTS).get(12)
+    long = 'supercalifragilisticexpialidocious ' * 6
+    eq(oledd.wrap(long, 124, font, lines=2), None, 'unfittable text')
+
+
+@check('wrap() keeps every word, in order')
+def t_wrap_lossless():
+    font = oledd.Fonts(oledd.DEFAULTS).get(12)
+    for s in ('Yeah, you do not know my mind, you do not know my kind',
+              'in its right place', 'Playing the hand'):
+        for lines in (2, 3):
+            rows = oledd.wrap(s, 124, font, lines=lines)
+            if rows and ' '.join(rows).split() != s.split():
+                raise AssertionError(f'words changed: {rows}')
+
+
+@check('fit() truncates to the available width')
+def t_fit():
+    font = oledd.Fonts(oledd.DEFAULTS).get(12)
+    out = oledd.fit('Red Hot Chili Peppers - Dark Necessities', 80, font)
+    if oledd.text_width(out, font) > 80:
+        raise AssertionError(f'{out!r} still too wide')
+    if not out.endswith('..'):
+        raise AssertionError(f'{out!r} not marked as truncated')
+    eq(oledd.fit('short', 124, font), 'short', 'text that already fits')
+
+
+# --- bars ------------------------------------------------------------------
+
+@check('draw_bar() handles 0, tiny, half and full without crashing')
+def t_bar_edges():
+    for frac in (None, 0.0, 0.001, 0.01, 0.5, 0.999, 1.0, -5.0, 5.0):
+        img = Image.new('1', (W, H), 0)
+        oledd.draw_bar(img, (3, 2, 60, 8), frac)   # regression: 1% crashed here
+
+
+@check('draw_bar() fill scales with the fraction')
+def t_bar_monotonic():
+    def lit(frac):
+        img = Image.new('1', (W, H), 0)
+        oledd.draw_bar(img, (3, 2, 60, 8), frac)
+        px = img.load()
+        return sum(1 for x in range(W) for y in range(H) if px[x, y])
+    a, b, c = lit(0.0), lit(0.5), lit(1.0)
+    if not a < b < c:
+        raise AssertionError(f'not monotonic: 0%={a} 50%={b} 100%={c}')
+
+
+# --- sources ---------------------------------------------------------------
+
+class _Ctx:
+    def __init__(self):
+        self.cfg = oledd.load_config('/nonexistent')
+        self.fonts = oledd.Fonts(self.cfg)
+        self.s = None
+        self.wake = threading.Event()
+
+
+@check('LyricsSource renders every layout branch to a valid frame')
+def t_lyrics_layouts():
+    import json
+    import os
+    import time
+    ctx = _Ctx()
+    now = time.time()
+    cases = [
+        ('short', 'Playing the hand', True),
+        ('two rows', 'Blow by blow and go away', True),
+        ('three rows', "Yeah, you do not know my mind, you do not know my kind", True),
+        ('unsynced', '', False),
+    ]
+    for name, lyric, synced in cases:
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+            json.dump({'artist': 'Radiohead', 'title': 'Everything In Its Right Place',
+                       'playing': True, 'anchor_wall': now, 'anchor_pos': 42.0,
+                       'duration': 251.0, 'lyrics_synced': synced,
+                       'written_at': now,
+                       'lyrics': [[0.0, lyric]] if synced else []}, f)
+            path = f.name
+        try:
+            src = oledd.LyricsSource(ctx, path)
+            if not src.active(now):
+                raise AssertionError(f'{name}: source inactive')
+            img = src.render(now)
+            eq(img.size, (W, H), f'{name} frame size')
+            eq(img.mode, '1', f'{name} frame mode')
+        finally:
+            os.unlink(path)
+
+
+@check('LyricsSource goes inactive on stale or stopped state')
+def t_lyrics_inactive():
+    import json
+    import os
+    import time
+    ctx = _Ctx()
+    now = time.time()
+    # Note: paused is deliberately NOT here - it stays active for pause_hold
+    # seconds so the now-playing card lingers. See t_pause_hold.
+    for name, patch in (('stale', {'written_at': now - 999}),
+                        ('no title', {'title': ''})):
+        st = {'artist': 'A', 'title': 'T', 'playing': True, 'anchor_wall': now,
+              'anchor_pos': 0.0, 'duration': 100.0, 'lyrics_synced': False,
+              'written_at': now, 'lyrics': []}
+        st.update(patch)
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+            json.dump(st, f)
+            path = f.name
+        try:
+            if oledd.LyricsSource(ctx, path).active(now):
+                raise AssertionError(f'{name}: should be inactive')
+        finally:
+            os.unlink(path)
+
+
+@check('otsu_threshold() adapts to dark and bright images')
+def t_otsu():
+    # bimodal: half the pixels at 40, half at 200 -> cutoff between them
+    hist = [0] * 256
+    hist[40] = 500
+    hist[200] = 500
+    cut = oledd.otsu_threshold(hist)
+    if not 40 <= cut < 200:
+        raise AssertionError(f'bimodal cutoff {cut} not between the modes')
+    # a dark cover: everything under 60. A fixed 128 renders this black;
+    # otsu must land inside the actual range so detail survives.
+    hist = [0] * 256
+    for v in range(10, 60):
+        hist[v] = 20
+    cut = oledd.otsu_threshold(hist)
+    if not 10 <= cut < 60:
+        raise AssertionError(f'dark-image cutoff {cut} outside the data')
+    # a bright cover: everything over 200
+    hist = [0] * 256
+    for v in range(200, 250):
+        hist[v] = 20
+    cut = oledd.otsu_threshold(hist)
+    if not 200 <= cut < 250:
+        raise AssertionError(f'bright-image cutoff {cut} outside the data')
+    eq(oledd.otsu_threshold([0] * 256), 128, 'empty histogram falls back')
+
+
+@check('tile_score() ranks a blank tile worse than a structured one')
+def t_tile_score():
+    blank = Image.new('1', (34, 34), 0)
+    white = Image.new('1', (34, 34), 1)
+    half = Image.new('1', (34, 34), 0)
+    ImageDraw.Draw(half).rectangle([0, 0, 33, 16], fill=1)      # clean shapes
+    noise = Image.new('1', (34, 34), 0)
+    px = noise.load()
+    random.seed(3)
+    for y in range(34):
+        for x in range(34):
+            px[x, y] = random.randint(0, 1)
+    s_blank, s_white = oledd.tile_score(blank), oledd.tile_score(white)
+    s_half, s_noise = oledd.tile_score(half), oledd.tile_score(noise)
+    if not s_half < s_blank:
+        raise AssertionError(f'blank ({s_blank:.3f}) scored better than shapes ({s_half:.3f})')
+    if not s_half < s_white:
+        raise AssertionError(f'all-white ({s_white:.3f}) scored better than shapes')
+    if not s_half < s_noise:
+        raise AssertionError(f'noise ({s_noise:.3f}) scored better than shapes')
+
+
+@check('in_gap() finds intros, breaks, outros - not normal line spacing')
+def t_in_gap():
+    G = oledd.LyricsSource.in_gap
+    lyrics = [[10.0, 'first line'], [14.0, 'second line'], [40.0, 'after a break']]
+    cases = [
+        (0.0,  True,  'before the first line'),
+        (11.0, False, 'just after a line started'),
+        (14.5, False, 'normal 4s line spacing'),
+        (25.0, True,  'middle of a 26s instrumental break'),
+        (39.0, False, 'next line is imminent'),
+        (41.0, False, 'just after the last line'),
+        (60.0, True,  'outro, well past the last line'),
+    ]
+    for pos, want, why in cases:
+        got = G(lyrics, pos, 8.0)
+        if got != want:
+            raise AssertionError(f'pos={pos} ({why}): got {got}, want {want}')
+    # an explicit blank in the .lrc is always a gap
+    eq(G([[0.0, ''], [30.0, 'x']], 1.0, 8.0), True, 'blank lyric line')
+
+
+@check('LyricsSource holds the card briefly after a pause, then yields')
+def t_pause_hold():
+    import json
+    import os
+    import time
+    ctx = _Ctx()
+    now = time.time()
+    st = {'artist': 'A', 'title': 'T', 'playing': False, 'anchor_wall': now,
+          'anchor_pos': 5.0, 'duration': 100.0, 'lyrics_synced': False,
+          'written_at': now, 'lyrics': []}
+    with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+        json.dump(st, f)
+        path = f.name
+    try:
+        src = oledd.LyricsSource(ctx, path)
+        hold = ctx.cfg['lyrics']['pause_hold']
+        eq(src.active(now), True, 'just paused')
+        eq(src.active(now + hold / 2), True, 'inside the hold window')
+        eq(src.active(now + hold + 1), False, 'after the hold window')
+    finally:
+        os.unlink(path)
+
+
+@check('resuming playback clears the pause timer')
+def t_pause_reset():
+    import json
+    import os
+    import time
+    ctx = _Ctx()
+    now = time.time()
+    paused = {'artist': 'A', 'title': 'T', 'playing': False, 'anchor_wall': now,
+              'anchor_pos': 5.0, 'duration': 100.0, 'lyrics_synced': False,
+              'written_at': now, 'lyrics': []}
+    with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+        json.dump(paused, f)
+        path = f.name
+    try:
+        src = oledd.LyricsSource(ctx, path)
+        src.active(now)
+        # resume: rewrite the file as playing and force a reload
+        with open(path, 'w') as f:
+            json.dump({**paused, 'playing': True, 'written_at': now + 100}, f)
+        os.utime(path, (now + 100, now + 100))
+        src._checked = 0
+        eq(src.active(now + 100), True, 'playing again')
+        # pause once more; the window must restart, not count from the first pause
+        with open(path, 'w') as f:
+            json.dump({**paused, 'written_at': now + 200}, f)
+        os.utime(path, (now + 200, now + 200))
+        src._checked = 0
+        eq(src.active(now + 200), True, 'newly paused holds again')
+    finally:
+        os.unlink(path)
+
+
+def _qwen_ctx():
+    """A context whose QwenSource poll thread exits immediately, and which
+    cannot see the real machine: no Strata URL, no client processes."""
+    import threading
+    ctx = _Ctx()
+    ctx.stop = threading.Event()
+    ctx.stop.set()
+    ctx.cfg['qwen'].update(strata_url='', clients=[])
+    return ctx
+
+
+def _qwen(status, gen_seen=0.0):
+    """A QwenSource with its poller disabled and a qwen-status reading injected."""
+    src = oledd.QwenSource(_qwen_ctx())
+    src._view = oledd.LlamaBackend(src.ctx).view(status) if status is not None else None
+    src._gen_seen = gen_seen
+    return src
+
+
+@check('QwenSource yields when the stack is idle, claims the screen when busy')
+def t_qwen_gating():
+    import time
+    now = time.time()
+    base = {'model_up': True, 'proxy_up': True, 'ctx_size': 229376,
+            'gen_tok_s': 99.9, 'gpu': {}, 'ts': now,
+            'prefill': {'tokens_done': 10, 'fraction': 1.0, 'complete': True}}
+    cases = [
+        ('idle, generation long ago', {**base}, 0.0, False),
+        ('prefill in progress',
+         {**base, 'prefill': {**base['prefill'], 'complete': False}}, 0.0, True),
+        ('model died under a running proxy', {**base, 'model_up': False}, 0.0, True),
+        # Both down is the stack switched off - the state at every boot. It
+        # used to claim the screen as MODEL DOWN until the model was started.
+        ('stack off', {**base, 'model_up': False, 'proxy_up': False}, 0.0, False),
+        ('stack off, old prefill left behind',
+         {**base, 'model_up': False, 'proxy_up': False,
+          'prefill': {**base['prefill'], 'complete': False}}, 0.0, False),
+        ('generation just finished', {**base}, now, True),
+        ('no prefill yet', {**base, 'prefill': None}, 0.0, False),
+        ('status unavailable', None, 0.0, False),
+    ]
+    for name, st, seen, want in cases:
+        got = _qwen(st, seen).active(now)
+        if got != want:
+            raise AssertionError(f'{name}: active={got}, want {want}')
+
+
+@check('QwenSource fires on a turn finishing, not on a wobbling rate')
+def t_qwen_completion_trigger():
+    import time
+    src = oledd.QwenSource(_qwen_ctx())
+    idle = oledd.qwen_view(up=True, state='idle', last_tps=24.9)
+
+    # a rolling rate that merely wobbles must not look like fresh output;
+    # this ping-ponged with the lyrics view every 10s in practice
+    for rate in (24.9, 24.3, 99.9, 24.3):
+        src._set_view({**idle, 'last_tps': rate})
+    eq(src.active(time.time()), False, 'wobbling rate must not activate')
+
+    # leaving a busy state is news, and stays news for GEN_FRESH
+    for busy in ('reading', 'generating'):
+        src._gen_seen = 0.0
+        src._set_view({**idle, 'state': busy})
+        eq(src.active(time.time()), True, f'{busy}: active while busy')
+        src._set_view(idle)
+        eq(src.active(time.time()), True, f'{busy} -> idle: activates')
+        eq(src.active(time.time() + src.GEN_FRESH + 1), False,
+           f'{busy} -> idle: yields after GEN_FRESH')
+
+
+@check('live decode rate comes from n_decoded deltas, not the stale average')
+def t_qwen_live_rate():
+    import io
+    import json as _json
+    import urllib.request
+
+    ctx = _qwen_ctx()
+    ctx.cfg['qwen']['slots_url'] = 'http://stub/slots'
+    be = oledd.LlamaBackend(ctx)
+
+    clock = [1000.0]
+    real_time, real_open = oledd.time.time, urllib.request.urlopen
+    slot = {'n_prompt_tokens': 210000, 'n_ctx': 229376, 'is_processing': True,
+            'next_token': [{'n_decoded': 0}]}
+
+    class Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_open(*a, **k):
+        return Resp(_json.dumps([slot]).encode())
+
+    oledd.time.time = lambda: clock[0]
+    urllib.request.urlopen = fake_open
+    try:
+        # 20 tokens per second, sampled once a second
+        for i in range(5):
+            slot['next_token'][0]['n_decoded'] = i * 20
+            clock[0] = 1000.0 + i
+            be._poll_slots()
+        if not (18 <= be._rate.tps <= 22):
+            raise AssertionError(f'expected ~20 tok/s, got {be._rate.tps}')
+        eq(be._ctx_used, (210000, 229376), 'context occupancy')
+        v = be.view({'model_up': True, 'gen_tok_s': 99.9})
+        eq((v['state'], v['live_tps'], v['ctx']),
+           ('generating', be._rate.tps, (210000, 229376)), 'view mid-turn')
+
+        # a new turn restarts the count; the stale rate must be dropped
+        slot['next_token'][0]['n_decoded'] = 3
+        clock[0] += 1
+        be._poll_slots()
+        eq(be._rate.tps, None, 'rate cleared when n_decoded goes backwards')
+
+        # once the turn ends there is no live rate at all
+        slot['is_processing'] = False
+        clock[0] += 1
+        be._poll_slots()
+        eq(be._rate.tps, None, 'no live rate while idle')
+    finally:
+        oledd.time.time = real_time
+        urllib.request.urlopen = real_open
+
+
+@check('a stale prefill does not pin QwenSource active forever')
+def t_qwen_stale_prefill():
+    import time
+    now = time.time()
+    # qwen-status leaves the last prefill behind when a request is interrupted:
+    # "72% done, eta 63s" while the server is idle. Believing it locked every
+    # other view off the panel indefinitely.
+    stale = {'model_up': True, 'ctx_size': 262144, 'gen_tok_s': 51.9,
+             'gpu': {}, 'prefill': {'complete': False, 'fraction': 0.72,
+                                    'tokens_done': 124373, 'eta_s': 62.9}}
+    src = oledd.QwenSource(_qwen_ctx())
+    be = oledd.LlamaBackend(src.ctx)
+
+    def active(processing, ctx_used):
+        be._processing, be._ctx_used = processing, ctx_used
+        src._view = be.view(stale)
+        return src.active(now)
+
+    # /slots says nothing is running
+    eq(active(False, (123760, 262144)), False, 'stale prefill with an idle server')
+    eq(src._view['state'], 'idle', 'and it is drawn as idle, not a frozen bar')
+    # the same state while the server really is working stays active
+    eq(active(True, (123760, 262144)), True,
+       'prefill with the server actually processing')
+    # and with no /slots to cross-check, trust the status file
+    eq(active(False, None), True, 'no /slots available, fall back to trusting it')
+
+
+@check('QwenSource survives nulls and junk without crashing')
+def t_qwen_null_safe():
+    import time
+    now = time.time()
+    for name, st in (
+            ('all nulls', {'model_up': True, 'proxy_up': True, 'ctx_size': None,
+                           'prefill': None, 'gen_tok_s': None, 'gpu': None,
+                           'ts': now}),
+            ('empty dict', {}),
+            ('partial prefill', {'model_up': True, 'ctx_size': 229376,
+                                 'prefill': {'complete': False}, 'gpu': None}),
+            ('zero ctx', {'model_up': True, 'ctx_size': 0, 'prefill': None,
+                          'gen_tok_s': 0.0, 'gpu': {}}),
+            ('null gpu readings', {'model_up': True, 'prefill': None,
+                                   'gpu': {'util_pct': None, 'power_w': None,
+                                           'temp_c': None}}),
+    ):
+        img = _qwen(st).render(now)
+        if img is not None:
+            eq(img.size, (W, H), f'{name} frame size')
+
+
+@check('QwenSource treats a failing qwen-status as "no idea", not a crash')
+def t_qwen_command_failure():
+    import time
+    ctx = _qwen_ctx()
+    ctx.cfg['qwen']['command'] = '/nonexistent/qwen-status-missing'
+    src = oledd.QwenSource(ctx)
+    src._poll_once()                    # must not raise
+    eq(src._view, None, 'view after a failed command')
+    eq(src.active(time.time()), False, 'inactive when status is unknown')
+    eq(src.render(time.time()), None, 'renders nothing when status is unknown')
+
+
+# Shapes recorded from a live Strata 0.1.39 (flashnext-serve) during omp turns.
+_STRATA_HEALTH = {'status': 'ok', 'max_context': 131072, 'loaded': True,
+                  'model': 'flashnext-abliterated-iq2_xs', 'service': 'strata'}
+_STRATA_LAST = {'prompt_tokens': 22958, 'reused': 22927, 'output_tokens': 34,
+                'prompt_total': 22958, 'prompt_read': 31, 'decode_tok_s': 67.4,
+                'finish': 'stop'}
+_STRATA_HW = {'gpu_util': 96, 'gpu_temp': 74, 'gpu_power': 135.6,
+              'gpu_mem_used': 25428885504, 'gpu_mem_total': 25651314688}
+
+
+def _strata_metrics(**live):
+    base = {'state': 'idle', 'queued': 0, 'phase': None, 'prompt_tokens': None,
+            'prompt_read': None, 'prompt_total': None, 'generated': None,
+            'elapsed_s': None, 'tok_s': None, 'prefill_tok_s_mean': None}
+    return {'engine': {'max_context': 131072}, 'live': {**base, **live},
+            'requests': [_STRATA_LAST], 'hardware': _STRATA_HW}
+
+
+@check('StrataBackend maps /health + /metrics onto the shared view')
+def t_strata_views():
+    be = oledd.StrataBackend(_qwen_ctx())
+    now = 1000.0
+
+    # before the first chunk lands, only the prompt length is known
+    v = be.view(_STRATA_HEALTH, _strata_metrics(
+        state='reading', phase='reading the prompt', prompt_tokens=7927,
+        generated=0, elapsed_s=5.0), now)
+    eq((v['up'], v['state']), (True, 'reading'), 'early prefill state')
+    eq((v['prefill']['frac'], v['prefill']['total'], v['prefill']['rate'],
+        v['prefill']['eta'], v['prefill']['elapsed']), (0.0, 7927, None, None, 5.0),
+       'early prefill numbers')
+
+    v = be.view(_STRATA_HEALTH, _strata_metrics(
+        state='reading', prompt_tokens=7927, prompt_read=3000,
+        prompt_total=7927, prefill_tok_s_mean=1000.0), now)
+    pf = v['prefill']
+    eq((pf['done'], pf['total'], pf['rate']), (3000, 7927, 1000.0), 'mid prefill')
+    if abs(pf['frac'] - 3000 / 7927) > 1e-9 or abs(pf['eta'] - 4.927) > 1e-9:
+        raise AssertionError(f'frac/eta: {pf}')
+
+    v = be.view(_STRATA_HEALTH, _strata_metrics(
+        state='generating', phase='thinking', prompt_tokens=9555,
+        generated=137, tok_s=46.4), now)
+    eq(v['state'], 'generating', 'generating state')
+    eq(v['ctx'], (9555 + 137, 131072), 'context while generating: prompt + output')
+    eq(v['last_tps'], 67.4, 'previous turn rate')
+    eq(v['gpu'], {'util_pct': 96, 'power_w': 135.6, 'temp_c': 74}, 'gpu')
+
+    v = be.view(_STRATA_HEALTH, _strata_metrics(), now)
+    eq((v['state'], v['prefill'], v['live_tps']), ('idle', None, None), 'idle')
+    eq(v['ctx'], (22958 + 34, 131072), 'context at rest: the last turn')
+
+    # Strata frees the GPU after a quiet spell; a request then waits ~60s on
+    # the weights, which is worth showing, unlike the unloaded state itself
+    cold = {**_STRATA_HEALTH, 'loaded': False}
+    eq(be.view(cold, _strata_metrics(state='reading', prompt_tokens=500), now)['state'],
+       'loading', 'request waiting on the weights')
+    eq(be.view(cold, _strata_metrics(state='unloaded'), now)['state'],
+       'unloaded', 'unloaded')
+    eq(be.view(cold, {}, now)['state'], 'unloaded', 'unloaded, no metrics')
+    eq(be.view(_STRATA_HEALTH, {}, now)['state'], 'idle', 'up, no metrics')
+
+
+@check('StrataBackend smooths the decode rate and drops it between turns')
+def t_strata_rate():
+    be = oledd.StrataBackend(_qwen_ctx())
+    gen = lambda n: _strata_metrics(state='generating', prompt_tokens=9555,
+                                    generated=n)
+    # speculative decoding lands tokens in bursts: 40, 80, 40, 80 a second
+    n, t = 0, 1000.0
+    for step in (40, 80, 40, 80, 40, 80):
+        n, t = n + step, t + 1.0
+        v = be.view(_STRATA_HEALTH, gen(n), t)
+    if not (50 <= v['live_tps'] <= 70):
+        raise AssertionError(f'expected ~60 tok/s, got {v["live_tps"]}')
+    v = be.view(_STRATA_HEALTH, _strata_metrics(), t + 1)
+    eq(v['live_tps'], None, 'no live rate once idle')
+    be.view(_STRATA_HEALTH, gen(400), t + 2)
+    v = be.view(_STRATA_HEALTH, gen(5), t + 3)
+    eq(v['live_tps'], None, 'a new turn restarts the count')
+
+
+@check('StrataBackend reads an unreachable server as stack off')
+def t_strata_unreachable():
+    ctx = _qwen_ctx()
+    be = oledd.StrataBackend(ctx)
+    eq(be.poll(), None, 'no URL configured: no opinion')
+    ctx.cfg['qwen']['strata_url'] = 'http://127.0.0.1:9'     # discard: refused
+    v = be.poll()
+    eq((v['backend'], v['up'], v['broken'], v['state']),
+       ('strata', False, False, 'off'), 'refused connection')
+
+
+class _FakeBackend:
+    def __init__(self, name, view, idle_poll=5.0):
+        self.name, self.idle_poll, self._v, self.polled = name, idle_poll, view, 0
+
+    def poll(self):
+        self.polled += 1
+        return self._v
+
+
+@check('QwenSource picks the server that is up, and alarms for a stranded client')
+def t_qwen_backend_choice():
+    real = oledd.process_running
+    up = lambda name: oledd.qwen_view(backend=name, up=True, state='idle')
+    off = lambda name, broken=False: oledd.qwen_view(backend=name, broken=broken)
+
+    def run(strata, llama, backend='auto', client=False):
+        src = oledd.QwenSource(_qwen_ctx())
+        src.ctx.cfg['qwen']['backend'] = backend
+        fakes = [_FakeBackend('strata', strata), _FakeBackend('llama', llama)]
+        src._backends = {b.name: b for b in fakes}
+        oledd.process_running = lambda names: client
+        src._poll_once()
+        return src._view, fakes
+
+    try:
+        v, (s, l) = run(up('strata'), up('llama'))
+        eq((v['backend'], l.polled), ('strata', 0), 'Strata first; llama not polled')
+        v, _ = run(off('strata'), up('llama'))
+        eq(v['backend'], 'llama', 'falls back to llama.cpp')
+        v, _ = run(off('strata'), off('llama'))
+        eq((v['up'], v['broken']), (False, False), 'both off: stack off, quiet')
+        v, _ = run(off('strata'), None)
+        eq((v['up'], v['broken']), (False, False), 'qwen-status missing: still off')
+        v, _ = run(off('strata'), off('llama'), client=True)
+        eq(v['broken'], True, 'omp running with nothing to talk to')
+        v, _ = run(off('strata'), off('llama', broken=True))
+        eq(v['broken'], True, 'llama proxy up, model down')
+        v, _ = run(up('strata'), up('llama'), client=True)
+        eq(v['broken'], False, 'a client with a server up is fine')
+        v, (s, l) = run(up('strata'), up('llama'), backend='llama')
+        eq((v['backend'], s.polled), ('llama', 0), 'backend pinned to llama')
+        v, _ = run(None, None)
+        eq(v, None, 'nobody could tell')
+    finally:
+        oledd.process_running = real
+
+
+@check('MODEL DOWN interrupts, then yields so it cannot burn in')
+def t_qwen_alarm_hold():
+    import time
+    src = oledd.QwenSource(_qwen_ctx())
+    down = oledd.qwen_view(backend='strata', broken=True)
+    now = time.time()
+    src._set_view(down)
+    eq(src.active(now), True, 'fresh alarm takes the screen')
+    src._set_view(down)                 # still down on the next poll
+    eq(src.active(now + src.ALARM_HOLD - 1), True, 'held for ALARM_HOLD')
+    eq(src.active(now + src.ALARM_HOLD + 1), False, 'then yields')
+    if src.render(now + src.ALARM_HOLD + 1) is None:
+        raise AssertionError('still drawable when pinned')
+    # recovering and failing again is a new alarm
+    src._set_view(oledd.qwen_view(backend='strata', up=True, state='idle'))
+    src._set_view(down)
+    eq(src.active(time.time()), True, 'a new failure alarms again')
+
+
+@check('process_running finds programs by name, interpreters included')
+def t_process_running():
+    with open('/proc/self/cmdline', 'rb') as f:
+        argv = [a.decode() for a in f.read().split(b'\0') if a]
+    eq(oledd.process_running([os.path.basename(argv[0])]), True, 'argv[0]')
+    eq(oledd.process_running([os.path.basename(argv[1])]), True,
+       'argv[1], as with `bun /path/to/omp`')
+    eq(oledd.process_running(['no-such-program-apex-oled']), False, 'absent')
+    eq(oledd.process_running([]), False, 'nothing to look for')
+
+
+@check('QwenSource draws every Strata state, junk included')
+def t_strata_render():
+    src = oledd.QwenSource(_qwen_ctx())
+    be = oledd.StrataBackend(src.ctx)
+    cold = {**_STRATA_HEALTH, 'loaded': False}
+    for name, health, metrics in (
+            ('early prefill', _STRATA_HEALTH,
+             _strata_metrics(state='reading', prompt_tokens=7927, elapsed_s=9.0)),
+            ('mid prefill', _STRATA_HEALTH,
+             _strata_metrics(state='reading', prompt_read=3000,
+                             prompt_total=7927, prefill_tok_s_mean=1000.0)),
+            ('generating', _STRATA_HEALTH,
+             _strata_metrics(state='generating', prompt_tokens=9555, generated=1)),
+            ('idle', _STRATA_HEALTH, _strata_metrics()),
+            ('loading', cold, _strata_metrics(state='reading')),
+            ('unloaded', cold, _strata_metrics(state='unloaded')),
+            ('empty', {}, {}),
+            ('null blocks', _STRATA_HEALTH,
+             {'live': None, 'requests': None, 'hardware': None, 'engine': None}),
+            ('junk request', _STRATA_HEALTH, {'requests': ['x'], 'live': {}}),
+            ('null gpu readings', _STRATA_HEALTH,
+             {'hardware': {'gpu_util': 5, 'gpu_power': None, 'gpu_temp': None}}),
+    ):
+        src._view = be.view(health, metrics, 1000.0)
+        img = src.render(1000.0)
+        eq(img.size, (W, H), f'{name} frame size')
+        if name in ('loading', 'unloaded', 'mid prefill', 'generating'):
+            if img.getbbox() is None:
+                raise AssertionError(f'{name}: blank frame')
+
+
+@check('si_k / short_secs format for a 128px panel')
+def t_formatters():
+    eq(oledd.si_k(999), '999', 'sub-thousand')
+    eq(oledd.si_k(200759), '201k', 'thousands')
+    eq(oledd.si_k(2_400_000), '2.4M', 'millions')
+    eq(oledd.short_secs(34), '34s', 'seconds')
+    eq(oledd.short_secs(0), '0s', 'zero')
+    eq(oledd.short_secs(-5), '0s', 'negative clamps')
+    eq(oledd.short_secs(154), '2m34s', 'minutes and seconds')
+    eq(oledd.short_secs(3700), '1h01m', 'hours')
+
+
+@check('NotifySource expires its frame')
+def t_notify_expiry():
+    import time
+    ctx = _Ctx()
+    n = oledd.NotifySource(ctx)
+    now = time.time()
+    eq(n.active(now), False, 'empty notify source')
+    n.push(Image.new('1', (W, H), 0), 0.5)
+    eq(n.active(now), True, 'just pushed')
+    eq(ctx.wake.is_set(), True, 'a push wakes a blanked main loop')
+    eq(n.active(now + 5), False, 'after expiry')
+
+
+@check('hotkey bindings parse into evdev codes')
+def t_hotkey_bindings():
+    import threading
+    ctx = _Ctx()
+    ctx.stop = threading.Event()
+    ctx.cfg['hotkeys'] = {'enabled': True, 'modifier': 'rightmeta',
+                          'bindings': {'o': 'cycle', 'F1': 'mode:idle',
+                                       'nonsense': 'mode:idle', '9': 'blank'}}
+    h = oledd.Hotkeys(ctx, lambda a: None)
+    eq(h.mod, 126, 'rightmeta code')
+    eq(h.bindings.get(24), 'cycle', 'o -> KEY_O(24)')
+    eq(h.bindings.get(59), 'mode:idle', 'F1 -> KEY_F1(59), case-insensitive')
+    eq(h.bindings.get(10), 'blank', '9 -> KEY_9(10)')
+    eq(len(h.bindings), 3, 'unknown key names are dropped, not fatal')
+    # left vs right meta must not collapse to the same code
+    ctx.cfg['hotkeys']['modifier'] = 'leftmeta'
+    eq(oledd.Hotkeys(ctx, lambda a: None).mod, 125, 'leftmeta code')
+
+
+@check('hotkey actions cycle, pin and blank')
+def t_hotkey_actions():
+    import threading
+    from PIL import Image
+    ctx = _Ctx()
+    ctx.stop = threading.Event()
+    ctx.stop.set()
+    ctx.forced_mode, ctx.blank_override = None, False
+    ctx.render_lines = lambda *a, **k: Image.new('1', (W, H), 0)
+    ctx.notify = oledd.NotifySource(ctx)
+
+    class Fake:
+        def __init__(self, n):
+            self.name = n
+    ctx.sources = [ctx.notify] + [Fake(n) for n in ('game', 'qwen', 'lyrics', 'idle')]
+    h = oledd.make_action_handler(ctx)
+
+    seen = []
+    for _ in range(6):
+        h('cycle')
+        seen.append(ctx.forced_mode)
+    # cycles through every mode and returns to auto (None)
+    eq(seen, ['idle', 'lyrics', 'qwen', 'game', None, 'idle'], 'cycle order')
+
+    h('mode:lyrics')
+    eq(ctx.forced_mode, 'lyrics', 'pin a mode')
+    h('mode:auto')
+    eq(ctx.forced_mode, None, 'back to auto')
+    h('blank')
+    eq(ctx.blank_override, True, 'blank on')
+    h('blank')
+    eq(ctx.blank_override, False, 'blank off')
+    h('nonsense')                       # must not raise
+    eq(ctx.forced_mode, None, 'unknown action changes nothing')
+    # pinning a mode clears a manual blank, so the panel cannot get stuck dark
+    ctx.blank_override = True
+    h('mode:idle')
+    eq(ctx.blank_override, False, 'pinning a mode unblanks')
+
+
+@check('config defaults load when the file is missing or broken')
+def t_config():
+    cfg = oledd.load_config('/nonexistent/config.toml')
+    eq(cfg['display']['blank_on_lock'], True, 'default blank_on_lock')
+    with tempfile.NamedTemporaryFile('w', suffix='.toml', delete=False) as f:
+        f.write('this is not valid toml {{{')
+        bad = f.name
+    cfg = oledd.load_config(bad)
+    eq(cfg['fonts']['family'], 'condensed', 'defaults survive a broken file')
+    with tempfile.NamedTemporaryFile('w', suffix='.toml', delete=False) as f:
+        f.write('[fonts]\nui_size = 99\n')
+        good = f.name
+    cfg = oledd.load_config(good)
+    eq(cfg['fonts']['ui_size'], 99, 'override applied')
+    eq(cfg['fonts']['family'], 'condensed', 'unspecified keys keep defaults')
+
+
+@check('compose() keeps the burn-in shift inside the panel')
+def t_compose_bounds():
+    cfg = oledd.load_config('/nonexistent')
+    src = Image.new('1', (W, H), 1)
+    for t in range(0, 1200, 7):
+        out = oledd.compose(src, float(t), cfg)
+        eq(out.size, (W, H), 'composed size')
+
+
+# --- input devices ---------------------------------------------------------
+
+def _fake_input(root, node, name, key='0', rel='0', abs_='0', props='0'):
+    """A /sys/class/input/eventN directory with just what the daemon reads.
+
+    Bitmaps are given exactly as the kernel prints them; the defaults in the
+    checks below were copied from real devices.
+    """
+    dev = os.path.join(root, node, 'device')
+    os.makedirs(os.path.join(dev, 'capabilities'))
+    for rel_path, text in (('name', name), ('properties', props),
+                           ('capabilities/key', key), ('capabilities/rel', rel),
+                           ('capabilities/abs', abs_)):
+        with open(os.path.join(dev, rel_path), 'w') as f:
+            f.write(text + '\n')
+    return os.path.join(root, node)
+
+
+@check('evdev_caps() reads unpadded sysfs bitmaps as one bit per code')
+def t_evdev_caps():
+    root = tempfile.mkdtemp()
+    # A touchpad: BTN_LEFT (272) in the fifth word, BTN_TOOL_FINGER (325) and
+    # BTN_TOUCH (330) in the sixth, every lower word printed as a bare "0".
+    pad = _fake_input(root, 'event5', 'Touchpad', key='e520 10000 0 0 0 0')
+    keys = oledd.evdev_caps(pad, 'capabilities/key')
+    for code in (272, 325, 330):
+        eq(keys >> code & 1, 1, f'code {code} set')
+    for code in (0, 30, 271, 273, 324):
+        eq(keys >> code & 1, 0, f'code {code} clear')
+    eq(oledd.evdev_caps(pad, 'capabilities/rel'), 0, 'empty bitmap')
+    eq(oledd.evdev_caps(pad, 'no/such/file'), 0, 'missing file reads as empty')
+
+
+# --- away from keyboard ----------------------------------------------------
+
+# (node, name, key, rel, abs, props, watched?) - bitmaps from a real machine.
+_DEVICES = [
+    ('event0', 'Lid Switch', '0', '0', '0', '0', False),
+    ('event1', 'Power Button', '8000 10000000000000 0', '0', '0', '0', False),
+    ('event3', 'AT Translated Set 2 keyboard',
+     '402000007 ff803078f800d001 feffffdfffcfffff fffffffffffffffe',
+     '0', '0', '0', True),
+    ('event5', 'GXTP5100:00 27C6:01E0 Touchpad', 'e520 10000 0 0 0 0', '0',
+     '2e0800000000003', '5', True),
+    ('event9', 'Video Bus', '3e000b00000000 0 0 0', '0', '0', '0', False),
+    ('event17', 'SteelSeries Aerox 9 Wireless', 'ff0000 0 0 0 0', '1943',
+     '10000000000', '0', True),
+    ('event22', 'sof-hda-dsp Headphone',
+     '40 0 0 0 0 0 0 1000000000 c000000000000 0', '0', '0', '0', False),
+    ('event26', 'SteelSeries Apex Pro Gen 3',
+     '1000000000007 ff9f207ac14057ff febeffdfffefffff fffffffffffffffe',
+     '0', '0', '0', True),
+    # Media keys only: taking the headphones off sends a pause, which must
+    # not count as sitting down at the desk.
+    ('event257', 'AirPods Max (AVRCP)',
+     '2fc800 145200000000 0 10300 49e800000c00 e16800000000f f810000010000ffc',
+     '0', '0', '0', False),
+    # Gamepad (BTN_SOUTH, 304) and its separate motion-sensor node.
+    ('event40', 'Xbox Wireless Controller', '7fdb000000000000 0 0 0 0',
+     '0', '3003f', '0', True),
+    ('event41', 'Controller Motion Sensors', '0', '0', '3f', '40', False),
+    ('event42', 'Pad With Sensors Built In', '7fdb000000000000 0 0 0 0',
+     '0', '3003f', '40', False),
+    # Synthetic input - matched by name against the default afk_ignore.
+    ('event12', 'ydotoold virtual device', 'ffffffffff 0 fffffffffffffffe',
+     '147', '0', '0', False),
+    ('event30', 'Mouse passthrough', 'ff0000 0 0 0 0', '1943', '0', '0', False),
+    ('event43', 'Sunshine X-Box One (virtual) pad', '7fdb000000000000 0 0 0 0',
+     '0', '3003f', '0', False),
+]
+
+
+def _fake_inputs(devices=_DEVICES):
+    sysfs, dev = tempfile.mkdtemp(), tempfile.mkdtemp()
+    for node, name, key, rel, abs_, props, _ in devices:
+        _fake_input(sysfs, node, name, key, rel, abs_, props)
+    return sysfs, dev
+
+
+def _ev(etype, code, value):
+    return oledd.Presence.EVENT.pack(0, 0, etype, code, value)
+
+
+SYN = _ev(0, 0, 0)
+
+
+@check('Presence watches keyboards, pointers and pads - not switches or synthetics')
+def t_presence_wanted():
+    sysfs, _ = _fake_inputs()
+    ignore = oledd.DEFAULTS['display']['afk_ignore']
+    for node, name, *_, want in _DEVICES:
+        got = oledd.Presence.wanted(os.path.join(sysfs, node), ignore) is not None
+        if got != want:
+            raise AssertionError(f'{name}: watched={got}, want {want}')
+    # The ignore list is what drops synthetics; without it they count.
+    eq(oledd.Presence.wanted(os.path.join(sysfs, 'event12')) is not None, True,
+       'ydotoold without an ignore list')
+
+
+@check('Presence counts presses and motion, not autorepeat or bookkeeping')
+def t_presence_is_input():
+    P = oledd.Presence
+    cases = [
+        ('key down', _ev(4, 4, 30) + _ev(1, 30, 1) + SYN, True),
+        ('key up', _ev(1, 30, 0) + SYN, True),
+        ('autorepeat only', _ev(1, 30, 2) + SYN + _ev(1, 30, 2) + SYN, False),
+        ('mouse motion', _ev(2, 0, -3) + _ev(2, 1, 1) + SYN, True),
+        ('stick or touch', _ev(3, 0, 1200) + SYN, True),
+        ('sync and scancodes only', SYN + _ev(4, 4, 30) + SYN, False),
+        ('empty read', b'', False),
+        ('trailing partial event', _ev(1, 30, 1) + b'\x00' * 7, True),
+    ]
+    for name, data, want in cases:
+        eq(P.is_input(data), want, name)
+
+
+@check('Presence scan opens wanted nodes once, and retries ones it could not open')
+def t_presence_scan():
+    import threading
+    sysfs, dev = _fake_inputs()
+    ctx = _Ctx()
+    ctx.stop = threading.Event()
+    p = oledd.Presence(ctx, 5, oledd.DEFAULTS['display']['afk_ignore'])
+    p.SYSFS, p.DEV = sysfs, dev
+    try:
+        p.scan()
+        eq(p.fds, {}, 'no device nodes yet (unreadable)')
+        p.last_input -= 3600
+        eq(p.away(), False, 'nothing watched is never away')
+        # Regular files stand in for the /dev nodes; the hotplug case is a
+        # node that failed to open (udev had not set its group yet) and must
+        # be picked up on the next pass, not skipped forever.
+        for node, *_ in _DEVICES:
+            open(os.path.join(dev, node), 'w').close()
+        p.scan()
+        want = sorted(os.path.join(dev, n) for n, *_, w in _DEVICES if w)
+        eq(sorted(p.fds), want, 'watched nodes')
+        eq(p.away(), False, 'first devices restart the clock')
+        fds = dict(p.fds)
+        p.scan()
+        eq(p.fds, fds, 'a rescan does not reopen')
+    finally:
+        p.close()
+
+
+@check('Presence drops a node that hits EOF or an error (unplugged)')
+def t_presence_unplug():
+    import threading
+    ctx = _Ctx()
+    ctx.stop = threading.Event()
+    p = oledd.Presence(ctx, 5)
+    r, w = os.pipe()
+    p.fds['/dev/input/event99'] = r
+    try:
+        os.write(w, _ev(1, 30, 1) + SYN)
+        eq(p.drain([r]), True, 'a keypress')
+        os.write(w, _ev(1, 30, 2) + SYN)
+        eq(p.drain([r]), False, 'autorepeat alone')
+        eq(p.drain([]), False, 'nothing ready')
+        os.close(w)
+        eq(p.drain([r]), False, 'EOF is not input')
+        eq(p.fds, {}, 'node dropped')
+    finally:
+        p.close()
+
+
+@check('Presence thread notices input on a watched fd')
+def t_presence_thread():
+    import threading
+    import time
+    ctx = _Ctx()
+    ctx.stop = threading.Event()
+    p = oledd.Presence(ctx, 1 / 60)         # one second
+    p.SYSFS = tempfile.mkdtemp()            # nothing real to find
+    r, w = os.pipe()
+    p.fds['/dev/input/event99'] = r
+    p.last_input -= 10
+    eq(p.away(), True, 'away before any input')
+    p.start()
+    try:
+        os.write(w, _ev(2, 0, 5) + SYN)
+        deadline = time.monotonic() + 3
+        while p.away() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        eq(p.away(), False, 'back after mouse motion')
+        eq(ctx.wake.is_set(), True, 'main loop woken')
+        if p.idle_for() > 1:
+            raise AssertionError(f'idle_for {p.idle_for():.1f}s after input')
+    finally:
+        ctx.stop.set()
+        p.join(3)
+        os.close(w)
+    eq(p.is_alive(), False, 'thread stops with the daemon')
+
+
+@check('should_blank: lock and manual are absolute, absence yields to notify')
+def t_should_blank():
+    import time
+
+    class _Sess:
+        def __init__(self, **kw): self.d = kw
+        def session(self): return self.d
+
+    class _Away:
+        def __init__(self, away): self._away = away
+        def away(self): return self._away
+
+    def why(locked=False, idle=False, away=None, notify=False, manual=False,
+            on_idle=False):
+        ctx = _Ctx()
+        ctx.cfg['display']['blank_on_idle'] = on_idle
+        ctx.s = _Sess(locked=locked, idle=idle)
+        ctx.blank_override = manual
+        ctx.presence = None if away is None else _Away(away)
+        ctx.notify = oledd.NotifySource(ctx)
+        if notify:
+            ctx.notify.push(Image.new('1', (W, H), 0), 5)
+        return oledd.Context.should_blank(ctx, time.time())
+
+    eq(why(), None, 'nothing to blank for')
+    eq(why(away=False), None, 'someone is here')
+    eq(why(away=True), 'away', 'nobody is here')
+    eq(why(away=True, notify=True), None, 'a pushed frame still shows')
+    eq(why(locked=True, away=True, notify=True), 'locked', 'lock beats notify')
+    eq(why(manual=True, notify=True), 'manual', 'manual beats notify')
+    eq(why(idle=True), None, 'IdleHint ignored unless blank_on_idle')
+    eq(why(idle=True, on_idle=True), 'idle', 'IdleHint with blank_on_idle')
+    eq(why(idle=True, on_idle=True, notify=True), None, 'idle yields to notify')
+
+
+@check('AFK blanking is on by default at five minutes')
+def t_afk_defaults():
+    cfg = oledd.load_config('/nonexistent')
+    eq(cfg['display']['afk_minutes'], 5, 'default timeout')
+    eq('ydotoold' in cfg['display']['afk_ignore'], True, 'synthetic input ignored')
+    # A bare string must be one pattern, not one per letter.
+    eq(oledd.Presence(_Ctx(), 5, 'ydotoold').ignore, ['ydotoold'], 'string ignore')
+
+
+@check('every section in config.example.toml matches DEFAULTS')
+def t_config_example():
+    import tomllib
+    with open(os.path.join(_HERE, 'config.example.toml'), 'rb') as f:
+        example = tomllib.load(f)
+    # Its header promises "everything here matches the built-in defaults";
+    # a section may be left out, but one that is there must be whole.
+    for section, values in example.items():
+        eq(values, oledd.DEFAULTS.get(section), f'[{section}]')
+
+
+# --- any script ------------------------------------------------------------
+
+@check('clusters keep marks, flags, skin tones and ZWJ sequences whole')
+def t_clusters():
+    eq(apex.clusters('éa'), ['é', 'a'], 'combining accent')
+    eq(apex.clusters('नमस्ते'), ['न', 'म', 'स्', 'ते'], 'Devanagari signs')
+    eq(len(apex.clusters('\U0001F1EF\U0001F1F5\U0001F1FA\U0001F1F8')), 2, 'two flags')
+    eq(len(apex.clusters('\U0001F44D\U0001F3FD')), 1, 'skin tone')
+    eq(len(apex.clusters('\U0001F468‍\U0001F469‍\U0001F467')), 1,
+       'ZWJ family')
+
+
+@check('FontChain falls back per character and keeps the primary metrics')
+def t_fontchain():
+    font = oledd.Fonts(oledd.load_config('/nonexistent')).get(12)
+    if not isinstance(font, apex.FontChain):
+        return                          # no freetype: nothing to fall back in
+    eq(font.getmetrics(), font.primary.getmetrics(), 'metrics')
+    latin = apex.visual_runs('Distortion', font.faces)
+    eq(len(latin), 1, 'Latin is one run')
+    eq(latin[0][1] is font.faces.primary, True, 'Latin stays on the primary')
+    jp = apex.visual_runs('結束バンド', font.faces)
+    if jp[0][1] is font.faces.primary:
+        return                          # no CJK font installed on this machine
+    eq(len(jp), 1, 'Japanese is one run')
+    # Drawing must ink something real, not the primary's empty-box glyph.
+    a, b = Image.new('1', (40, 20), 0), Image.new('1', (40, 20), 0)
+    font.draw(ImageDraw.Draw(a), (0, 0), '結', 1)
+    ImageDraw.Draw(b).text((0, 0), '結', font=font.primary, fill=1)
+    if a.tobytes() == b.tobytes():
+        raise AssertionError('CJK drew the same as the primary font (a box)')
+
+
+@check('right-to-left runs come out in display order')
+def t_bidi():
+    font = oledd.Fonts(oledd.load_config('/nonexistent')).get(12)
+    if not isinstance(font, apex.FontChain):
+        return
+    runs = apex.visual_runs('abc אב', font.faces)
+    texts = [t for t, _, _ in runs]
+    want = ['abc ', 'אב'] if apex.RAQM else ['abc ', 'בא']
+    eq(texts, want, 'LTR paragraph with a Hebrew word')
+    runs = apex.visual_runs('שלום 2', font.faces)
+    eq(runs[0][0], '2', 'RTL paragraph: the trailing number sits leftmost')
+
+
+@check('lines without spaces wrap, obeying Japanese kinsoku')
+def t_wrap_unspaced():
+    font = oledd.Fonts(oledd.load_config('/nonexistent')).get(12)
+    eq(oledd.break_units('Blow by blow'),
+       [('Blow', ''), ('by', ' '), ('blow', ' ')], 'spaced text unchanged')
+    units = oledd.break_units('「孤独」ギターと、ヒーロー')
+    for u, _ in units[1:]:
+        if u[0] in oledd._NO_BREAK_BEFORE:
+            raise AssertionError(f'a line could start with {u[0]!r}: {units}')
+    for u, _ in units[:-1]:
+        if u[-1] in oledd._NO_BREAK_AFTER:
+            raise AssertionError(f'a line could end with {u[-1]!r}: {units}')
+    line = '踏みつけられた孤独とペダルから、何度も鳴り響く音色が頬に伝う'
+    rows = oledd.wrap(line, W - 4, font, lines=3)
+    if rows is None:
+        raise AssertionError('a long Japanese line did not wrap at all')
+    eq(''.join(rows), line, 'no characters lost or added')
+    for r in rows:
+        if oledd.text_width(r, font) > W - 4:
+            raise AssertionError(f'row too wide: {r}')
+    # Korean is spaced: it breaks between words, never inside one.
+    ko = '이 밤 그날의 반딧불을 당신의 창 가까이 보낼게요'
+    eq(' '.join(oledd.wrap(ko, W - 4, font, lines=3) or []), ko, 'Korean by word')
+
+
+@check('truncation never strands a vowel sign from its letter')
+def t_fit_clusters():
+    font = oledd.Fonts(oledd.load_config('/nonexistent')).get(12)
+    s = 'हम तेरे बिन अब रह नहीं सकते ' * 3
+    for avail in range(20, 120, 7):
+        out = oledd.fit(s, avail, font)
+        if not out.endswith('..'):
+            continue
+        kept = out[:-2]
+        nxt = s[len(kept.rstrip()):][:1] if s.startswith(kept.rstrip()) else ''
+        if nxt and apex._is_mark(nxt):
+            raise AssertionError(f'cut before a mark at {avail}px: {out!r}')
+
+
+_MANGO_HEAD = ('os,cpu,gpu,ram,kernel,driver,cpuscheduler\n'
+               'Gentoo,Ultra 9,RTX 5090,32GB,7.2.8,595,\n'
+               'fps,frametime,cpu_load,cpu_power,gpu_load,cpu_temp,gpu_temp,'
+               'gpu_core_clock,gpu_mem_clock,gpu_vram_used,gpu_power,ram_used,'
+               'swap_used,process_rss,elapsed\n')
+
+
+def _mango_row(fps):
+    return f'{fps},6.9,40,80,98,81,66,2400,12000,9.1,140,18.2,0.1,4.2,1234\n'
+
+
+@check('MangoHudFps reads the newest whole row and ignores the rest')
+def t_mango_fps():
+    import time
+    d = tempfile.mkdtemp()
+    cfg = oledd.load_config('/nonexistent')
+    cfg['game']['mangohud_logs'] = d
+    m = oledd.MangoHudFps(cfg)
+    now = time.time()
+    eq(m.read(now), None, 'empty folder')
+
+    log = os.path.join(d, 'Game.exe_2026-10-02_15-00-00.csv')
+    with open(log, 'w') as f:
+        f.write(_MANGO_HEAD)
+    m._scanned = 0
+    eq(m.read(time.time()), None, 'header only, no samples yet')
+
+    with open(log, 'a') as f:
+        f.write(_mango_row(143.6) + _mango_row(87.2) + '61.0,16.')  # half-written
+    m._scanned = 0
+    eq(m.read(time.time()), 87.2, 'last whole row, not the partial one')
+
+    # The end-of-run summary sits beside the log and must not be mistaken for it.
+    summary = log.replace('.csv', '_summary.csv')
+    with open(summary, 'w') as f:
+        f.write('0.1% Min FPS,1% Min FPS,97% Percentile FPS,Average FPS\n1,2,3,4\n')
+    m._scanned = 0
+    eq(m.read(time.time()), 87.2, 'summary file ignored')
+
+    old = time.time() - 10
+    os.utime(log, (old, old))
+    m._scanned = 0
+    eq(m.read(time.time()), None, 'log stopped growing = game closed')
+
+    ancient = time.time() - 3 * 86400
+    os.utime(log, (ancient, ancient))
+    m._scanned = 0
+    m.read(time.time())
+    eq(os.path.exists(log), False, 'old session logs pruned')
+
+
+@check('GameSource claims the screen on a live MangoHud log, without gamemode')
+def t_game_fps_source():
+    import time
+
+    class _S:
+        def gamemode(self): return False
+        def gpu(self): return {'util': 100, 'temp': 87}
+        def cpu_util(self): return 13.0
+        def cpu_temp(self): return 104
+        def swap_rate(self): return (0.0, 0.0)
+        def mem(self): return (9.0, 31.0)
+
+    d = tempfile.mkdtemp()
+    ctx = _Ctx()
+    ctx.s = _S()
+    ctx.cfg['game']['mangohud_logs'] = d
+    src = oledd.GameSource(ctx)
+    eq(src.active(time.time()), False, 'no game, no gamemode')
+
+    log = os.path.join(d, 'Game.exe_2026-10-02_15-00-00.csv')
+    for fps in (7, 144, 1240, 9999):
+        with open(log, 'w') as f:
+            f.write(_MANGO_HEAD + _mango_row(fps))
+        src._mango._scanned = 0
+        now = time.time()
+        eq(src.active(now), True, f'{fps} fps: active')
+        img = src.render(now)
+        eq(img.size, (W, H), f'{fps} fps: frame size')
+        # The number must stay inside its column and clear of the burn-in
+        # margin, however many digits it has.
+        box = img.crop((0, 0, src.FPS_COL, H)).getbbox()
+        if box and (box[0] < 1 or box[2] > src.FPS_COL):
+            raise AssertionError(f'{fps} fps: digits spill out of the column {box}')
+
+
+def main():
+    verbose = '-v' in sys.argv
+    for name, fn in RUN:
+        try:
+            fn()
+            if verbose:
+                print(f'  ok    {name}')
+        except Exception as e:
+            FAILS.append((name, e))
+            print(f'  FAIL  {name}\n          {e}')
+    print(f'\n{len(RUN) - len(FAILS)}/{len(RUN)} checks passed')
+    return 1 if FAILS else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
