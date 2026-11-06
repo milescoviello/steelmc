@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SteelSeries settings
+Comment=Configure an Aerox 9 Wireless mouse and an Apex Pro Gen 3 keyboard
+Exec=aerox-gui
+Icon=input-mouse
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=mouse;keyboard;dpi;steelseries;aerox;apex;
