@@ -1327,7 +1327,7 @@ class PressureTyper(_KeyHolder):
 class Lights:
     """Makes each key glow with how far it is pressed, and fade after you let go."""
 
-    def __init__(self, color=(255, 90, 0), base=(10, 10, 20), fade=0.25, hz=30.0):
+    def __init__(self, color=(255, 90, 0), base=(0, 0, 0), fade=0.25, hz=30.0):
         self.color, self.base, self.fade, self.period = color, base, fade, 1.0 / hz
         self.levels, self.shown = {}, {}
         self.last = 0.0
@@ -1877,7 +1877,7 @@ def cmd_lights(args):
     lights = _lights_from(args)
     keys = key_names(args.keys) if args.keys else None
     with _Screen() as screen:
-        screen.draw(["apex-analog lights", "", "Press keys and watch them glow. Ctrl-C quits and restores your normal lighting."])
+        screen.draw(["apex-analog lights", "", "The keyboard goes dark, then keys glow as you press them. Ctrl-C quits and restores your normal lighting."])
         _loop(args.hz or 60, keys, None, lambda depths, now: None, lights)
 
 
@@ -2197,7 +2197,7 @@ def cmd_actuation(args):
 
 def _add_light_options(parser):
     parser.add_argument("--color", default="FF5A00", metavar="RRGGBB", help="colour of a key at full depth (default FF5A00)")
-    parser.add_argument("--base", default="0A0A14", metavar="RRGGBB", help="colour of everything else (default 0A0A14)")
+    parser.add_argument("--base", default="000000", metavar="RRGGBB", help="colour of everything else (default 000000, dark)")
     parser.add_argument("--fade", type=float, default=0.25, metavar="SEC", help="how long a key takes to fade after you let go (default 0.25)")
 
 

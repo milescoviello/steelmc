@@ -110,10 +110,11 @@ apex-analog type --combo J=LCTRL+J --combo K=F13
 apex-analog lights
 ```
 
-Each key glows brighter the deeper you press it, then fades. Ctrl-C puts your normal lighting back. Add `--lights` to `gamepad`, `map` or `midi` to make their keys glow while you use them.
+The whole keyboard goes dark, then each key glows brighter the deeper you press it and fades when you let go. Ctrl-C puts your normal lighting back. Add `--lights` to `gamepad`, `map` or `midi` to make their keys glow while you use them.
 
 ```
-apex-analog lights --color 00C8FF --base 000000 --fade 0.5
+apex-analog lights --color 00C8FF --fade 0.5
+apex-analog lights --base 0A0A14     # keep the rest of the board dimly lit instead of dark
 apex-analog lights --keys WASD
 apex-analog lights --off             # normal lighting again, if something quit without restoring it
 ```

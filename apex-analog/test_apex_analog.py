@@ -652,6 +652,13 @@ class LightsLogic(unittest.TestCase):
         lights.update(kb, {"W": 0.0, "A": 0.0}, 1.4)
         self.assertEqual(kb.calls.pop(), ("keys", {"W": (0, 0, 0)}))
 
+    def test_board_goes_dark_first_by_default(self):
+        kb = FakeLightKeyboard()
+        a.Lights().start(kb)
+        self.assertEqual(kb.calls, [("all", 0, 0, 0)])
+        args = a.build_parser().parse_args(["lights"])
+        self.assertEqual(a._lights_from(args).base, (0, 0, 0))
+
     def test_rate_is_capped(self):
         kb, lights = FakeLightKeyboard(), a.Lights(hz=30)
         lights.update(kb, {"W": 4.0}, 1.0)
