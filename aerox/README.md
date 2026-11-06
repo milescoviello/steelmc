@@ -18,7 +18,7 @@ The command line needs only Python. The GUI also needs PySide6, and its keyboard
 
 ## GUI
 
-Run `aerox-gui`, or find "SteelSeries settings" in your application menu. The full-window screenshots use sample data.
+Run `aerox-gui`, or find "SteelSeries settings" in your application menu. The full keyboard page screenshots use sample data.
 
 Changes apply as you make them, but last only until the mouse powers off. **Save to mouse** writes them to its flash, and **Undo changes** goes back to how things were when the page loaded. The keyboard page works the same way, with **Save to keyboard**.
 
