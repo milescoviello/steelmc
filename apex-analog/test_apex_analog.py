@@ -3,6 +3,7 @@
 import fcntl
 import math
 import os
+import re
 import random
 import select
 import shutil
@@ -1433,6 +1434,14 @@ class HelpAndBars(unittest.TestCase):
 
     def test_no_keys_pressed(self):
         self.assertEqual(a.bar_lines([], {}, 80, 20), ["Press a key slowly."])
+
+
+class Packaging(unittest.TestCase):
+    def test_pyproject_and_module_agree_on_the_version(self):
+        with open(os.path.join(os.path.dirname(__file__), "pyproject.toml")) as f:
+            declared = re.search(r'^version = "([^"]+)"', f.read(), re.M)
+        self.assertIsNotNone(declared, "pyproject.toml has no version")
+        self.assertEqual(declared.group(1), a.__version__)
 
 
 if __name__ == "__main__":

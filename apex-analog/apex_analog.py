@@ -58,7 +58,7 @@ import threading
 import time
 from typing import NamedTuple
 
-__version__ = "0.8.0"
+__version__ = "0.1.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"

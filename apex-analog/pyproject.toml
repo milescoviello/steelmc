@@ -4,12 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apex-analog"
-version = "0.8.0"
+version = "0.1.0"
 description = "See how far every key is pressed on a SteelSeries Apex Pro Gen 3 on Linux, and wire it to anything."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 dependencies = []
+keywords = ["steelseries", "apex-pro", "hall-effect", "keyboard", "linux", "uinput", "midi", "gamepad"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Topic :: Hardware",
+]
+
+[project.urls]
+Homepage = "https://github.com/milescoviello/apex-analog"
+Repository = "https://github.com/milescoviello/apex-analog"
+Issues = "https://github.com/milescoviello/apex-analog/issues"
+Changelog = "https://github.com/milescoviello/apex-analog/blob/main/CHANGELOG.md"
 
 [project.scripts]
 apex-analog = "apex_analog:main"

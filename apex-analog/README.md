@@ -2,6 +2,8 @@
 
 See how far every key is pressed on a SteelSeries Apex Pro Gen 3 on Linux, in millimetres, and wire it to anything: a game, the mouse, keystrokes, or your own program.
 
+[![tests](https://github.com/milescoviello/apex-analog/actions/workflows/tests.yml/badge.svg)](https://github.com/milescoviello/apex-analog/actions/workflows/tests.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ```
 git clone https://github.com/milescoviello/apex-analog
 cd apex-analog
@@ -10,6 +12,10 @@ apex-analog
 ```
 
 Press a key slowly and watch its bar. Ctrl-C quits. There is nothing to configure and nothing else to install: it's one Python file with no dependencies.
+
+## Requirements
+
+Linux, Python 3.8 or newer, and nothing else to install: the only dependency is the standard library. It needs an Apex Pro Gen 3 (`1038:1640`) on firmware 4.16.8, and refuses to run on any other firmware. `./install.sh` sets up access with a udev rule, so you don't need root to use it.
 
 ## Use the keys as a controller
 
@@ -332,7 +338,7 @@ apex-analog gamepad --watch          # stay in this terminal and show live value
 
 `gamepad`, `map`, `midi` and `type` share one slot because they all take over the keyboard, so starting one replaces another. `lights` and `auto` share another. Your lights setting and typing recording come back at login; a controller never does, so your keys can't start the day not typing.
 
-`apex-analog help` lists everything, and `apex-analog help COMMAND` gives the details of one.
+`apex-analog help` lists everything, `apex-analog help COMMAND` gives the details of one, and `apex-analog --version` prints the version.
 
 Python programs go through the daemon automatically if it's running, and talk to the keyboard directly if it isn't.
 
@@ -340,7 +346,8 @@ Python programs go through the daemon automatically if it's running, and talk to
 
 - **61 keys have sensors**, the main block. ESC, the F row, nav keys and arrows don't, so they can't report depth.
 - **Millimetres come from the firmware's own actuation table**, not a physical measurement.
-- **Online games:** virtual controllers and rapid-trigger keys can break the rules of games with anti-cheat. Check before using them there.- **Network and pipe rates:** 60 updates a second by default, `--hz` to change it. Reading every key tops out near 190 a second, and reading keys from two rows near 490. Mapping defaults to 120.
+- **Online games:** virtual controllers and rapid-trigger keys can break the rules of games with anti-cheat. Check before using them there.
+- **Network and pipe rates:** 60 updates a second by default, `--hz` to change it. Reading every key tops out near 190 a second, and reading keys from two rows near 490. Mapping defaults to 120.
 
 ## What's been tested
 
@@ -405,4 +412,6 @@ Hall sensors aren't linear, so position isn't distance: half the sensor range is
 
 ## Credits
 
-Not affiliated with SteelSeries. Contains no SteelSeries firmware or code. Reverse engineered from my own keyboard and its firmware for compatibility, with AI assistance (Claude Code). MIT license.
+Not affiliated with SteelSeries. Contains no SteelSeries firmware or code. Reverse engineered from my own keyboard and its firmware for compatibility. MIT license.
+
+Changes are listed in [CHANGELOG.md](CHANGELOG.md). To work on it, see [CONTRIBUTING.md](CONTRIBUTING.md).
