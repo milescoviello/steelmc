@@ -6,6 +6,8 @@ import json
 import os
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1077,5 +1079,46 @@ class Window(unittest.TestCase):
         self.assertFalse(gui.KeyCap("Esc", inert=True).grab().isNull())
 
 
+class AppExit(unittest.TestCase):
+    def test_the_real_app_closes_cleanly(self):
+        """In its own process, because a crash on shutdown only shows in the exit code."""
+        script = """
+import sys
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+import gui
+
+
+class NoDevice:
+    def read(self):
+        raise gui.KeyboardError("no device")
+    battery = frame = read
+
+
+gui.MouseDevice = gui.KeyboardDevice = gui.OledDevice = NoDevice
+real_exec = QApplication.exec
+
+
+def timed(*_):
+    def close():
+        for widget in QApplication.topLevelWidgets():
+            widget.close()
+        QApplication.quit()
+    QTimer.singleShot(500, close)
+    return real_exec()
+
+
+QApplication.exec = staticmethod(timed)
+sys.exit(gui.main(["steelmc"]))
+"""
+        run = subprocess.run([sys.executable, "-X", "faulthandler", "-c", script], cwd=os.path.dirname(os.path.realpath(__file__)),
+                             env={**os.environ, "QT_QPA_PLATFORM": "offscreen"}, capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+
+
 if __name__ == "__main__":
-    unittest.main()
+    result = unittest.main(exit=False).result
+    # Leftover test widgets can crash Python's shutdown on PySide6 6.12. The app itself has its own test above.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0 if result.wasSuccessful() else 1)
