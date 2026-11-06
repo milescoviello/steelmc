@@ -18,7 +18,7 @@ The command line needs only Python. The GUI also needs PySide6, and its keyboard
 
 ## GUI
 
-Run `aerox-gui`, or find "SteelSeries settings" in your application menu. The full keyboard page screenshots use sample data.
+Run `aerox-gui`, or find "SteelSeries settings" in your application menu. The keyboard page and drag-select screenshots above and below use sample data. The ones under "More screenshots" are from real use.
 
 Changes apply as you make them, but last only until the mouse powers off. **Save to mouse** writes them to its flash, and **Undo changes** goes back to how things were when the page loaded. The keyboard page works the same way, with **Save to keyboard**.
 
@@ -31,6 +31,18 @@ Drag across keys to pick several at once, or drag from an empty spot to box them
 ![Dragging a box across the keyboard to pick a group of keys](docs/keyboard-drag.png)
 
 The keyboard page also mirrors what's on the keyboard's screen, and can pin what it shows, turn it off, or send it a message, through [apex-oled](https://github.com/milescoviello/apex-oled). The screen needs an `apex-oled` with the `frame` command.
+
+## More screenshots
+
+From real use. The first three are from a slightly older build, where the enlarged screen view was cut off at the sides.
+
+![The keyboard's screen mirrored in the app, showing lyrics](docs/real-screen-mirror.png)
+
+![Dragging a box across the keys](docs/real-drag-select.png)
+
+![Keys filling as they're pressed, with the screen's mode menu open](docs/real-live-depth.png)
+
+![The mouse page](docs/real-mouse.png)
 
 ## Command line
 
