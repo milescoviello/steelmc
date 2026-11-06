@@ -67,7 +67,7 @@ Changing the polling rate makes the dongle re-sync its radio, so the mouse drops
 
 ## Tested
 
-On real hardware, through the dongle: every setting round-tripped in RAM, and the GUI driven against both devices. Not tested yet: saving to flash, the mouse plugged in by cable, and whether a RAM change survives the mouse sleeping.
+On real hardware, through the dongle: every setting round-tripped in RAM, the GUI driven against both devices, one save to flash, which the mouse accepted, and Alt+Tab pressed on a side button. Not tested yet: a saved setting surviving a power cycle, the mouse plugged in by cable, and a RAM change surviving the mouse sleeping.
 
 ```
 python3 test_aerox.py                   # no hardware
