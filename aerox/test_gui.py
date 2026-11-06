@@ -447,6 +447,82 @@ class KeyboardPageTest(unittest.TestCase):
         self.assertTrue(self.page.content.isEnabled())
 
 
+class ShortcutPanel(unittest.TestCase):
+    def setUp(self):
+        self.device = FakeKeyboard()
+        self.page = gui.KeyboardPage(self.device, Inline(), yes)
+        self.page.refresh()
+
+    def kind(self, value):
+        self.page.shortcut_kind.setCurrentIndex(self.page.shortcut_kind.findData(value))
+
+    def test_needs_exactly_one_key(self):
+        self.assertFalse(self.page.shortcut_save.isEnabled())
+        self.page.pick(["W", "A"])
+        self.assertFalse(self.page.shortcut_save.isEnabled())
+        self.page.pick(["J"])
+        self.assertTrue(self.page.shortcut_save.isEnabled())
+        self.assertEqual(self.page.shortcut_key.text(), "SteelSeries + J")
+
+    def test_the_keyboards_own_keys_are_refused(self):
+        for key in ("Q", "I", "O", "T", "LGUI", "SS"):
+            self.page.pick([key])
+            self.assertFalse(self.page.shortcut_save.isEnabled(), key)
+            self.assertIn("keyboard's own", self.page.shortcut_key.text())
+
+    def test_save_keys(self):
+        self.page.pick(["J"])
+        self.kind("keys")
+        self.page.shortcut_value.setText("ctrl+c")
+        self.page.shortcut_save.click()
+        self.assertEqual(self.device.calls, [("add_shortcut", "J", "keys", "ctrl+c")])
+
+    def test_a_volume_shortcut_needs_nothing_typed(self):
+        self.page.pick(["J"])
+        self.kind("volume+")
+        self.assertTrue(self.page.shortcut_value.isHidden())
+        self.page.shortcut_save.click()
+        self.assertEqual(self.device.calls, [("add_shortcut", "J", "volume+", "")])
+
+    def test_empty_is_a_message_not_a_shortcut(self):
+        self.page.pick(["J"])
+        self.kind("command")
+        self.page.shortcut_save.click()
+        self.assertEqual(self.device.calls, [])
+        self.assertIn("Say what", self.page.status.text())
+
+    def test_existing_shortcuts_show_and_can_be_removed(self):
+        self.device.data["shortcuts"] = {"J": "volume+", ",": "macro:ss-comma"}
+        self.page.refresh()
+        self.assertTrue(self.page.caps["J"].marked)
+        self.assertIn("volume+", self.page.caps["J"].toolTip())
+        self.assertIn("J: volume+", self.page.shortcut_list.text())
+        self.page.pick(["K"])
+        self.assertFalse(self.page.shortcut_remove.isEnabled())
+        self.page.pick(["J"])
+        self.page.shortcut_remove.click()
+        self.assertEqual(self.device.calls, [("remove_shortcut", "J")])
+
+    def test_commands_it_sends(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        path = os.path.join(d.name, "fake")
+        with open(path, "w") as f:
+            f.write('#!/bin/sh\nprintf "%s|" "$@" >> "$0.log"\nprintf "\\n" >> "$0.log"\n')
+        os.chmod(path, 0o755)
+        device = gui.KeyboardDevice(path)
+        device.add_shortcut(",", "keys", "ctrl+c")
+        device.add_shortcut("J", "text", "hi there")
+        device.add_shortcut("K", "command", "firefox --new-window")
+        device.add_shortcut("L", "volume+", "")
+        device.remove_shortcut(",")
+        self.assertEqual(open(path + ".log").read().splitlines(), [
+            "macro|add|ss-comma|CTRL+C|", "shortcut|add|COMMA|macro:ss-comma|",
+            "macro|add|ss-j|text:hi there|", "shortcut|add|J|macro:ss-j|",
+            "shortcut|add|K|run:firefox --new-window|", "shortcut|add|L|volume+|", "shortcut|remove|COMMA|",
+        ])
+
+
 class DragSelect(unittest.TestCase):
     def setUp(self):
         self.device = FakeKeyboard()

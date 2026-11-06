@@ -195,6 +195,11 @@ EFFECTS = [
     ("CPU and memory on the F row", ["lights", "--effect", "stats"], None),
     ("Heatmap of what you press", ["lights", "--effect", "heatmap"], None),
 ]
+# Keys the keyboard keeps for its own settings while its SteelSeries key is held, plus that key itself.
+SHORTCUT_TAKEN = {"Q", "I", "O", "T", "LGUI", "SS"}
+SHORTCUT_KINDS = [("Press keys", "keys", "ctrl+c"), ("Type text", "text", "hello"), ("Run a command", "command", "firefox"),
+                  ("Volume up", "volume+", ""), ("Volume down", "volume-", ""), ("Brightness up", "brightness+", ""),
+                  ("Brightness down", "brightness-", "")]
 FEATURES = [
     ("gamepad", "W, A, S, D as an analog controller", "While this is on, those keys stop typing."),
     ("oled", "Key depth on the keyboard's screen", "Shows how far each key is pressed on the small display."),
@@ -315,7 +320,30 @@ class KeyboardDevice:
         info = json.loads(self.run("info", "--json"))
         status = self.run("status")
         presets = [line.strip() for line in self.run("preset", "list").splitlines() if line.strip()]
-        return {"info": info, "jobs": parse_jobs(status), "presets": presets}
+        return {"info": info, "jobs": parse_jobs(status), "presets": presets, "shortcuts": self.shortcuts()}
+
+    def shortcuts(self):
+        try:
+            return json.loads(self.run("shortcut", "list", "--json"))
+        except (KeyboardError, ValueError):  # an apex-analog from before shortcuts
+            return {}
+
+    def add_shortcut(self, key, kind, value):
+        """Keys and text are saved as a macro named after the key, so editing one replaces it."""
+        name = KEY_ARGS.get(key, key)
+        if kind in ("keys", "text"):
+            macro = f"ss-{name.lower()}"
+            step = value.upper() if kind == "keys" else f"text:{value}"
+            self.run("macro", "add", macro, step)
+            output = f"macro:{macro}"
+        elif kind == "command":
+            output = f"run:{value}"
+        else:
+            output = kind
+        return self.run("shortcut", "add", name, output)
+
+    def remove_shortcut(self, key):
+        return self.run("shortcut", "remove", KEY_ARGS.get(key, key))
 
     @staticmethod
     def key_args(names):
@@ -1506,6 +1534,14 @@ class KeyboardPage(QWidget):
         features_title.setObjectName("title")
         panel.layout().addWidget(features_title)
         panel.layout().addLayout(self.feature_list)
+        self.jobs_label = muted("")
+        self.jobs_label.setWordWrap(True)
+        self.turn_off = QVBoxLayout()
+        running = QLabel("Running now")
+        running.setObjectName("title")
+        panel.layout().addWidget(running)
+        panel.layout().addWidget(self.jobs_label)
+        panel.layout().addLayout(self.turn_off)
         panel.layout().addStretch(1)
         return panel
 
@@ -1520,16 +1556,32 @@ class KeyboardPage(QWidget):
         save_as.clicked.connect(self.save_preset)
         delete = QPushButton("Delete")
         delete.clicked.connect(self.delete_preset)
-        self.jobs_label = muted("")
-        self.jobs_label.setWordWrap(True)
-        self.turn_off = QVBoxLayout()
         panel = well(row(self.preset, use), row(save_as, delete, None), title="Saved setups")
-        running = QLabel("Running now")
-        running.setObjectName("title")
-        panel.layout().addWidget(running)
-        panel.layout().addWidget(self.jobs_label)
-        panel.layout().addLayout(self.turn_off)
+        title = QLabel("Shortcuts")
+        title.setObjectName("title")
+        hint = muted("Hold the SteelSeries key and press another key. Red keys are the keyboard's own.")
+        hint.setWordWrap(True)
+        self.shortcut_key = QLabel("Pick one key")
+        self.shortcut_kind = QComboBox()
+        self.shortcut_kind.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.shortcut_kind.setMinimumContentsLength(10)
+        for label, kind, _ in SHORTCUT_KINDS:
+            self.shortcut_kind.addItem(label, kind)
+        self.shortcut_kind.currentIndexChanged.connect(self.shortcut_kind_picked)
+        self.shortcut_value = QLineEdit()
+        self.shortcut_save = QPushButton("Save shortcut")
+        self.shortcut_save.clicked.connect(self.save_shortcut)
+        self.shortcut_remove = QPushButton("Remove")
+        self.shortcut_remove.clicked.connect(self.remove_shortcut)
+        self.shortcut_list = muted("")
+        self.shortcut_list.setWordWrap(True)
+        for widget in (title, hint, self.shortcut_key, self.shortcut_kind, self.shortcut_value):
+            panel.layout().addWidget(widget)
+        panel.layout().addLayout(row(self.shortcut_save, self.shortcut_remove, None))
+        panel.layout().addWidget(self.shortcut_list)
         panel.layout().addStretch(1)
+        self.shortcuts = {}
+        self.shortcut_kind_picked()
         return panel
 
     # Loading
@@ -1555,8 +1607,9 @@ class KeyboardPage(QWidget):
                 mm = self.key_depth(key)
                 rapid = key["mode"] != 0
                 cap.fires_at = key["press"]
-                cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid)
-                cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else ""))
+                shortcut = data.get("shortcuts", {}).get(name)
+                cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid or bool(shortcut))
+                cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else "") + (f". With the SteelSeries key: {shortcut}" if shortcut else ""))
             else:
                 cap.inert = True
                 cap.setEnabled(False)
@@ -1567,6 +1620,8 @@ class KeyboardPage(QWidget):
         if current in data["presets"]:
             self.preset.setCurrentText(current)
         self.show_jobs(data["jobs"])
+        self.shortcuts = data.get("shortcuts", {})
+        self.shortcut_list.setText("\n".join(f"{KEY_LABELS.get(k, k)}: {v}" for k, v in sorted(self.shortcuts.items())))
         self.loading = False
         self.selection_changed()
         if not self.status.text():
@@ -1712,6 +1767,45 @@ class KeyboardPage(QWidget):
         if len(chosen) == 1 and chosen[0] in self.settings:
             self.depth.setValue(DEPTHS.index(self.key_depth(self.settings[chosen[0]])))
         self.show_set_label()
+        self.show_shortcut_key()
+
+    def shortcut_target(self):
+        """The one picked key a shortcut can go on, or None."""
+        chosen = self.selected_keys()
+        return chosen[0] if len(chosen) == 1 and chosen[0] not in SHORTCUT_TAKEN else None
+
+    def show_shortcut_key(self):
+        if not hasattr(self, "shortcut_save"):
+            return
+        chosen, target = self.selected_keys(), self.shortcut_target()
+        if target:
+            self.shortcut_key.setText(f"SteelSeries + {KEY_LABELS.get(target, target)}")
+        elif len(chosen) == 1:
+            self.shortcut_key.setText(f"{KEY_LABELS.get(chosen[0], chosen[0])} is the keyboard's own")
+        else:
+            self.shortcut_key.setText("Pick one key")
+        self.shortcut_save.setEnabled(bool(target))
+        self.shortcut_remove.setEnabled(bool(target) and target in self.shortcuts)
+
+    def shortcut_kind_picked(self, *_):
+        _, kind, placeholder = SHORTCUT_KINDS[self.shortcut_kind.currentIndex()]
+        self.shortcut_value.setPlaceholderText(placeholder)
+        self.shortcut_value.setVisible(bool(placeholder))
+
+    def save_shortcut(self):
+        key, kind, value = self.shortcut_target(), self.shortcut_kind.currentData(), self.shortcut_value.text().strip()
+        if not key:
+            return
+        if kind in ("keys", "text", "command") and not value:
+            self.status.say("Say what the shortcut should do first.", "bad")
+            return
+        self.shortcut_value.clear()
+        self.apply(lambda: self.device.add_shortcut(key, kind, value), f"Saved the shortcut on {KEY_LABELS.get(key, key)}.")
+
+    def remove_shortcut(self):
+        key = self.shortcut_target()
+        if key:
+            self.apply(lambda: self.device.remove_shortcut(key), f"Removed the shortcut on {KEY_LABELS.get(key, key)}.")
 
     def depth_shown(self, *_):
         self.depth_label.setText(f"{DEPTHS[self.depth.value()]:.1f} mm")

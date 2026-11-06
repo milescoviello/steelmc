@@ -28,6 +28,8 @@ While the keyboard page is showing, each key fills as you press it and shows its
 
 Drag across keys to pick several at once, or drag from an empty spot to box them.
 
+Shortcuts fire when you hold the SteelSeries key and press another key. Pick one key, choose what it does, and save it. The keys the keyboard keeps for itself light up red while you hold it, and can't be used.
+
 ![Dragging a box across the keyboard to pick a group of keys](docs/keyboard-drag.png)
 
 The keyboard page also mirrors what's on the keyboard's screen, and can pin what it shows, turn it off, or send it a message, through [apex-oled](https://github.com/milescoviello/apex-oled). The screen needs an `apex-oled` with the `frame` command.
