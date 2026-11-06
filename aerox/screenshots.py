@@ -10,6 +10,7 @@ import sys
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"  # never on screen, whatever the session is
 
+from PySide6.QtGui import QColor, QFont, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 import aerox
@@ -65,11 +66,26 @@ def sample_keyboard():
 
 
 def sample_screen():
-    """A plausible frame for the docs: two bars and a line of text, packed the way the panel takes it."""
+    """A plausible frame for the docs, packed the way the panel takes it."""
+    image = QImage(128, 40, QImage.Format_Grayscale8)
+    image.fill(0)
+    p = QPainter(image)
+    p.setPen(QColor(255, 255, 255))
+    font = QFont("Noto Sans")
+    font.setPixelSize(11)
+    font.setStyleStrategy(QFont.NoAntialias)
+    p.setFont(font)
+    for y, label, value, used in ((1, "CPU", "12%  48C", .12), (14, "GPU", "3%  41C", .03), (27, "RAM", "11 GB", .36)):
+        p.drawText(2, y + 10, label)
+        p.drawRect(26, y + 2, 50, 7)
+        p.fillRect(26, y + 2, round(50 * used), 7, QColor(255, 255, 255))
+        p.drawText(80, y + 10, value)
+    p.end()
     fb = bytearray(640)
-    for x in range(4, 124):
-        fb[x] = 0x7E if x < 70 else 0x42
-        fb[128 + x] = 0x7E if x < 96 else 0x42
+    for x in range(128):
+        for y in range(40):
+            if image.pixelColor(x, y).value() >= 128:
+                fb[y // 8 * 128 + x] |= 1 << (y % 8)
     return base64.b64encode(bytes(fb)).decode()
 
 
@@ -118,6 +134,13 @@ def main():
         window.keyboard_page.show_depths({"F": 3.2, "J": 0.7})
     render(window, os.path.join(out, prefix + "keyboard.png"))
     window.keyboard_page.show_depths({})
+    if not real:
+        page = window.keyboard_page
+        page.pick([])
+        page.plate.begin_drag(page.caps["UP"].geometry().center())
+        page.plate.continue_drag(page.caps["F"].geometry().center())
+        render(window, os.path.join(out, "sample-keyboard-drag.png"))
+        page.plate.end_drag()
     if not real:
         window.tabs.setCurrentIndex(0)
         window.mouse_page.select_button("side 12")

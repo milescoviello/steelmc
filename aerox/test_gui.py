@@ -624,6 +624,11 @@ class Screen(unittest.TestCase):
         self.assertFalse(self.page.plate.screen.grab().isNull())
         self.assertEqual(self.page.screen_state.text(), "Showing system stats.")
 
+    def test_the_enlarged_view_shows_the_whole_panel(self):
+        view = self.page.screen_zoom
+        self.assertGreaterEqual(view.width(), gui.SCREEN_WIDTH * view.zoom)
+        self.assertGreaterEqual(view.height(), gui.SCREEN_HEIGHT * view.zoom)
+
     def test_a_dark_panel_looks_dark(self):
         self.oled.state.update(fb=base64.b64encode(bytes([255]) * 640).decode())
         self.page.poll_screen()

@@ -1420,7 +1420,7 @@ class KeyboardPage(QWidget):
 
     def build_screen(self):
         self.screen_zoom = OledView(2)
-        self.screen_zoom.setFixedHeight(SCREEN_HEIGHT * 2 + 8)
+        self.screen_zoom.setFixedSize(SCREEN_WIDTH * 2 + 8, SCREEN_HEIGHT * 2 + 8)
         self.screen_state = muted("")
         self.screen_state.setWordWrap(True)
         self.screen_mode = QComboBox()
