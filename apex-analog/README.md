@@ -104,6 +104,35 @@ Choose something else for a deep press, per key, with `--combo`:
 apex-analog type --combo J=LCTRL+J --combo K=F13
 ```
 
+## Make keys glow
+
+```
+apex-analog lights
+```
+
+Each key glows brighter the deeper you press it, then fades. Ctrl-C puts your normal lighting back. Add `--lights` to `gamepad`, `map` or `midi` to make their keys glow while you use them.
+
+```
+apex-analog lights --color 00C8FF --base 000000 --fade 0.5
+apex-analog lights --keys WASD
+apex-analog lights --off             # normal lighting again, if something quit without restoring it
+```
+
+## Change where keys actuate
+
+No GG needed.
+
+```
+apex-analog actuation                # see what every key is set to
+apex-analog actuation W 1.0          # W fires at 1.0 mm
+apex-analog actuation WASD 1.2
+apex-analog actuation all 1.8        # the level every key on this board was on before any changes
+```
+
+It uses the nearest of the firmware's 20 levels and reads the result back to check it. LGUI can't be changed this way.
+
+The change lives in the keyboard's memory. What happens to it after a replug hasn't been tested yet.
+
 ## Put it on your stream
 
 ```
@@ -207,11 +236,15 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 - The test suite (`python3 -m unittest`) needs no keyboard.
 - Checked on real hardware: sensor reads, the virtual controller as seen by Linux, holding back keys, and UDP, OSC, WebSocket and HTTP clients.
 - A real drive: BeamNG.drive 0.40.4 through Proton saw it as `XBox Controller 1` with no setup, and it drove well on W, S, A and D. That's one person and one short session.
-- **Tested only with simulated key depths so far:** MIDI playing feel, pressure typing, the typing print, the typing profile's numbers, and two players or pedals inside a game. MIDI did reach a real ALSA client, the overlay did run in a real browser, and the extra controllers and pedals did appear to Linux as joysticks.
+- The typing print passed on real key presses, `health` ran on the real keyboard, and an actuation change on W was read back and felt on a real press.
+- **Tested only with simulated key depths so far:** MIDI playing feel, pressure typing, the typing profile's numbers, and two players or pedals inside a game. MIDI did reach a real ALSA client, the overlay did run in a real browser, and the extra controllers and pedals did appear to Linux as joysticks.
+- **Not yet run on the real keyboard:** `lights`, and `actuation` as a command. Both send bytes checked by tests against the firmware's format.
 
 ## Safety
 
-This reads the keyboard and never changes it. It can only send these five commands. Each one's firmware handler was read first and only copies memory into the reply: no flash writes, no resets, no settings changed.
+Unless you run `lights` or set `actuation`, this only reads the keyboard. Every command it can send is listed here, and each one's firmware handler was read first. None of them reach a flash save or a reset.
+
+These five only copy memory into the reply:
 
 | Send | Reply | |
 |---|---|---|
@@ -220,6 +253,15 @@ This reads the keyboard and never changes it. It can only send these five comman
 | `B1 <n> [<hid> 0 0]...` | `<hid> <press> <release>`... | actuation points, n/255 of the key's range |
 | `B2 <n> [<hid> 0]...` | `<hid> <mode>`... | per-key mode byte |
 | `9E` | 1 byte | OLED `ACTUATION ICON` setting |
+
+These four change something in the keyboard's memory, and only when you ask:
+
+| Send | | Used by |
+|---|---|---|
+| `3A <n> [<hid> <r> <g> <b>]...` | colours for up to 15 keys | `lights` |
+| `21 00 <r> <g> <b>` | colour for the whole board | `lights` |
+| `3B` | back to normal lighting | `lights` |
+| `31 <n> [<hid> <press> <release>]...` | actuation for up to 20 keys, as n/255 of the key's range | `actuation` |
 
 It refuses to run on any firmware but 4.16.8, and there's no override, because on other firmware the same bytes could do something else.
 

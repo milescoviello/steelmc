@@ -579,5 +579,142 @@ class Modes(unittest.TestCase):
         os.close(fd)
 
 
+class FakeLightKeyboard:
+    def __init__(self):
+        self.calls = []
+
+    def set_all_colors(self, r, g, b):
+        self.calls.append(("all", r, g, b))
+
+    def set_colors(self, colors):
+        self.calls.append(("keys", dict(colors)))
+
+    def clear_colors(self):
+        self.calls.append(("clear",))
+
+
+class LightingBytes(unittest.TestCase):
+    def setUp(self):
+        self.read, write = os.pipe()
+        self.kb = a.Keyboard.__new__(a.Keyboard)
+        self.kb.fd = write
+        self.addCleanup(os.close, self.read)
+        self.addCleanup(os.close, write)
+
+    def packets(self, count):
+        return [os.read(self.read, 65) for _ in range(count)]
+
+    def test_one_key(self):
+        self.kb.set_colors({"W": (1, 2, 3)})
+        packet = self.packets(1)[0]
+        self.assertEqual(len(packet), 65)
+        self.assertEqual(packet[:7], bytes([0, 0x3A, 1, 0x1A, 1, 2, 3]))
+        self.assertEqual(set(packet[7:]), {0})
+
+    def test_many_keys_split_into_reports_that_fit(self):
+        self.kb.set_colors({k: (9, 9, 9) for k in "QWERTYUIOPASDFGH"})
+        first, second = self.packets(2)
+        self.assertEqual(first[:2], bytes([0, 0x3A]))
+        self.assertEqual(first[2], 15)
+        self.assertEqual(second[2], 1)
+        self.assertEqual(second[3], a.BY_NAME["H"][1])
+
+    def test_whole_board_and_restore(self):
+        self.kb.set_all_colors(4, 5, 6)
+        self.kb.clear_colors()
+        whole, restore = self.packets(2)
+        self.assertEqual(whole[:6], bytes([0, 0x21, 0, 4, 5, 6]))
+        self.assertEqual(restore[:2], bytes([0, 0x3B]))
+
+    def test_only_lighting_commands_get_through(self):
+        for command in (0x31, 0x30, 0x01, 0x5A, 0x7F, 0x74, 0x15, 0x16, 0x51, 0x22):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                self.kb._send_light([command])
+        self.assertEqual(set(a.LIGHT_COMMANDS), {0x3A, 0x21, 0x3B})
+
+    def test_reads_cannot_send_lighting_commands(self):
+        for command in a.LIGHT_COMMANDS:
+            with self.assertRaisesRegex(ValueError, "refused"):
+                self.kb._ask([command])
+
+
+class LightsLogic(unittest.TestCase):
+    def test_glow_follows_depth_fades_and_stops_sending_when_still(self):
+        kb, lights = FakeLightKeyboard(), a.Lights((200, 0, 0), (0, 0, 0), fade=0.2, hz=30)
+        lights.start(kb)
+        self.assertEqual(kb.calls.pop(), ("all", 0, 0, 0))
+        lights.update(kb, {"W": 4.0, "A": 0.0}, 1.0)
+        self.assertEqual(kb.calls.pop(), ("keys", {"W": (200, 0, 0)}))
+        lights.update(kb, {"W": 4.0, "A": 0.0}, 1.1)
+        self.assertEqual(kb.calls, [])
+        lights.update(kb, {"W": 0.0, "A": 0.0}, 1.2)
+        self.assertEqual(kb.calls.pop(), ("keys", {"W": (100, 0, 0)}))
+        lights.update(kb, {"W": 0.0, "A": 0.0}, 1.4)
+        self.assertEqual(kb.calls.pop(), ("keys", {"W": (0, 0, 0)}))
+
+    def test_rate_is_capped(self):
+        kb, lights = FakeLightKeyboard(), a.Lights(hz=30)
+        lights.update(kb, {"W": 4.0}, 1.0)
+        kb.calls.clear()
+        lights.update(kb, {"W": 1.0}, 1.001)
+        self.assertEqual(kb.calls, [])
+
+    def test_quitting_restores_even_if_the_keyboard_is_gone(self):
+        class Gone(FakeLightKeyboard):
+            def clear_colors(self):
+                raise a.Disconnected("gone")
+        a.Lights().stop(Gone())
+        kb = FakeLightKeyboard()
+        a.Lights().stop(kb)
+        self.assertEqual(kb.calls, [("clear",)])
+
+    def test_bad_colour_explains_itself(self):
+        self.assertEqual(a._rgb("FF5A00"), (255, 90, 0))
+        self.assertEqual(a._rgb("#0a0a14"), (10, 10, 20))
+        with self.assertRaisesRegex(ValueError, "colour"):
+            a._rgb("red")
+
+
+class Actuation(unittest.TestCase):
+    def setUp(self):
+        self.read, write = os.pipe()
+        self.kb = a.Keyboard.__new__(a.Keyboard)
+        self.kb.fd = write
+        self.addCleanup(os.close, self.read)
+        self.addCleanup(os.close, write)
+
+    def test_levels_match_what_the_keyboard_uses(self):
+        self.assertEqual(a.actuation_level(1.8), (1.8, 50, 46))  # the keyboard's own default here
+        self.assertEqual(a.actuation_level(1.0), (1.0, 23, 21))  # the value tested by hand on W
+        self.assertEqual(a.actuation_level(0.1), (0.1, 5, 5))
+        self.assertEqual(a.actuation_level(4.0), (4.0, 215, 210))
+        self.assertEqual(a.actuation_level(1.9)[0], 1.8)
+
+    def test_every_level_has_sane_points(self):
+        for tenths in a.LEVEL_TENTHS:
+            _, press, release = a.actuation_level(tenths / 10)
+            self.assertGreaterEqual(press, release)
+
+    def test_out_of_range_is_refused(self):
+        for bad in (0.0, 4.5, -1):
+            with self.assertRaisesRegex(ValueError, "between"):
+                a.actuation_level(bad)
+
+    def test_exact_bytes_for_one_key(self):
+        self.assertEqual(self.kb.set_actuation("W", 1.0), 1.0)
+        packet = os.read(self.read, 65)
+        self.assertEqual(packet[:6], bytes([0, 0x31, 1, 0x1A, 23, 21]))
+        self.assertEqual(set(packet[6:]), {0})
+
+    def test_many_keys_split_and_lgui_is_skipped(self):
+        self.kb.set_actuation(list("QWERTYUIOPASDFGHJKLZXC") + ["LGUI"], 2.0)
+        first, second = os.read(self.read, 65), os.read(self.read, 65)
+        self.assertEqual((first[2], second[2]), (20, 2))
+        self.assertNotIn(a.BY_NAME["LGUI"][1], second[3:9:3])
+
+    def test_settings_command_list_stays_short(self):
+        self.assertEqual(set(a.SETTING_COMMANDS), {0x31})
+
+
 if __name__ == "__main__":
     unittest.main()

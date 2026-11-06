@@ -6,18 +6,21 @@
   apex-analog map W=rt A=lx-    any key to a controller, pedals, the mouse, a keystroke, or a command
   apex-analog midi              play it as a MIDI instrument, with velocity and per-key pressure
   apex-analog type              press deep for capitals or key combos
+  apex-analog lights            make keys glow with how far they are pressed
   apex-analog stream            one JSON line per update, for piping into anything
   apex-analog overlay           key pressure on your stream, as an OBS browser source
   apex-analog profile           how you type, and what it means for your actuation point
   apex-analog health            check every switch for drift, noise and short range
   apex-analog typeprint         experiment: recognise you by how you press keys
+  apex-analog actuation W 1.0   set where keys actuate, no GG needed
   apex-analog info              the keyboard, your access, and every key's actuation settings
 
   from apex_analog import Keyboard
   with Keyboard() as kb:
       print(kb.read()["W"])     # millimetres
 
-Only ever sends the read commands in ALLOWED, and only to the firmware they were checked on. No dependencies.
+Only sends the read commands in ALLOWED, plus LIGHT_COMMANDS when you ask for lights and SETTING_COMMANDS when you set
+actuation, and only to the firmware they were checked on. No dependencies.
 """
 import argparse
 import base64
@@ -29,6 +32,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import select
 import signal
 import socket
@@ -41,7 +45,7 @@ import threading
 import time
 from typing import NamedTuple
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"
@@ -55,6 +59,20 @@ ALLOWED = {
     0xB1: "each key's press and release actuation points",
     0xB2: "each key's mode byte",
     0x9E: "whether the OLED's ACTUATION ICON is on",
+}
+
+# The only commands that change anything, sent only for lights. Each handler was read on both chips: they store colours in the
+# lighting chip's memory and nothing else, so a replug or 3B undoes them. The rest of the lighting chip's commands stay out,
+# including its own firmware update commands.
+LIGHT_COMMANDS = {
+    0x3A: "set the colour of up to 15 keys",
+    0x21: "set the colour of the whole board",
+    0x3B: "go back to the keyboard's normal lighting",
+}
+
+# Changes a setting, only when you ask. Its handler stores in memory and reaches no flash save. It ignores LGUI (hid 0xE3).
+SETTING_COMMANDS = {
+    0x31: "set the press and release points of up to 20 keys",
 }
 
 # Sensor channel -> (HID usage, name, Linux key code), from the keyboard's own key table.
@@ -89,6 +107,10 @@ BANK_SIZE = 14
 CURVE = [(0, 0.0), (5, 0.2), (8, 0.4), (12, 0.6), (16, 0.8), (21, 1.0), (26, 1.2), (31, 1.4), (38, 1.6), (46, 1.8), (55, 2.0),
          (65, 2.2), (77, 2.4), (91, 2.6), (108, 2.8), (128, 3.0), (151, 3.2), (180, 3.4), (206, 3.7), (215, 4.0)]
 TRAVEL_MM = 4.0
+# The firmware's actuation levels: tenths of a mm per level, and the threshold list its press and release points come from.
+LEVEL_TENTHS = [1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 37, 40]
+LEVEL_THRESHOLDS = [5, 5, 4, 5, 6, 8, 10, 12, 14, 16, 18, 21, 23, 26, 28, 31, 34, 38, 42, 46, 50, 55, 60, 65, 71, 77, 84, 91, 99, 108,
+                    118, 128, 139, 151, 165, 180, 201, 206, 210, 215]
 AT_REST_MM = 0.2  # below this a key counts as untouched: some keys rest up to 0.14 mm above their calibrated rest value
 
 
@@ -116,6 +138,20 @@ def curve_mm(n):
         if n <= x1:
             return mm0 + (mm1 - mm0) * (n - x0) / (x1 - x0)
     return TRAVEL_MM
+
+
+def actuation_level(mm):
+    """Depth in mm -> (mm the keyboard calls it, press point, release point), at the nearest of the firmware's 20 levels."""
+    if not 0.1 <= mm <= TRAVEL_MM:
+        raise ValueError(f"actuation must be between 0.1 and {TRAVEL_MM} mm, not {mm}")
+    level = min(range(len(LEVEL_TENTHS)), key=lambda i: abs(LEVEL_TENTHS[i] / 10 - mm))
+    if level == 0:
+        press, release = LEVEL_THRESHOLDS[1], LEVEL_THRESHOLDS[1]
+    elif level == len(LEVEL_TENTHS) - 1:
+        press, release = LEVEL_THRESHOLDS[-1], LEVEL_THRESHOLDS[-2]
+    else:
+        press, release = LEVEL_THRESHOLDS[2 * level + 2], LEVEL_THRESHOLDS[2 * level + 1]
+    return LEVEL_TENTHS[level] / 10, press, release
 
 
 def key_name(key):
@@ -324,6 +360,41 @@ class Keyboard:
     def actuation_icon(self):
         """Whether the OLED's ACTUATION ICON setting is on. With DISPLAY ICONS also on, the firmware's home screen draws a depth bar."""
         return bool(self._ask([0x9E])[0])
+
+    def set_actuation(self, keys, mm):
+        """Set where these keys actuate, at the nearest firmware level. Returns the level used. LGUI can't be changed this way."""
+        names = [n for n in key_names(keys) if n != "LGUI"]
+        level, press, release = actuation_level(mm)
+        for start in range(0, len(names), 20):
+            part = names[start:start + 20]
+            payload = [0x31, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], press, release)]
+            try:
+                os.write(self.fd, bytes([0, *payload]).ljust(65, b"\0")[:65])
+            except OSError as e:
+                raise Disconnected(f"Lost the keyboard: {e}") from None
+        return level
+
+    def _send_light(self, payload):
+        if not payload or payload[0] not in LIGHT_COMMANDS:
+            raise ValueError(f"refused to send {payload[:1]!r}: not a lighting command")
+        try:
+            os.write(self.fd, bytes([0, *payload]).ljust(65, b"\0")[:65])
+        except OSError as e:
+            raise Disconnected(f"Lost the keyboard: {e}") from None
+
+    def set_colors(self, colors):
+        """{'W': (255, 80, 0)}. Stays that colour until you change it, call clear_colors(), or replug."""
+        items = [[BY_NAME[key_name(key)][1], *color] for key, color in colors.items()]
+        for start in range(0, len(items), 15):
+            part = items[start:start + 15]
+            self._send_light([0x3A, len(part)] + [byte for item in part for byte in item])
+
+    def set_all_colors(self, red, green, blue):
+        self._send_light([0x21, 0, red, green, blue])
+
+    def clear_colors(self):
+        """Back to the keyboard's normal lighting."""
+        self._send_light([0x3B])
 
 
 def _valid_bank(reply):
@@ -1251,6 +1322,45 @@ class PressureTyper(_KeyHolder):
             self.virtual_keys.close()
 
 
+# ---- lights ----------------------------------------------------------------------------------------------------------
+
+class Lights:
+    """Makes each key glow with how far it is pressed, and fade after you let go."""
+
+    def __init__(self, color=(255, 90, 0), base=(10, 10, 20), fade=0.25, hz=30.0):
+        self.color, self.base, self.fade, self.period = color, base, fade, 1.0 / hz
+        self.levels, self.shown = {}, {}
+        self.last = 0.0
+
+    def start(self, kb):
+        self.levels, self.shown = {}, {}
+        kb.set_all_colors(*self.base)
+
+    def update(self, kb, depths, now):
+        elapsed = now - self.last
+        if elapsed < self.period:
+            return
+        self.last = now
+        changes = {}
+        for key, mm in depths.items():
+            level = mm / TRAVEL_MM
+            if self.fade > 0:
+                level = max(level, self.levels.get(key, 0.0) - elapsed / self.fade)
+            self.levels[key] = level
+            color = tuple(int(b + (c - b) * level) for b, c in zip(self.base, self.color))
+            if color != self.shown.get(key, self.base):
+                self.shown[key] = color
+                changes[key] = color
+        if changes:
+            kb.set_colors(changes)
+
+    def stop(self, kb):
+        try:
+            kb.clear_colors()
+        except Disconnected:
+            pass  # a replug resets the lighting anyway
+
+
 # ---- how you type ----------------------------------------------------------------------------------------------------
 
 class Press(NamedTuple):
@@ -1681,7 +1791,7 @@ def _selected_keys(args):
     return None if args.keys in (None, "all") else key_names(args.keys)
 
 
-def _loop(hz, keys, holder, on_frame):
+def _loop(hz, keys, holder, on_frame, lights=None):
     """Read, map, send. Comes back after an unplug or a suspend, and lets go of every output while the keyboard is away."""
     Keyboard().close()  # a problem at the start should be reported, not waited on
     waiting = False
@@ -1696,13 +1806,21 @@ def _loop(hz, keys, holder, on_frame):
                     if missing:
                         raise ApexError(f"No sensor fitted on this keyboard for: {' '.join(missing)}")
                     holder.attach()
-                last = time.monotonic()
-                for depths in kb.stream(hz, keys):
-                    now = time.monotonic()
-                    if holder:
-                        holder.update(depths, now - last)
-                    last = now
-                    on_frame(depths, now)
+                try:
+                    if lights:
+                        lights.start(kb)
+                    last = time.monotonic()
+                    for depths in kb.stream(hz, keys):
+                        now = time.monotonic()
+                        if holder:
+                            holder.update(depths, now - last)
+                        last = now
+                        if lights:
+                            lights.update(kb, depths, now)
+                        on_frame(depths, now)
+                finally:
+                    if lights:
+                        lights.stop(kb)
         except (Disconnected, NotFound, AccessDenied) as e:
             if isinstance(e, AccessDenied) and not waiting:
                 raise
@@ -1739,6 +1857,30 @@ def cmd_stream(args):
     _loop(args.hz or (200 if tracker else 60), explicit, None, on_frame)
 
 
+def _rgb(text):
+    value = text.lstrip("#")
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", value):
+        raise ValueError(f"{text!r} should be a colour like FF5A00")
+    return tuple(bytes.fromhex(value))
+
+
+def _lights_from(args):
+    return Lights(_rgb(args.color), _rgb(args.base), args.fade)
+
+
+def cmd_lights(args):
+    if args.off:
+        with Keyboard() as kb:
+            kb.clear_colors()
+        print("Back to your normal lighting.")
+        return 0
+    lights = _lights_from(args)
+    keys = key_names(args.keys) if args.keys else None
+    with _Screen() as screen:
+        screen.draw(["apex-analog lights", "", "Press keys and watch them glow. Ctrl-C quits and restores your normal lighting."])
+        _loop(args.hz or 60, keys, None, lambda depths, now: None, lights)
+
+
 def _map_lines(mapper, rate):
     lines = [f"apex-analog  {rate:.0f} updates/s  " + " ".join(m.text for m in mapper.maps), ""]
     for name, value in mapper.values.items():
@@ -1768,7 +1910,7 @@ def _holder_lines(holder):
     return ["", "Ctrl-C quits."]
 
 
-def _drive(holder, hz, read, lines, sinks=(), explicit=None):
+def _drive(holder, hz, read, lines, sinks=(), explicit=None, lights=None):
     """Run a key-driven mode: read the keyboard, feed the mode and any network outputs, and keep the screen up to date."""
     state = {"scans": 0, "rate": 0.0, "last": time.monotonic(), "drawn": 0.0}
     try:
@@ -1782,7 +1924,7 @@ def _drive(holder, hz, read, lines, sinks=(), explicit=None):
                 if now - state["drawn"] >= 0.05:
                     state["drawn"] = now
                     screen.draw(lines(holder, state["rate"]))
-            _loop(hz, read, holder, on_frame)
+            _loop(hz, read, holder, on_frame, lights)
     finally:
         holder.close()
 
@@ -1799,7 +1941,7 @@ def cmd_map(args):
         _say(f"Virtual controller {player} ready: {pad.path}")
     if mapper.pedals:
         _say(f"Virtual pedals ready: {mapper.pedals.path}. They have no default bindings, so bind them in your game once.")
-    _drive(mapper, args.hz or 120, read, _map_lines, sinks, explicit)
+    _drive(mapper, args.hz or 120, read, _map_lines, sinks, explicit, _lights_from(args) if args.lights else None)
 
 
 def _midi_lines(instrument, rate):
@@ -1827,7 +1969,7 @@ def cmd_midi(args):
     instrument = MidiInstrument(args.layout, args.octave, args.channel, args.note_at, args.aftertouch, args.soft, args.hard, ccs,
                                 swallow=not args.no_swallow, pause_key=args.pause_key)
     _say(f"MIDI port ready: {instrument.midi.address} \"Apex Analog\". Connect it from your synth or DAW, or with aconnect.")
-    _drive(instrument, args.hz or 300, instrument.keys, _midi_lines)
+    _drive(instrument, args.hz or 300, instrument.keys, _midi_lines, lights=_lights_from(args) if args.lights else None)
 
 
 def _type_lines(typer, rate):
@@ -2024,6 +2166,41 @@ def cmd_info(args):
         print(f"{name:8}{k['mm']:6.1f}{k['press']:7.2f}{k['release']:9.2f}{k['mode']:6d}")
 
 
+def cmd_actuation(args):
+    if args.mm is None and args.keys is not None:
+        raise ValueError("Say how deep too, like: apex-analog actuation W 1.0")
+    with Keyboard() as kb:
+        if args.keys is not None:
+            names = list(kb.keys) if args.keys == "all" else key_names(args.keys)
+            missing = [n for n in names if n not in kb.keys]
+            if missing:
+                raise ValueError(f"No sensor fitted on this keyboard for: {' '.join(missing)}")
+            level = kb.set_actuation(names, args.mm)
+            time.sleep(0.1)
+            changed = [n for n in names if n != "LGUI"]
+            _, press, release = actuation_level(args.mm)
+            settings = kb.actuation(changed)
+            wrong = [n for n in changed if (settings[n]["press_raw"], settings[n]["release_raw"]) != (press, release)]
+            if wrong:
+                raise ApexError(f"Sent, but these read back differently: {' '.join(wrong)}")
+            print(f"Set {len(changed)} key{'s' if len(changed) != 1 else ''} to {level:.1f} mm and read it back.")
+            if "LGUI" in names:
+                print("LGUI skipped: this command can't change it.")
+        settings = kb.actuation()
+    groups = {}
+    for name, value in settings.items():
+        groups.setdefault(value["press"], []).append(name)
+    for press, names in sorted(groups.items()):
+        print(f"{press:.2f} mm: " + ("every other key" if len(names) > 30 else " ".join(names)))
+    return 0
+
+
+def _add_light_options(parser):
+    parser.add_argument("--color", default="FF5A00", metavar="RRGGBB", help="colour of a key at full depth (default FF5A00)")
+    parser.add_argument("--base", default="0A0A14", metavar="RRGGBB", help="colour of everything else (default 0A0A14)")
+    parser.add_argument("--fade", type=float, default=0.25, metavar="SEC", help="how long a key takes to fade after you let go (default 0.25)")
+
+
 def _add_network_options(parser):
     parser.add_argument("--keys", help="which keys to send, like WASD or W,A,SPACE. Required for network outputs; 'all' sends every key on this machine only")
     parser.add_argument("--udp", metavar="HOST:PORT", help="send each update as a JSON datagram")
@@ -2064,6 +2241,8 @@ def build_parser():
         p.add_argument("--run-rate", type=float, default=8.0, metavar="N/S", help="run: and desktop repeats at full depth (default 8)")
         p.add_argument("--no-swallow", action="store_true", help="let mapped keys keep typing as well")
         p.add_argument("--pause-key", default="PAUSE", metavar="KEY", help="key that pauses mapping so you can type (default PAUSE)")
+        p.add_argument("--lights", action="store_true", help="also make these keys glow as you press them")
+        _add_light_options(p)
         _add_network_options(p)
         p.set_defaults(func=cmd_map)
 
@@ -2085,6 +2264,8 @@ def build_parser():
     m.add_argument("--cc", action="append", metavar="KEY=NUMBER", help="send a key's depth as a MIDI controller, like --cc F=74")
     m.add_argument("--no-swallow", action="store_true", help="let these keys keep typing as well")
     m.add_argument("--pause-key", default="PAUSE", metavar="KEY", help="key that pauses playing so you can type (default PAUSE)")
+    m.add_argument("--lights", action="store_true", help="also make these keys glow as you press them")
+    _add_light_options(m)
     m.add_argument("--hz", type=float, help="updates per second")
     m.set_defaults(func=cmd_midi)
 
@@ -2096,6 +2277,18 @@ def build_parser():
     t.add_argument("--pause-key", default="PAUSE", metavar="KEY", help="key that pauses this so you can type normally (default PAUSE)")
     t.add_argument("--hz", type=float, help="updates per second")
     t.set_defaults(func=cmd_type)
+
+    l = commands.add_parser("lights", help="make keys glow with how far they are pressed")
+    l.add_argument("--keys", help="only these keys respond, like WASD")
+    l.add_argument("--off", action="store_true", help="go back to your normal lighting, if something quit without restoring it")
+    _add_light_options(l)
+    l.add_argument("--hz", type=float, help="updates per second")
+    l.set_defaults(func=cmd_lights)
+
+    ac = commands.add_parser("actuation", help="see or set where keys actuate, no GG needed")
+    ac.add_argument("keys", nargs="?", help="W, WASD, W,A,SPACE, or all. Leave out to just see the current settings")
+    ac.add_argument("mm", nargs="?", type=float, help="depth from 0.1 to 4.0; uses the nearest of the firmware's 20 levels")
+    ac.set_defaults(func=cmd_actuation)
 
     tp = commands.add_parser("typeprint", help="experiment: recognise you by how you press keys. Not security")
     tp.add_argument("action", choices=("enroll", "check", "forget"), help="enroll: type a set phrase 8 times. check: try to pass. forget: delete it")
