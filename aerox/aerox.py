@@ -150,6 +150,7 @@ NO_ECHO = {0x90, 0xD0}  # these reply with a bare string
 UNREACHABLE = b"\x40\xff"  # the dongle couldn't forward: mouse off, asleep or out of range
 REPLY_TIMEOUT = 4.5  # the dongle gives up on a forwarded command after 4 s
 RESYNC_TIMEOUT = 15  # how long a polling rate change may take to reconnect
+LOCK_TIMEOUT = 20  # long enough to outlast whatever a polling change is doing elsewhere
 LOW_BATTERY_LEVEL = 2  # don't erase flash on a nearly flat battery
 
 
@@ -381,11 +382,17 @@ class Aerox:
             self.fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
         except PermissionError:
             raise AeroxError(f"No permission for {node}. Run ./install.sh to add the udev rule.") from None
-        try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(self.fd)
-            raise AeroxError(f"Another program is using {node}.") from None
+        # The other user is usually the GUI or another aerox, holding it for a moment.
+        end = time.monotonic() + LOCK_TIMEOUT
+        while True:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= end:
+                    os.close(self.fd)
+                    raise AeroxError(f"Another program is holding {node}. Close it and retry.") from None
+                time.sleep(0.05)
 
     @classmethod
     def open(cls):
@@ -619,7 +626,8 @@ class Aerox:
         else:
             self.set_dpi(dpi["dpi"], dpi["current"])
         self.set_polling(saved["polling_hz"])
-        self.set_sleep_ms(saved["sleep_ms"])
+        if self.sleep_ms() != saved["sleep_ms"]:
+            self.set_sleep_ms(saved["sleep_ms"])
         self.set_low_power(saved["low_power"])
         self.set_lighting(**saved["lighting"])
         self.set_reactive(**saved["reactive"])

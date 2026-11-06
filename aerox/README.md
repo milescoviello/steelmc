@@ -1,19 +1,10 @@
 # aerox
 
-Read a SteelSeries Aerox 9 Wireless from Linux, with no vendor software: battery, DPI stages, polling rate, sleep time and button bindings.
+Configure a SteelSeries Aerox 9 Wireless on Linux with no vendor software, from a command line or a GUI. The GUI also configures an Apex Pro Gen 3 keyboard, through [apex-analog](https://github.com/milescoviello/apex-analog).
 
-It's one Python file with no dependencies, and it's **read-only** for now.
+![The mouse page](docs/mouse.png)
 
-```
-$ aerox
-Aerox 9 Wireless, through the dongle (/dev/hidraw8)
-  dongle    1.2.4
-  mouse     1.2.4
-  battery   30% (level 7 of 21), not charging
-  polling   1000 Hz
-  dpi       stage 1 of 5: [0x04] 0x09 0x0d 0x1b 0x26
-  sleep     5 min
-```
+![The keyboard page: shading on each key shows where it fires](docs/keyboard.png)
 
 ## Install
 
@@ -21,42 +12,66 @@ Aerox 9 Wireless, through the dongle (/dev/hidraw8)
 ./install.sh
 ```
 
-This links `aerox` into `~/.local/bin` and adds a udev rule. The rule opens only the mouse's vendor interface (interface 3). The interfaces carrying clicks and keystrokes stay closed.
+This links `aerox` and `aerox-gui` into `~/.local/bin`, adds an application menu entry, and installs a udev rule. The rule opens only the mouse's vendor interface. The interfaces that carry clicks and keystrokes stay closed.
 
-## Use
+The command line needs only Python. The GUI also needs PySide6, and its keyboard page needs `apex-analog` on your PATH.
 
-| Command | Shows |
+## GUI
+
+Run `aerox-gui`, or find "SteelSeries settings" in your application menu.
+
+Changes apply as you make them, but last only until the mouse powers off. **Save to mouse** writes them to its flash, and **Undo changes** goes back to how things were when the page loaded. The keyboard page works the same way, with **Save to keyboard**.
+
+## Command line
+
+| Command | Does |
 |---|---|
 | `aerox` | Status |
-| `aerox battery` | Battery |
-| `aerox dpi` | DPI stages, current one in brackets |
-| `aerox polling` | Polling rate |
-| `aerox sleep` | Sleep time |
-| `aerox buttons` | What each button is bound to, and which differ from the default |
-| `aerox info` | Device node, firmware versions, git hashes |
+| `aerox battery` | Battery level |
+| `aerox dpi 400,800,1600 --stage 2` | Set DPI stages, or show them with no arguments |
+| `aerox polling 1000` | 125, 250, 500 or 1000 Hz |
+| `aerox sleep 5` | Minutes until it sleeps: 0 (off) to 20, in half minutes |
+| `aerox low-power on` | The sensor's low power mode |
+| `aerox buttons` | What each button does |
+| `aerox bind "side 12" alt+tab` | Bind a button |
+| `aerox light --brightness 8 --idle-minutes 1` | Brightness, idle dimming, smart lighting |
+| `aerox color all ff5a00` | Temporary zone colours. `aerox color clear` undoes them |
+| `aerox reactive on --color ffffff` | Flash on click |
+| `aerox save` | Write changes to the mouse's flash |
+| `aerox backup FILE`, `aerox restore FILE` | Copy settings to and from a file |
+| `aerox info` | Device and firmware details |
 
 Add `--json` to any of them for scripts.
 
-## What the values mean
+**Buttons:** `left`, `right`, `middle`, `tilt left`, `tilt right`, `dpi`, `side 1` to `side 12`, `wheel up`, `wheel down`.
 
-- **DPI** is shown raw. The value goes straight to a sensor register and the firmware has no conversion table, so the tool doesn't guess.
-- **Battery** is a level from 1 to 21. The percentage assumes 5% steps.
-- **Button names** come from the firmware's defaults: `side N` is the button that types key N out of the box. `record 3` and `record 4` are physical buttons not identified yet.
+**Actions:** keys like `alt+tab` or `ctrl+shift+t` (up to 4 at once), `mouse1` to `mouse8`, `dpi`, `scroll-up`, `scroll-down`, `tilt-left`, `tilt-right`, `media:mute` (also `play-pause`, `next`, `previous`, `stop`, `volume-up`, `volume-down`), `none`.
 
 ## Safety
 
-The protocol comes from reading the firmware's command handlers. Commands look harmless by their shape but aren't: some with the "read" bit set restore defaults and save to flash. So:
+The protocol comes from reading the firmware's command handlers, because the commands aren't what they look like. Some with the "read" bit set restore defaults and save to flash. So:
 
-- It can only send the exact bytes and arguments in `ALLOWED`. Anything else is refused before reaching the device.
-- It stops on any firmware other than 1.2.4, on both the dongle and the mouse.
-- It sends one command at a time and waits for the reply, since the dongle drops anything sent while a forwarded command is pending.
+- It can only send the exact commands in `ALLOWED`, and every argument is checked first. Anything else is refused before reaching the device.
+- It stops on any firmware but 1.2.4, on both the dongle and the mouse.
+- Every setting is read back after it's written.
+- Only `aerox save` and the Save button write to flash. Both ask first, and neither runs on a nearly flat battery.
+
+Changing the polling rate makes the dongle re-sync its radio, so the mouse drops out for about a second.
+
+## What it can't do yet
+
+- **Lighting effects.** Zone colours here are temporary. The stored effects use a format that's only partly decoded, and a bad one makes the mouse reset its lighting.
+- **Actions that GG runs on Windows.** GG can attach software actions to a button, like its "switch apps" action or repeating clicks. These aren't on the mouse, so they do nothing on Linux. Alt+Tab works as a normal key binding instead, and on any computer.
+- **Angle snapping and GG's acceleration settings.** I couldn't find what they map to on the mouse.
+- **Macros.**
 
 ## Tested
 
-On real hardware through the dongle: every command above. Not tested yet: the mouse plugged in by cable, or the mouse asleep or off.
+On real hardware, through the dongle: every setting round-tripped in RAM, and the GUI driven against both devices. Not tested yet: saving to flash, the mouse plugged in by cable, and whether a RAM change survives the mouse sleeping.
 
 ```
-python3 test_aerox.py
+python3 test_aerox.py                   # no hardware
+python3 test_gui.py                     # no hardware, nothing on screen
+AEROX_HARDWARE=1 python3 test_hardware.py   # the real mouse, never saves
+python3 screenshots.py OUTDIR           # render the GUI to PNG, nothing on screen
 ```
-
-The tests need no hardware.

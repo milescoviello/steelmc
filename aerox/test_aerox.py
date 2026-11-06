@@ -2,12 +2,14 @@
 """Tests for aerox. No hardware needed: a small simulated mouse answers over a socket pair,
 and sample replies are real ones captured from an Aerox 9 Wireless on firmware 1.2.4."""
 import contextlib
+import fcntl
 import io
 import json
 import os
 import select
 import socket
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -496,6 +498,23 @@ class Finding(unittest.TestCase):
     def test_other_firmware_is_refused(self):
         with self.assertRaisesRegex(aerox.AeroxError, "isn't 1.2.4"):
             aerox.Aerox("/dev/fake", "dongle", "0125", fd=-1)
+
+
+class Locking(unittest.TestCase):
+    def test_waits_for_a_short_holder(self):
+        with tempfile.NamedTemporaryFile() as f:
+            holder = os.open(f.name, os.O_RDWR)
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            threading.Timer(0.1, os.close, [holder]).start()
+            aerox.Aerox(f.name, "dongle", aerox.FIRMWARE_BCD).close()
+
+    def test_gives_up_on_a_long_holder(self):
+        with tempfile.NamedTemporaryFile() as f, mock.patch("aerox.LOCK_TIMEOUT", 0.1):
+            holder = os.open(f.name, os.O_RDWR)
+            self.addCleanup(os.close, holder)
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            with self.assertRaisesRegex(aerox.AeroxError, "holding"):
+                aerox.Aerox(f.name, "dongle", aerox.FIRMWARE_BCD)
 
 
 class Command(unittest.TestCase):
