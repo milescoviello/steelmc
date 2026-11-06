@@ -108,6 +108,7 @@ ALIASES = {
 }
 NO_MAGNET = (2900, 928)  # calibration the firmware leaves on channels with no switch fitted
 BANK_SIZE = 14
+WRITE_GAP = 0.005  # seconds to leave after a command that gets no reply
 
 # The firmware's own actuation levels: position as n/255 of a key's calibrated range -> distance in mm.
 # The sensors are not linear: half the sensor range is already 3.0 mm.
@@ -374,25 +375,24 @@ class Keyboard:
         level, press, release = actuation_level(mm)
         for start in range(0, len(names), 20):
             part = names[start:start + 20]
-            payload = [0x31, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], press, release)]
-            try:
-                os.write(self.fd, bytes([0, *payload]).ljust(65, b"\0")[:65])
-            except OSError as e:
-                raise Disconnected(f"Lost the keyboard: {e}") from None
+            self._write([0x31, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], press, release)])
         return level
 
-    def _send_light(self, payload):
-        if not payload or payload[0] not in LIGHT_COMMANDS:
-            raise ValueError(f"refused to send {payload[:1]!r}: not a lighting command")
+    def _write(self, payload):
+        """Send a command that gets no reply, then give the keyboard time to act on it. One that arrives straight after appears to replace it."""
         try:
             os.write(self.fd, bytes([0, *payload]).ljust(65, b"\0")[:65])
         except OSError as e:
             raise Disconnected(f"Lost the keyboard: {e}") from None
+        time.sleep(WRITE_GAP)
+
+    def _send_light(self, payload):
+        if not payload or payload[0] not in LIGHT_COMMANDS:
+            raise ValueError(f"refused to send {payload[:1]!r}: not a lighting command")
+        self._write(payload)
 
     def _send_colors(self, items):
         for start in range(0, len(items), 15):
-            if start:
-                time.sleep(0.002)  # give the lighting chip's link a moment between reports
             part = items[start:start + 15]
             self._send_light([0x3A, len(part)] + [byte for item in part for byte in item])
 

@@ -638,6 +638,21 @@ class LightingBytes(unittest.TestCase):
         self.kb.clear_colors()
         self.assertEqual(self.packets(1)[0][:2], bytes([0, 0x3B]))
 
+    def test_every_write_leaves_a_gap_even_the_last(self):
+        naps = []
+        original = a.time.sleep
+        a.time.sleep = naps.append
+        self.addCleanup(setattr, a.time, "sleep", original)
+        self.kb.set_all_colors(0, 0, 0)
+        self.assertEqual(naps, [a.WRITE_GAP] * ((len(a.LED_HIDS) + 14) // 15))
+        naps.clear()
+        self.kb.clear_colors()
+        self.assertEqual(naps, [a.WRITE_GAP])
+        naps.clear()
+        self.kb.set_actuation("W", 1.0)
+        self.assertEqual(naps, [a.WRITE_GAP])
+        self.assertGreaterEqual(a.WRITE_GAP, 0.002)
+
     def test_only_lighting_commands_get_through(self):
         for command in (0x31, 0x30, 0x01, 0x5A, 0x7F, 0x74, 0x15, 0x16, 0x51, 0x22, 0x21):
             with self.assertRaisesRegex(ValueError, "refused"):
