@@ -240,7 +240,8 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 - A real drive: BeamNG.drive 0.40.4 through Proton saw it as `XBox Controller 1` with no setup, and it drove well on W, S, A and D. That's one person and one short session.
 - The typing print passed on real key presses, `health` ran on the real keyboard, and an actuation change on W was read back and felt on a real press.
 - **Tested only with simulated key depths so far:** MIDI playing feel, pressure typing, the typing profile's numbers, and two players or pedals inside a game. MIDI did reach a real ALSA client, the overlay did run in a real browser, and the extra controllers and pedals did appear to Linux as joysticks.
-- **Not yet run on the real keyboard:** `lights`, and `actuation` as a command. Both send bytes checked by tests against the firmware's format.
+- `lights --keep` and the glow in `lights` work on the real keyboard.
+- **Not yet confirmed on the real keyboard:** `lights` taking the whole board dark, and setting keys with the `actuation` command.
 
 ## Safety
 
