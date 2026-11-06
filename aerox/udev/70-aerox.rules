@@ -1,0 +1,5 @@
+# aerox: let the logged-in user talk to the Aerox 9 Wireless's vendor interface.
+# Interface 3 only (dongle 1858, mouse 185a). The others carry real clicks and keystrokes.
+# ATTRS must all match on one parent, and the IDs and interface number live on different ones, hence two steps.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="1858|185a", ENV{AEROX_DEVICE}="1"
+ENV{AEROX_DEVICE}=="1", ATTRS{bInterfaceNumber}=="03", MODE="0660", GROUP="input", TAG+="uaccess"

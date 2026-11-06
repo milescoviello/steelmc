@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# Firmware is SteelSeries code and never goes in this repo.
+*.bin
+*.padded_bin
+fw-*/
