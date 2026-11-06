@@ -36,6 +36,27 @@ def eq(got, want, what=''):
         raise AssertionError(f'{what}: got {got!r}, want {want!r}')
 
 
+# --- mirroring the panel ---------------------------------------------------
+
+@check('frame command reports what the panel shows')
+def _frame_command():
+    import base64
+    ctx = oledd.Context.__new__(oledd.Context)
+    ctx.last_fb, ctx.current_source, ctx.blanked = None, 'idle', False
+    ctx.blank_reason, ctx.released_until, ctx.forced_mode = None, 0.0, None
+    ctx.notify = None
+    server = oledd.Server.__new__(oledd.Server)
+    server.ctx = ctx
+    reply = server.handle({'cmd': 'frame'})
+    eq(reply['ok'], True, 'ok before any frame')
+    eq(reply['fb'], None, 'no frame yet')
+    ctx.last_fb = bytes(range(256)) * 2 + bytes(128)
+    reply = server.handle({'cmd': 'frame'})
+    eq(base64.b64decode(reply['fb']), ctx.last_fb, 'framebuffer')
+    eq(reply['source'], 'idle', 'source')
+    eq(reply['released'], False, 'released')
+
+
 # --- packing ---------------------------------------------------------------
 
 def _patterns():

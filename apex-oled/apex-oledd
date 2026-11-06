@@ -2261,6 +2261,18 @@ class Server(threading.Thread):
             self.ctx.do_action(act)
             return {'ok': True, 'mode': self.ctx.forced_mode or 'auto',
                     'blanked': self.ctx.blank_override}
+        if cmd == 'frame':
+            # What the panel is showing, as a packed framebuffer, so another
+            # program can mirror it. fb is None until the first frame lands.
+            import base64
+            fb = self.ctx.last_fb
+            return {'ok': True,
+                    'fb': base64.b64encode(bytes(fb)).decode() if fb else None,
+                    'source': self.ctx.current_source,
+                    'blanked': self.ctx.blanked,
+                    'blank_reason': self.ctx.blank_reason,
+                    'released': time.time() < self.ctx.released_until,
+                    'forced_mode': self.ctx.forced_mode}
         if cmd == 'status':
             now = time.time()
             pres = self.ctx.presence
@@ -2302,6 +2314,7 @@ class Context:
         self.blank_override = False
         self.do_action = lambda action: None    # set once sources exist
         self.released_until = 0.0   # panel handed to another process until then
+        self.last_fb = None         # the last framebuffer that reached the panel
         self.notify = None
         self.sources = []
 
@@ -2557,7 +2570,7 @@ def run(args):
                       else apex.pack(compose(frame, now, cfg)))
                 if fb != last_fb:          # skip identical redraws
                     dpy.send(fb)
-                    last_fb = fb
+                    last_fb = ctx.last_fb = fb
                     healthy()
             ctx.stop.wait(1.0 / src.fps)
         except (OSError, RuntimeError) as e:
