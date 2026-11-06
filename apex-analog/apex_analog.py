@@ -2869,7 +2869,7 @@ def cmd_off(args):
         found = [slot for slot in slots if _job_call(client, OP_OFF, slot.encode())["found"]]
     finally:
         client.close()
-    print(f"Turned off: {' '.join(found)}" if found else f"{args.name} wasn't on.")
+    print((f"Turned off {args.name}." if args.name != "all" else f"Turned off: {' '.join(found)}") if found else f"{args.name} wasn't on.")
     return 0
 
 
