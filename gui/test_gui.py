@@ -467,10 +467,18 @@ class ShortcutPanel(unittest.TestCase):
         self.assertEqual(self.page.shortcut_key.text(), "SteelSeries + J")
 
     def test_the_keyboards_own_keys_are_refused(self):
-        for key in ("Q", "I", "O", "T", "LGUI", "SS"):
+        for key in ("Q", "I", "O", "T", "LGUI"):
             self.page.pick([key])
             self.assertFalse(self.page.shortcut_save.isEnabled(), key)
             self.assertIn("keyboard's own", self.page.shortcut_key.text())
+
+    def test_the_steelseries_key_itself_is_a_tap(self):
+        self.page.pick(["SS"])
+        self.assertTrue(self.page.shortcut_save.isEnabled())
+        self.assertEqual(self.page.shortcut_key.text(), "Tap the SteelSeries key alone")
+        self.kind("volume+")
+        self.page.shortcut_save.click()
+        self.assertEqual(self.device.calls[-1], ("add_shortcut", "SS", "volume+", ""))
 
     def test_save_keys(self):
         self.page.pick(["J"])

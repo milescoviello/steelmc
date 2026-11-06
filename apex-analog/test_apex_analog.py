@@ -88,7 +88,7 @@ class Safety(unittest.TestCase):
 
     def test_allowlist_has_not_grown_by_accident(self):
         self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4})
-        self.assertEqual(set(a.BIND_COMMANDS), {0x63, 0x64})
+        self.assertEqual(set(a.BIND_COMMANDS), {0x63, 0x64, 0x60})
         self.assertEqual(set(a.BIND_CHECKS), set(a.BIND_COMMANDS))
 
     def test_only_known_write_commands_can_be_sent(self):
@@ -185,6 +185,8 @@ class SimulatedKeyboard:
                 self.tables[layer][hid] = bytes(record)
         elif p[0] == 0x64:
             self.wheel[0 if p[1] == 0 else 1] = [bytes(p[2:7]), bytes(p[7:12])]
+        elif p[0] == 0x60:
+            self.layer_key = p[1]
         else:
             raise AssertionError(f"unexpected write {p.hex(' ')}")
 
@@ -314,6 +316,23 @@ class Bindings(unittest.TestCase):
         self.assertRegex(listing, r"\n  J +media:play-pause +\(changed\)")
         self.assertRegex(listing, r"\n  WHEEL_DOWN +media:next +\(changed\)")
         self.assertRegex(listing, r"\n  Q +builtin:10\n")
+
+    def test_move_the_layer_then_bind_the_steelseries_key(self):
+        sim = SimulatedKeyboard()
+        self.assertIn("Holding SS turns on", self.run_cli(sim, "layer-key"))
+        self.assertIn("Holding SCRLK now turns on", self.run_cli(sim, "layer-key", "scrlk"))
+        self.assertEqual(sim.layer_key, 0x47)
+        self.run_cli(sim, "bind", "SS", "media:play-pause")
+        self.assertEqual(sim.tables[0][0xF0], a.parse_binding("media:play-pause"))
+        with self.assertRaisesRegex(ValueError, "never fires"):
+            self.run_cli(sim, "bind", "SCRLK", "f13")
+        self.assertIn("back on the SteelSeries key", self.run_cli(sim, "layer-key", "SS"))
+        self.assertEqual(sim.layer_key, 0xF0)
+        with self.assertRaisesRegex(ValueError, "not a control"):
+            self.run_cli(sim, "layer-key", "WHEEL_PRESS")
+        for payload in ([0x60], [0x60, 0xF2], [0x60, 0x47, 0]):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                a._check_layer_key(payload)
 
     def test_refusals_are_explained(self):
         sim = SimulatedKeyboard()
@@ -1466,6 +1485,55 @@ class Shortcuts(unittest.TestCase):
         m.update({"SS": 3.0, "J": 0.0}, 0.01)
         m.update({"SS": 3.0, "J": 3.0}, 0.01)
         self.assertEqual(started, ["hello"])
+
+    def tap(self, m, held=0.1, others=None, step=0.01):
+        frames = max(1, round(held / step))
+        for _ in range(frames):
+            m.update({"SS": 3.0, **(others or {})}, step)
+        m.update({"SS": 0.0}, step)
+
+    def test_a_quick_tap_of_ss_alone_fires(self):
+        started = self.runner()
+        m = self.mapper("SS=run:hello", "SS+J=run:there")
+        self.assertFalse(m.want_swallow)
+        self.assertEqual(m.held_keys(), [])
+        self.assertEqual(m.read_keys(), ["J", "SS"])
+        m.update({"SS": 3.0}, 0.01)
+        self.assertIsNone(m.read_keys())  # every key while SS is down, to see a combo
+        m.update({"SS": 0.0}, 0.01)
+        self.assertEqual(m.read_keys(), ["J", "SS"])
+        self.assertEqual(started, ["hello"])
+
+    def test_holding_ss_or_using_it_for_a_combo_doesnt_fire(self):
+        started = self.runner()
+        m = self.mapper("SS=run:hello", "SS+J=run:there")
+        self.tap(m, held=0.6)
+        self.assertEqual(started, [])
+        self.tap(m, others={"J": 3.0})
+        self.assertEqual(started, ["there"])
+        self.tap(m, others={"Q": 3.0})  # the keyboard's own SS+Q: not a shortcut here, but still a combo
+        self.assertEqual(started, ["there"])
+        self.tap(m)
+        self.assertEqual(started, ["there", "hello"])
+
+    def test_losing_the_keyboard_mid_press_isnt_a_tap(self):
+        started = self.runner()
+        m = self.mapper("SS=run:hello")
+        m.update({"SS": 3.0}, 0.01)
+        m.release()
+        self.assertEqual(started, [])
+
+    def test_a_tap_only_sends_one_off_things(self):
+        for rule in ("SS=rt", "SS=lx-", "SS=mouse-x+", "SS=tap:RIGHT", "SS=clutch"):
+            with self.assertRaisesRegex(ValueError, "tap of the SteelSeries key"):
+                a.Mapping(rule)
+        a.Mapping("SS=key:F13")
+        a.Mapping("SS=volume+")
+
+    def test_shortcut_rule_for_ss_is_a_tap(self):
+        self.assertEqual(a.shortcut_rule("SS", "volume+"), "SS=volume+")
+        self.assertEqual(a.shortcut_rule("J", "volume+"), "SS+J=volume+")
+        self.assertTrue(a.Mapping(a.shortcut_rule("SS", "volume+")).ss_tap)
 
     def test_never_grabs_the_keyboard(self):
         m = self.mapper("SS+J=run:hello")

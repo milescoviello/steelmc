@@ -197,8 +197,8 @@ EFFECTS = [
     ("CPU and memory on the F row", ["lights", "--effect", "stats"], None),
     ("Heatmap of what you press", ["lights", "--effect", "heatmap"], None),
 ]
-# Keys the keyboard keeps for its own settings while its SteelSeries key is held, plus that key itself.
-SHORTCUT_TAKEN = {"Q", "I", "O", "T", "LGUI", "SS"}
+# Keys the keyboard keeps for its own settings while its SteelSeries key is held. A shortcut on SS itself fires on a tap.
+SHORTCUT_TAKEN = {"Q", "I", "O", "T", "LGUI"}
 SHORTCUT_KINDS = [("Press keys", "keys", "ctrl+c"), ("Type text", "text", "hello"), ("Run a command", "command", "firefox"),
                   ("Volume up", "volume+", ""), ("Volume down", "volume-", ""), ("Brightness up", "brightness+", ""),
                   ("Brightness down", "brightness-", "")]
@@ -231,6 +231,11 @@ def pretty_action(action):
     if "+" not in action:
         return f"Key {action.upper() if len(action) == 1 else action.capitalize()}"
     return "+".join(part.upper() if len(part) == 1 else part.capitalize() for part in action.split("+"))
+
+
+def shortcut_label(key):
+    """SteelSeries + J, or for the SteelSeries key itself, a tap of it."""
+    return "Tap the SteelSeries key alone" if key == "SS" else f"SteelSeries + {KEY_LABELS.get(key, key)}"
 
 
 def binding_label(entry, layer):
@@ -1686,7 +1691,7 @@ class KeyboardPage(QWidget):
         panel = well(row(self.preset, use), row(save_as, delete, None), title="Saved setups")
         title = QLabel("Shortcuts")
         title.setObjectName("title")
-        hint = muted("Hold the SteelSeries key and press another key. Red keys are the keyboard's own.")
+        hint = muted("Hold the SteelSeries key and press another key, or pick the SteelSeries key itself for a quick tap. Red keys are the keyboard's own.")
         hint.setWordWrap(True)
         self.shortcut_key = QLabel("Pick one key")
         self.shortcut_kind = QComboBox()
@@ -1740,7 +1745,7 @@ class KeyboardPage(QWidget):
         if current in data["presets"]:
             self.preset.setCurrentText(current)
         self.show_jobs(data["jobs"])
-        self.shortcut_list.setText("\n".join(f"{KEY_LABELS.get(k, k)}: {v}" for k, v in sorted(self.shortcuts.items())))
+        self.shortcut_list.setText("\n".join(f"{shortcut_label(k)}: {v}" for k, v in sorted(self.shortcuts.items())))
         self.loading = False
         self.selection_changed()
         if not self.status.text():
@@ -2046,7 +2051,7 @@ class KeyboardPage(QWidget):
             return
         chosen, target = self.selected_keys(), self.shortcut_target()
         if target:
-            self.shortcut_key.setText(f"SteelSeries + {KEY_LABELS.get(target, target)}")
+            self.shortcut_key.setText(shortcut_label(target))
         elif len(chosen) == 1:
             self.shortcut_key.setText(f"{KEY_LABELS.get(chosen[0], chosen[0])} is the keyboard's own")
         else:

@@ -106,6 +106,7 @@ RAPID_TAP_MODE = 2  # the value the keyboard's own RAPID TAP menu sets
 BIND_COMMANDS = {
     0x63: "set what up to 10 keys do, on one layer",
     0x64: "set what the volume wheel does, on one layer",
+    0x60: "choose which key turns on the SteelSeries layer while held",
 }
 # The one command that writes flash: all current settings, over one of the five saved configs. Same code as the Save Config menu.
 SAVE_COMMAND = 0x09
@@ -298,7 +299,13 @@ def _check_wheel(payload):
             _check_record(record)
 
 
-BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel}
+def _check_layer_key(payload):
+    """60 <hid>. Only a key the firmware can bind, so the layer always stays reachable from a real key."""
+    if len(payload) != 2 or payload[1] not in BIND_NAMES:
+        raise ValueError("refused to send 60: it takes one key the keyboard can bind")
+
+
+BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel, 0x60: _check_layer_key}
 
 
 def bind_key(key):
@@ -627,11 +634,13 @@ class Keyboard:
         return out
 
     def stream(self, hz=100, keys=None):
-        """Yields read() forever at up to hz. All keys tops out near 190 Hz; two rows of keys near 490 Hz."""
-        names = key_names(keys)
+        """Yields read() forever at up to hz. All keys tops out near 190 Hz; two rows of keys near 490 Hz.
+        keys can also be a function, asked before each read, for a mode that sometimes needs more keys than others."""
+        dynamic = callable(keys)
+        names = None if dynamic else key_names(keys)
         period, due = 1.0 / hz, time.monotonic()
         while True:
-            yield self.read(names)
+            yield self.read(key_names(keys()) if dynamic else names)
             due += period
             delay = due - time.monotonic()
             if delay > 0:
@@ -746,6 +755,10 @@ class Keyboard:
     def layer_key(self):
         """The HID usage of the key that turns on the SteelSeries layer while held. 0xF0, the SteelSeries key, out of the box."""
         return self._ask([0xE0])[0]
+
+    def set_layer_key(self, key):
+        """Move the SteelSeries layer to another key. Stays in the keyboard's memory until save_to_keyboard."""
+        self._write([0x60, BIND_HIDS[bind_key(key)]])
 
     def channels(self):
         """Filtered sensor value of all 70 channels, including those with no switch fitted."""
@@ -1232,11 +1245,13 @@ class Digital:
 
 SHORTCUT_HOLD = "SS"  # hold the SteelSeries key and press another. The keyboard stops that key typing by itself
 SHORTCUT_DOWN = 0.5  # mm
+SS_TAP_SECONDS = 0.35  # a rule on SS itself fires on a quick tap with nothing else pressed, so holding it still works for combos
 SHORTCUT_TAKEN = ("Q", "I", "O", "T", "LGUI")  # the keyboard's own combos, lit red while SS is held. F9-F12 and the arrows have no sensors
 
 
 class Mapping:
-    """One 'KEY=OUTPUT' or 'KEY=OUTPUT@mm' rule, or 'SS+KEY=OUTPUT' to need the SteelSeries key held."""
+    """One 'KEY=OUTPUT' or 'KEY=OUTPUT@mm' rule, or 'SS+KEY=OUTPUT' to need the SteelSeries key held.
+    'SS=OUTPUT' fires on a quick tap of the SteelSeries key alone, since holding it is for its combos."""
 
     def __init__(self, text, rapid=0.0):
         self.chord = SHORTCUT_HOLD if text[:3].upper() == SHORTCUT_HOLD + "+" and len(text) > 3 else None
@@ -1290,6 +1305,9 @@ class Mapping:
                              "Command: run:your-command. Macro: macro:NAME")
         if self.player == 2 and self.kind not in ("stick", "trigger", "button"):
             raise ValueError(f"{text!r}: p2: only applies to controller outputs")
+        self.ss_tap = self.key == SHORTCUT_HOLD and not self.chord
+        if self.ss_tap and self.kind not in ("key", "macro", "run"):
+            raise ValueError(f"{text!r}: a tap of the SteelSeries key can send a keystroke, a macro or a command, not {target}")
         if self.kind in ("key", "mouse-button", "button", "macro") or (self.chord and self.kind == "run"):
             self.digital = Digital(at, rapid)
 
@@ -1428,8 +1446,10 @@ class Mapper(_KeyHolder):
         self.deadzone, self.full, self.curve = deadzone, full, curve
         self.mouse_speed, self.wheel_speed, self.tap_rate, self.run_rate = mouse_speed, wheel_speed, tap_rate, run_rate
         self.keys = sorted({m.key for m in self.maps} | {m.chord for m in self.maps if m.chord}, key=lambda n: BY_NAME[n][0])
-        self.held = sorted({m.key for m in self.maps if not m.chord}, key=lambda n: BY_NAME[n][0])
+        self.held = sorted({m.key for m in self.maps if not m.chord and not m.ss_tap}, key=lambda n: BY_NAME[n][0])
         self.want_swallow = self.want_swallow and bool(self.held)  # shortcuts never need to grab the keyboard
+        self.ss_taps = [m for m in self.maps if m.ss_tap]
+        self.ss_held_for, self.ss_spoiled = None, False  # seconds SS has been down, and whether anything else was pressed
         self.pads = {}
         for player in sorted({m.player for m in self.maps if m.kind in ("stick", "trigger", "button")}):
             self.pads[player] = Gamepad(f"Apex Analog Player {player} (Xbox 360 layout)")
@@ -1455,6 +1475,35 @@ class Mapper(_KeyHolder):
 
     def held_keys(self):
         return self.held
+
+    def read_keys(self):
+        """Which keys to read next. While SS is down with a tap rule waiting, all of them, to see if it's part of a combo."""
+        return None if self.ss_taps and self.ss_held_for is not None else self.keys
+
+    def _ss_tap(self, depths, dt):
+        """True on the frame SS comes back up after a quick press with nothing else pressed."""
+        down = depths.get(SHORTCUT_HOLD, 0.0) >= SHORTCUT_DOWN
+        others = any(mm >= SHORTCUT_DOWN for key, mm in depths.items() if key != SHORTCUT_HOLD)
+        if down:
+            if self.ss_held_for is None:
+                self.ss_held_for, self.ss_spoiled = 0.0, others
+            else:
+                self.ss_held_for += dt
+                self.ss_spoiled = self.ss_spoiled or others or self.ss_held_for > SS_TAP_SECONDS
+            return False
+        tapped = self.ss_held_for is not None and not self.ss_spoiled and not others and self.ss_held_for + dt <= SS_TAP_SECONDS
+        self.ss_held_for = None
+        return tapped
+
+    def _fire(self, m):
+        """A one-off: a keystroke pressed and let go, a macro, or a command."""
+        if m.kind == "key" and self.virtual_keys:
+            self.virtual_keys.send(m.target, 1)
+            self.virtual_keys.send(m.target, 0)
+        elif m.kind == "macro":
+            self._play(m.target)
+        elif m.kind == "run" and (m.process is None or m.process.poll() is not None):
+            m.process = subprocess.Popen(m.target, shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _depth(self, m, depths):
         """How far a rule's key counts as pressed. A shortcut's key only counts if SS went down first."""
@@ -1485,7 +1534,12 @@ class Mapper(_KeyHolder):
         if self.paused:
             depths = {}
         pad_values, pedal_values, keys, moves, clicks = {}, {}, {}, {}, {}
+        if self.ss_taps and self._ss_tap(depths, dt):
+            for m in self.ss_taps:
+                self._fire(m)
         for m in self.maps:
+            if m.ss_tap:
+                continue
             mm = self._depth(m, depths)
             amount = self.shape(mm)
             slots = pad_values.setdefault(m.player, {})
@@ -1558,6 +1612,7 @@ class Mapper(_KeyHolder):
         for m in self.maps:
             if m.digital:
                 m.digital.down = False
+        self.ss_held_for = None  # a keyboard that went away mid-press isn't a tap
         self.update({}, 0.0)
         self.stop_holding()
 
@@ -3238,6 +3293,7 @@ your terminal back, and several can run at once. Add --watch to keep one in the 
     rapid KEYS on|off    the keyboard's own rapid tap
     bind KEY ACTION      what a key does, on the keyboard itself, like: bind CAPS esc. --layer ss or deep too
     bindings             what every key does
+    layer-key KEY        move the SteelSeries layer to another key, so the SteelSeries key itself can be bound
     preset save|use NAME keep setups on this computer
     save                 write the current settings to the keyboard's flash, so they survive a replug
 
@@ -3538,13 +3594,35 @@ def cmd_bindings(args):
         name = LAYER_NAMES[layer]
         entries = {**report["layers"][name], **report["wheel"].get(name, {})}
         shown = {k: v for k, v in entries.items() if args.full or not v["default"] or (layer == 1 and v["action"] != "none")}
-        print(f"{LAYER_LABELS[layer].capitalize()}:")
+        print(f"{LAYER_LABELS[layer][:1].upper()}{LAYER_LABELS[layer][1:]}:")
         if not shown:
             print("  every key does what it normally does" if layer == 0 else "  nothing bound")
         for key, entry in shown.items():
             print(f"  {key:13}{entry['action']}" + ("" if entry["default"] else "   (changed)"))
     if report["layer_key"] != "SS":
         print(f"The SteelSeries layer is on while {report['layer_key']} is held.")
+    return 0
+
+
+def cmd_layer_key(args):
+    with Keyboard() as kb:
+        if args.key:
+            key = bind_key(args.key)
+            if key in WHEEL_DIRECTIONS or key in WHEEL_KEY_HIDS:
+                raise ValueError("Pick a key on the keyboard for the SteelSeries layer, not a control by the wheel.")
+            kb.set_layer_key(key)
+            time.sleep(0.1)
+            if kb.layer_key() != BIND_HIDS[key]:
+                raise ApexError("Sent, but it reads back differently.")
+            if key == SHORTCUT_HOLD:
+                print("The SteelSeries layer is back on the SteelSeries key.")
+            else:
+                print(f"Holding {key} now turns on the SteelSeries layer, so {key} stops doing its own thing. The SteelSeries key works "
+                      f"like any other key: bind it with apex-analog bind SS ACTION. apex-analog layer-key SS puts it back. "
+                      f"It lasts until you unplug the keyboard. apex-analog save keeps it.")
+            return 0
+        hid = kb.layer_key()
+    print(f"Holding {BIND_NAMES.get(hid, f'{hid:#04x}')} turns on the SteelSeries layer.")
     return 0
 
 
@@ -3569,7 +3647,8 @@ def cmd_bind(args):
                 raise ValueError(f"{key} has no sensor, so it has no deeper press.")
             if layer == 0 and hid == kb.layer_key():
                 raise ValueError(f"{key} turns on the SteelSeries layer while it's held, so a normal binding on it never fires. "
-                                 f"Bind it with --layer ss instead: that fires each time it's pressed.")
+                                 f"Bind it with --layer ss instead, which fires each time it's pressed, or move the layer to another "
+                                 f"key first with apex-analog layer-key KEY.")
             record = default_binding(layer, hid) if args.action == "default" else parse_binding(args.action)
             kb.set_bindings(layer, {key: record})
             time.sleep(0.1)
@@ -3577,8 +3656,11 @@ def cmd_bind(args):
                 if layer == 2:
                     raise ApexError(f"The keyboard refused it: {key} needs a second actuation point before a deeper press can do anything.")
                 raise ApexError("Sent, but it reads back differently.")
-    print(f"{key} now does {describe_binding(record)} {LAYER_LABELS[layer]}, and the keyboard reads it back. "
-          f"It lasts until you unplug the keyboard. apex-analog save keeps it.")
+    if args.action == "default":
+        print(f"{key} is back to what it does out of the box {LAYER_LABELS[layer]}: {describe_binding(record)}. The keyboard reads it back.")
+    else:
+        print(f"{key} now does {describe_binding(record)} {LAYER_LABELS[layer]}, and the keyboard reads it back. "
+              f"It lasts until you unplug the keyboard. apex-analog save keeps it.")
     return 0
 
 
@@ -3871,6 +3953,9 @@ def cmd_map(args):
     mapper = Mapper(maps, args.deadzone, args.full, args.curve, args.rapid, args.mouse_speed, args.wheel_speed,
                     args.tap_rate, args.run_rate, not args.no_swallow, args.pause_key)
     read = sorted({*mapper.keys, *(explicit or [])}, key=lambda n: BY_NAME[n][0]) if args.keys != "all" else None
+    if mapper.ss_taps and read is not None:
+        fixed = read
+        read = lambda: fixed if mapper.read_keys() is not None else None  # all keys while SS is down
     for player, pad in mapper.pads.items():
         _say(f"Virtual controller {player} ready: {pad.path}")
     if mapper.pedals:
@@ -3902,7 +3987,8 @@ def cmd_shortcut(args):
         if args.json:
             print(json.dumps(saved))
         else:
-            print("\n".join(f"SS+{key}: {output}" for key, output in sorted(saved.items())) or "No shortcuts yet. Try: apex-analog shortcut add J volume+")
+            print("\n".join(f"{shortcut_name(key)}: {output}" for key, output in sorted(saved.items()))
+                  or "No shortcuts yet. Try: apex-analog shortcut add J volume+")
         return 0
     if not args.key:
         raise ValueError(f"Name the key: apex-analog shortcut {args.action} J")
@@ -3910,22 +3996,34 @@ def cmd_shortcut(args):
     if args.action == "add":
         if not args.output:
             raise ValueError("Say what it does, like: apex-analog shortcut add J key:F13, macro:NAME, run:your-command or volume+")
-        Mapping(f"SS+{key}={args.output}")  # refuses a bad rule before it's saved
+        Mapping(shortcut_rule(key, args.output))  # refuses a bad rule before it's saved
         saved[key] = args.output
     else:
         saved.pop(key, None)
     _write_private(path, saved)
     _apply_shortcuts(saved)
-    print(f"SS+{key}: {saved[key]}" if key in saved else f"SS+{key} removed.")
+    print(f"{shortcut_name(key)}: {saved[key]}" if key in saved else f"{shortcut_name(key)} removed.")
+    if key == SHORTCUT_HOLD and key in saved:
+        print("It fires on a quick tap with nothing else pressed, so holding SS still works for its combos. "
+              "F9-F12 and the arrows have no sensor, so a quick SS+F10 can look like a tap.")
     return 0
+
+
+def shortcut_name(key):
+    return "SS tap" if key == SHORTCUT_HOLD else f"SS+{key}"
 
 
 def cmd_shortcuts(args):
     saved = _load_json(_config_path("shortcuts.json"))
     if not saved:
         raise ApexError("No shortcuts yet. Add one with: apex-analog shortcut add J volume+")
-    mapper = Mapper([f"SS+{key}={output}" for key, output in saved.items()], swallow=False, pause_key=None)
-    _drive(mapper, args.hz or 120, mapper.keys, _map_lines)
+    mapper = Mapper([shortcut_rule(key, output) for key, output in saved.items()], swallow=False, pause_key=None)
+    _drive(mapper, args.hz or 120, mapper.read_keys if mapper.ss_taps else mapper.keys, _map_lines)
+
+
+def shortcut_rule(key, output):
+    """A saved shortcut as a map rule. The one on SS itself fires on a tap."""
+    return f"{SHORTCUT_HOLD}={output}" if key == SHORTCUT_HOLD else f"{SHORTCUT_HOLD}+{key}={output}"
 
 
 def _midi_lines(instrument, rate):
@@ -4316,6 +4414,10 @@ def build_parser():
     bd.add_argument("--layer", choices=("base", "ss", "deep"), default="base",
                     help="base: normally (default), ss: while the SteelSeries key is held, deep: on a deeper press")
     bd.set_defaults(func=cmd_bind)
+
+    lk = commands.add_parser("layer-key", help="which key turns on the SteelSeries layer while held, so the SteelSeries key itself can be bound")
+    lk.add_argument("key", nargs="?", help="any key, or SS to put it back. Leave out to see which it is")
+    lk.set_defaults(func=cmd_layer_key)
 
     pr = commands.add_parser("preset", help="keep named actuation and rapid tap setups on this computer")
     pr.add_argument("action", choices=("save", "use", "list", "delete"))
