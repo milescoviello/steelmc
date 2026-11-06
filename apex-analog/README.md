@@ -255,12 +255,11 @@ These five only copy memory into the reply:
 | `B2 <n> [<hid> 0]...` | `<hid> <mode>`... | per-key mode byte |
 | `9E` | 1 byte | OLED `ACTUATION ICON` setting |
 
-These four change something in the keyboard's memory, and only when you ask:
+These three change something in the keyboard's memory, and only when you ask:
 
 | Send | | Used by |
 |---|---|---|
 | `3A <n> [<hid> <r> <g> <b>]...` | colours for up to 15 keys | `lights` |
-| `21 00 <r> <g> <b>` | colour for the whole board | `lights` |
 | `3B` | back to normal lighting | `lights` |
 | `31 <n> [<hid> <press> <release>]...` | actuation for up to 20 keys, as n/255 of the key's range | `actuation` |
 

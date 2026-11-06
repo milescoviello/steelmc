@@ -619,18 +619,30 @@ class LightingBytes(unittest.TestCase):
         self.assertEqual(second[2], 1)
         self.assertEqual(second[3], a.BY_NAME["H"][1])
 
-    def test_whole_board_and_restore(self):
+    def test_whole_board_sets_every_led_key_individually(self):
         self.kb.set_all_colors(4, 5, 6)
+        reports = (len(a.LED_HIDS) + 14) // 15
+        seen = []
+        for packet in self.packets(reports):
+            self.assertEqual(packet[:2], bytes([0, 0x3A]))
+            for i in range(packet[2]):
+                self.assertEqual(packet[4 + i * 4:7 + i * 4], bytes([4, 5, 6]))
+                seen.append(packet[3 + i * 4])
+        self.assertEqual(seen, a.LED_HIDS)
+        for hid, _, _ in a.CHANNELS.values():
+            self.assertIn(hid, a.LED_HIDS)
+        for number_row_and_nav in (0x29, 0x3A, 0x45, 0x4A, 0x52):  # ESC, F1, F12, HOME, UP have LEDs but no sensor
+            self.assertIn(number_row_and_nav, a.LED_HIDS)
+
+    def test_restore(self):
         self.kb.clear_colors()
-        whole, restore = self.packets(2)
-        self.assertEqual(whole[:6], bytes([0, 0x21, 0, 4, 5, 6]))
-        self.assertEqual(restore[:2], bytes([0, 0x3B]))
+        self.assertEqual(self.packets(1)[0][:2], bytes([0, 0x3B]))
 
     def test_only_lighting_commands_get_through(self):
-        for command in (0x31, 0x30, 0x01, 0x5A, 0x7F, 0x74, 0x15, 0x16, 0x51, 0x22):
+        for command in (0x31, 0x30, 0x01, 0x5A, 0x7F, 0x74, 0x15, 0x16, 0x51, 0x22, 0x21):
             with self.assertRaisesRegex(ValueError, "refused"):
                 self.kb._send_light([command])
-        self.assertEqual(set(a.LIGHT_COMMANDS), {0x3A, 0x21, 0x3B})
+        self.assertEqual(set(a.LIGHT_COMMANDS), {0x3A, 0x3B})
 
     def test_reads_cannot_send_lighting_commands(self):
         for command in a.LIGHT_COMMANDS:
