@@ -944,6 +944,41 @@ class EffectEngine(unittest.TestCase):
         with self.assertRaisesRegex(a.ApexError, "profile"):
             a.TypingHeatmap()
 
+    def test_heatmap_changes_as_you_type(self):
+        class Board:
+            def __init__(self):
+                self.sent = {}
+
+            def set_colors(self, colors):
+                self.sent.update(colors)
+
+        def tap(heat, board, key, now):
+            heat.update(board, {key: 2.0}, now)
+            heat.update(board, {key: 0.0}, now + 0.01)
+
+        board = Board()
+        heat = a.TypingHeatmap(keep=True, totals={"E": 1000, "Q": 1})
+        heat.update(board, {}, 1.0)
+        before = board.sent["Q"]
+        for i in range(50):
+            tap(heat, board, "Q", 2.0 + i * 0.02)  # far quicker than it redraws
+        self.assertEqual(heat.totals["Q"], 51)
+        heat.update(board, {}, 10.0)
+        self.assertNotEqual(board.sent["Q"], before)
+        self.assertEqual(board.sent["Q"], a._heat_color(math.log(52) / math.log(1001)))
+
+    def test_heatmap_lights_a_key_on_its_first_press(self):
+        heat = a.TypingHeatmap(keep=True, totals={"E": 1000})
+        self.assertNotIn("Z", heat.frame({}, 1.0, 1.0))
+        heat.log.update({"Z": 2.0}, 1.0)
+        heat.update(type("Board", (), {"set_colors": lambda self, colors: None})(), {"Z": 2.0}, 2.0)
+        heat.update(type("Board", (), {"set_colors": lambda self, colors: None})(), {"Z": 0.0}, 2.1)
+        self.assertEqual(heat.totals["Z"], 1)
+        self.assertIn("Z", heat.frame({}, 3.0, 1.0))
+
+    def test_heatmap_watches_every_key(self):
+        self.assertIn("heatmap", a.USES_DEPTH)
+
     def test_effect_flags_choose_the_right_thing(self):
         parse = a.build_parser().parse_args
         for flags, kind in ((["--effect", "ripple"], a.Ripple), (["--effect", "music"], a.MusicBars), (["--effect", "stats"], a.StatsMeter),

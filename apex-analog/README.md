@@ -132,7 +132,7 @@ More effects, also available on `gamepad`, `map` and `midi` with `--lights --eff
 apex-analog lights --effect ripple              # a wave spreads from each key you press, stronger the faster you press
 apex-analog lights --effect music               # bars that move with whatever this computer is playing
 apex-analog lights --effect stats               # CPU on the F row and RAM on the number row. Also: --stats cpu,ram,temp,battery
-apex-analog lights --effect heatmap             # each key by how much you use it, from apex-analog profile
+apex-analog lights --effect heatmap             # each key by how much you use it, updating as you type
 apex-analog lights --effect rev                 # BeamNG RPM across the number row, flashing at the shift point, with your gear on the F row
 apex-analog gamepad --lights --effect rev       # the same while driving with W S A D
 ```

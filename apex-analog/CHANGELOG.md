@@ -1,5 +1,9 @@
 # Change log
 
+## Unreleased
+
+- `lights --effect heatmap` now updates as you type, instead of showing the totals from when it started
+
 ## 0.1.0 — 2026-11-05
 
 First release. Reads how far each key is pressed on a SteelSeries Apex Pro Gen 3 (firmware 4.16.8) and turns that into anything:

@@ -2135,10 +2135,10 @@ class RevLights(Effect):
 
 
 class TypingHeatmap(Effect):
-    """Lights each key by how much you use it, from your apex-analog profile totals."""
+    """Lights each key by how much you use it: your apex-analog profile totals, plus every press since it started."""
 
     def __init__(self, keep=False, base=(0, 0, 0), totals=None):
-        super().__init__(keep, base, 1.0)
+        super().__init__(keep, base, 10.0)
         if totals is None:
             path = _state_path("typing-profile.json")
             if not os.path.exists(path):
@@ -2146,6 +2146,13 @@ class TypingHeatmap(Effect):
             with open(path) as f:
                 totals = {k: v["count"] for k, v in json.load(f).get("keys", {}).items()}
         self.totals = totals
+        self.log = _PressLog()
+
+    def update(self, kb, depths, now):
+        # Count on every reading, not just the ones that redraw, or quick presses would be missed.
+        for press in self.log.update(depths, now):
+            self.totals[press.key] = self.totals.get(press.key, 0) + 1
+        super().update(kb, depths, now)
 
     def frame(self, depths, now, elapsed):
         top = max(self.totals.values(), default=0)
@@ -2155,7 +2162,7 @@ class TypingHeatmap(Effect):
 
 
 EFFECTS = ("glow", "ripple", "music", "stats", "rev", "heatmap")
-USES_DEPTH = ("glow", "ripple")
+USES_DEPTH = ("glow", "ripple", "heatmap")
 
 
 def make_effect(name, color=None, base=(0, 0, 0), fade=None, keep=False, stats=("cpu", "ram"), port=4444, redline=None):
