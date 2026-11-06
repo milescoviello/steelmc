@@ -39,6 +39,11 @@ Each rule is `KEY=OUTPUT`.
 | Mouse movement and scroll, faster the deeper you press | `mouse-x-` `mouse-x+` `mouse-y-` `mouse-y+` `wheel-` `wheel+` `hwheel-` `hwheel+` |
 | Mouse buttons | `mouse-left` `mouse-right` `mouse-middle` |
 | Keystrokes | `key:F13`, `key:LSHIFT`, `key:UP` |
+| A second controller | put `p2:` in front: `I=p2:rt`, `J=p2:lx-`, `K=p2:a` |
+| Pedals on their own device, with no default bindings | `clutch` `handbrake` `pedal3` `pedal4` `pedal5` `pedal6` |
+| A keystroke that repeats faster the deeper you press | `tap:RIGHT` |
+| Desktop controls, faster the deeper you press | `volume+` `volume-` `brightness+` `brightness-` |
+| Any command, repeating the same way | `run:your-command` |
 
 Buttons and keystrokes switch on at 1 mm. Add `@mm` to choose the depth, which lets one key do two things:
 
@@ -55,11 +60,84 @@ apex-analog map drive --curve 1.5                # finer control near the top of
 apex-analog map drive --deadzone 0.5 --full 3.0  # where the axis starts and where it reaches full
 apex-analog map J=key:F13@0.5 --rapid 0.2        # re-trigger after moving 0.2 mm either way, anywhere in the travel
 apex-analog map drive --no-swallow               # let the mapped keys keep typing too
+apex-analog map drive2                           # two players on one keyboard: WASD and IJKL. stick2 is the walking version
+apex-analog map manual                           # drive, plus LSHIFT as an analog clutch and SPACE as an analog handbrake
+apex-analog map "]=volume+" "[=volume-"          # hold harder to change volume faster
+apex-analog map "X=tap:LEFT" "C=tap:RIGHT"       # scrub through a video, faster the deeper you press
 ```
+
+`manual` puts the clutch and handbrake on a separate pedals device, so they can't collide with any controller bindings. Bind those two axes once in your game's controls menu.
 
 Save a setup as a file with one rule or option per line, then use it with `apex-analog map @myprofile.txt`.
 
 Run `apex-analog map --help` for everything.
+
+## Play it as an instrument
+
+```
+apex-analog midi
+```
+
+This opens a MIDI port called `Apex Analog`. Connect it from your DAW or synth, or with `aconnect`. No sound comes out until something is listening.
+
+The Z row and Q row are laid out like piano keys, with the black keys on the row above each. How fast you press sets how loud the note starts, and how deep you hold it sends pressure for that one note. SPACE sustains, LSHIFT is the mod wheel, and TAB and CAPS bend pitch up and down.
+
+```
+apex-analog midi --layout grid       # every key a note, rows a fourth apart, like a guitar: about 4 octaves
+apex-analog midi --octave 1          # everything up an octave
+apex-analog midi --cc F=74           # F's depth also sends controller 74
+apex-analog midi --aftertouch channel  # for synths that don't take per-note pressure
+apex-analog midi --soft 5 --hard 200 # tune how press speed maps to loudness
+```
+
+## Press deep for capitals
+
+```
+apex-analog type
+```
+
+Type lightly for lowercase, and press past 3.2 mm for a capital or the other symbol on that key, with no Shift. A key's keystroke goes out once its depth is settled, and keys always go out in the order you pressed them. Holding Ctrl, Alt or Win keeps shortcuts instant.
+
+Choose something else for a deep press, per key, with `--combo`:
+
+```
+apex-analog type --combo J=LCTRL+J --combo K=F13
+```
+
+## Put it on your stream
+
+```
+apex-analog overlay
+```
+
+Add `http://127.0.0.1:8765/overlay` as an OBS browser source. It shows W A S D, SPACE, LSHIFT and LCTRL filling up as you press them, on a transparent background. Choose keys with `--keys`. Viewers can read anything you show, so be careful with `--keys all`.
+
+## Learn how you type
+
+```
+apex-analog profile
+```
+
+Type normally for a while, then press Ctrl-C. It tells you how deep and fast you press, how often you bottom out, how many presses stopped short of your actuation point, and what that means for your settings. Runs add together. `--report` shows the totals and `--reset` clears them. It stores per-key totals only, never the order of keys, so it can't be read back as text.
+
+## Check your switches
+
+```
+apex-analog health               # rest drift, noise and range on every switch, keep your hands off for 2 seconds
+apex-analog health --press 60    # also press every key once to find any that don't reach the bottom
+```
+
+## Recognise you by how you press
+
+An experiment, not security.
+
+```
+apex-analog typeprint enroll     # type a set phrase 8 times
+apex-analog typeprint check      # try to pass, then see whether anyone else can
+apex-analog typeprint forget     # delete it
+```
+
+It compares how deep, how fast and how long you press each key, and the gaps between keys. `check` exits 0 on a match and 1 otherwise. The phrase is fixed on purpose, so a real password can't end up in its file.
 
 ## Wire it into your own program
 
@@ -129,6 +207,7 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 - The test suite (`python3 -m unittest`) needs no keyboard.
 - Checked on real hardware: sensor reads, the virtual controller as seen by Linux, holding back keys, and UDP, OSC, WebSocket and HTTP clients.
 - A real drive: BeamNG.drive 0.40.4 through Proton saw it as `XBox Controller 1` with no setup, and it drove well on W, S, A and D. That's one person and one short session.
+- **Tested only with simulated key depths so far:** MIDI playing feel, pressure typing, the typing print, the typing profile's numbers, and two players or pedals inside a game. MIDI did reach a real ALSA client, the overlay did run in a real browser, and the extra controllers and pedals did appear to Linux as joysticks.
 
 ## Safety
 

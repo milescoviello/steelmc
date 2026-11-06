@@ -2,8 +2,13 @@
 """python3 -m unittest    No keyboard needed. Virtual device tests hold their own output so nothing reaches your desktop."""
 import fcntl
 import os
+import random
 import select
+import shutil
+import socket
 import struct
+import subprocess
+import tempfile
 import time
 import unittest
 
@@ -260,6 +265,318 @@ class VirtualDevices(unittest.TestCase):
         tap(f21)
         self.assertEqual(drain(out), [(a.EV_KEY, f21, 1), (a.EV_KEY, f21, 0)])
         os.close(out)
+
+
+class FakeMidi:
+    def __init__(self):
+        self.sent = []
+
+    def note_on(self, channel, note, velocity):
+        self.sent.append(("on", note, velocity))
+
+    def note_off(self, channel, note, velocity=64):
+        self.sent.append(("off", note))
+
+    def key_pressure(self, channel, note, pressure):
+        self.sent.append(("pressure", note, pressure))
+
+    def controller(self, channel, number, value):
+        self.sent.append(("cc", number, value))
+
+    def channel_pressure(self, channel, pressure):
+        self.sent.append(("channel", pressure))
+
+    def pitch_bend(self, channel, value):
+        self.sent.append(("bend", value))
+
+    def close(self):
+        pass
+
+
+class Midi(unittest.TestCase):
+    def instrument(self, **options):
+        return a.MidiInstrument(output=FakeMidi(), swallow=False, pause_key=None, **options)
+
+    def velocity_of(self, step):
+        m = self.instrument()
+        for mm in (0.0, 0.5, 1.0, 2.0):
+            m.update({"Z": mm}, step)
+        return next(e[2] for e in m.midi.sent if e[0] == "on")
+
+    def test_layouts(self):
+        piano = a.midi_layout("piano")
+        self.assertEqual((piano["Z"], piano["S"], piano["Q"], piano[","]), (48, 49, 60, 60))
+        self.assertEqual(a.midi_layout("piano", 1)["Z"], 60)
+        grid = a.midi_layout("grid")
+        self.assertEqual(grid["A"] - grid["Z"], 5)
+        self.assertEqual(grid["X"] - grid["Z"], 1)
+        with self.assertRaisesRegex(ValueError, "layout"):
+            a.midi_layout("nope")
+
+    def test_faster_press_is_louder(self):
+        self.assertGreater(self.velocity_of(0.003), self.velocity_of(0.05))
+        self.assertEqual(a.midi_velocity(1), 1)
+        self.assertEqual(a.midi_velocity(10000), 127)
+
+    def test_note_has_one_start_one_end_and_pressure_between(self):
+        m = self.instrument()
+        for mm in (2.0, 2.0, 3.0, 4.0, 1.0):
+            m.update({"Z": mm}, 0.01)
+        kinds = [e[0] for e in m.midi.sent]
+        self.assertEqual(kinds.count("on"), 1)
+        self.assertEqual(kinds.count("off"), 1)
+        self.assertEqual(max(e[2] for e in m.midi.sent if e[0] == "pressure"), 127)
+        self.assertLess(kinds.index("on"), kinds.index("pressure"))
+        self.assertLess(kinds.index("pressure"), kinds.index("off"))
+
+    def test_two_keys_on_one_note(self):
+        m = self.instrument()
+        m.update({",": 2.0}, 0.01)
+        m.update({",": 2.0, "Q": 2.0}, 0.01)
+        m.update({",": 0.0, "Q": 2.0}, 0.01)
+        self.assertEqual([e[0] for e in m.midi.sent if e[0] in ("on", "off")], ["on"])
+        m.update({}, 0.01)
+        self.assertEqual([e[0] for e in m.midi.sent if e[0] in ("on", "off")], ["on", "off"])
+
+    def test_sustain_mod_and_bend(self):
+        m = self.instrument(ccs={"F": 74})
+        m.update({"SPACE": 4.0, "LSHIFT": 2.0, "F": 4.0, "TAB": 4.0}, 0.01)
+        self.assertIn(("cc", 64, 127), m.midi.sent)
+        self.assertIn(("cc", 1, 63), m.midi.sent)
+        self.assertIn(("cc", 74, 127), m.midi.sent)
+        self.assertIn(("bend", 8191), m.midi.sent)
+        m.update({"CAPS": 4.0}, 0.01)
+        self.assertIn(("bend", -8191), m.midi.sent)
+        m.update({}, 0.01)
+        self.assertEqual(m.midi.sent[-1], ("bend", 0))
+
+    def test_release_stops_every_note(self):
+        m = self.instrument()
+        m.update({"Z": 2.0, "X": 2.0}, 0.01)
+        m.release()
+        self.assertEqual(sum(e[0] == "off" for e in m.midi.sent), 2)
+        self.assertEqual(m.midi.sent[-1], ("cc", 123, 0))
+        self.assertEqual(m.sounding, {})
+
+    @unittest.skipUnless(shutil.which("aseqdump") and os.access("/dev/snd/seq", os.W_OK), "no ALSA sequencer access")
+    def test_real_alsa_port_reaches_a_real_client(self):
+        midi = a.AlsaMidi("apex-analog test")
+        self.addCleanup(midi.close)
+        dump = subprocess.Popen(["aseqdump", "-p", midi.address], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        time.sleep(0.4)
+        midi.note_on(0, 60, 100)
+        midi.key_pressure(0, 60, 77)
+        midi.controller(0, 64, 127)
+        midi.pitch_bend(0, 512)
+        midi.channel_pressure(0, 33)
+        midi.note_off(0, 60)
+        time.sleep(0.3)
+        dump.terminate()
+        out = dump.communicate(timeout=3)[0]
+        for wanted in ("Note on", "note 60, velocity 100", "Polyphonic aftertouch", "value 77", "Control change", "controller 64, value 127", "Pitch bend", "512", "Channel aftertouch", "33", "Note off"):
+            self.assertIn(wanted, out)
+
+
+class HowYouType(unittest.TestCase):
+    def press(self, key, down, held=0.09, peak=3.8, speed=120.0):
+        return a.Press(key, down, down + held, peak, speed)
+
+    def attempt(self, rng, peak=3.8, speed=120.0, gap=0.14):
+        t, out = 0.0, []
+        for c in a.TYPEPRINT_PHRASE:
+            out.append(self.press(c, t, rng.gauss(0.09, 0.006), rng.gauss(peak, 0.08), rng.gauss(speed, 8)))
+            t += rng.gauss(gap, 0.01)
+        return a.typing_features(out)
+
+    def test_press_log_measures_a_press(self):
+        log = a._PressLog()
+        out = []
+        for now, mm in enumerate((0.0, 1.0, 3.0, 3.8, 2.0, 0.1)):
+            out += log.update({"J": mm}, now * 0.01)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].key, "J")
+        self.assertEqual(out[0].peak, 3.8)
+        self.assertAlmostEqual(out[0].speed, 200.0)
+        self.assertAlmostEqual(out[0].up - out[0].down, 0.04)
+
+    def test_typeprint_passes_you_and_rejects_someone_else(self):
+        rng = random.Random(7)
+        typeprint = a.build_typeprint([self.attempt(rng) for _ in range(a.TYPEPRINT_SAMPLES)])
+        self.assertLessEqual(a.typeprint_score(typeprint, self.attempt(rng)), typeprint["limit"])
+        self.assertGreater(a.typeprint_score(typeprint, self.attempt(rng, peak=2.4, speed=50, gap=0.28)), typeprint["limit"])
+
+    def test_phrase_is_fixed_so_a_real_password_cant_end_up_on_disk(self):
+        self.assertNotIn("--phrase", " ".join(a.build_parser().format_help().split()))
+        self.assertEqual(a.TYPEPRINT_PHRASE, "pressure never lies")
+
+    def test_profile_keeps_totals_and_never_the_order(self):
+        profile = a.TypingProfile()
+        for i, key in enumerate("hello"):
+            profile.add(self.press(key.upper(), i * 0.1, peak=3.9), actuates_at=1.89)
+        profile.add(self.press("H", 1.0, peak=1.0), actuates_at=1.89)
+        self.assertEqual(sorted(profile.keys), ["E", "H", "L", "O"])
+        self.assertEqual(profile.keys["L"]["count"], 2)
+        self.assertEqual(profile.keys["H"]["near_misses"], 1)
+        self.assertEqual(set(profile.keys["H"]), {"count", "bins", "speed", "held", "near_misses"})
+        report = "\n".join(profile.report(1.89))
+        self.assertIn("6 presses on 4 keys", report)
+        self.assertIn("1 presses (16.7%) stopped short", report)
+
+    def test_health_flags_only_what_is_off(self):
+        self.assertEqual(a.key_health(15, 0.8, 2488, 2488), [])
+        self.assertIn("high", a.key_health(200, 0.8, 2488, 2488)[0])
+        self.assertIn("low", a.key_health(-50, 0.8, 2488, 2488)[0])
+        self.assertIn("noisy", a.key_health(15, 9.0, 2488, 2488)[0])
+        self.assertIn("range", a.key_health(15, 0.8, 1800, 2488)[0])
+
+
+class Overlay(unittest.TestCase):
+    def setUp(self):
+        self.sink = a.ServeSink(0)
+        self.port = self.sink.server.getsockname()[1]
+        self.addCleanup(self.sink.server.close)
+
+    def get(self, path, *headers):
+        with socket.create_connection(("127.0.0.1", self.port), timeout=2) as c:
+            c.sendall(("GET " + path + " HTTP/1.1\r\nHost: x\r\n" + "".join(h + "\r\n" for h in headers) + "\r\n").encode())
+            out = b""
+            while True:
+                chunk = c.recv(65536)
+                if not chunk:
+                    return out.decode()
+                out += chunk
+
+    def test_page_latest_reading_and_outside_pages_refused(self):
+        self.assertIn("<!DOCTYPE html>", self.get("/overlay"))
+        self.assertIn("new WebSocket", self.get("/overlay"))
+        self.sink.send({"W": 1.5})
+        self.assertTrue(self.get("/").endswith('{"W": 1.5}'))
+        self.assertIn("403", self.get("/overlay", "Origin: https://evil.example").split("\r\n")[0])
+
+
+class Rules2(unittest.TestCase):
+    def test_new_outputs(self):
+        self.assertEqual(a.Mapping("I=p2:rt").player, 2)
+        self.assertEqual(a.Mapping("LSHIFT=clutch").kind, "pedal")
+        self.assertEqual(a.Mapping("X=tap:RIGHT").target, 106)
+        self.assertEqual(a.Mapping("V=volume+").kind, "run")
+        self.assertEqual(a.Mapping("V=run:wpctl x @SINK@ 2%+").target, "wpctl x @SINK@ 2%+")
+        with self.assertRaisesRegex(ValueError, "p2"):
+            a.Mapping("W=p2:key:F13")
+
+    def test_every_preset_parses(self):
+        for preset in a.PRESETS:
+            self.assertTrue([a.Mapping(r) for r in a.expand_maps([preset])])
+
+
+@unittest.skipUnless(HAVE_UINPUT, "no /dev/uinput access")
+class Modes(unittest.TestCase):
+    def mapper(self, *rules, **options):
+        mapper = a.Mapper(list(rules), swallow=False, pause_key=None, **options)
+        self.addCleanup(mapper.close)
+        return mapper
+
+    def test_two_players_are_separate_controllers(self):
+        m = self.mapper("drive2")
+        one, two = hold(m.pads[1].path), hold(m.pads[2].path)
+        m.update({"W": 3.5, "J": 3.5}, 0.01)
+        self.assertEqual(drain(one), [(a.EV_ABS, 0x05, 1023)])
+        self.assertEqual(drain(two), [(a.EV_ABS, 0x00, -32767)])
+        self.assertEqual(m.values["p2:lx"], -1.0)
+        os.close(one)
+        os.close(two)
+
+    def test_pedals_are_their_own_device(self):
+        m = self.mapper("manual")
+        fd = hold(m.pedals.path)
+        m.update({"LSHIFT": 3.5, "SPACE": 1.9}, 0.01)
+        self.assertEqual(set(drain(fd)), {(a.EV_ABS, 0x00, 4095), (a.EV_ABS, 0x01, 2047)})
+        m.release()
+        self.assertEqual(set(drain(fd)), {(a.EV_ABS, 0x00, 0), (a.EV_ABS, 0x01, 0)})
+        os.close(fd)
+
+    def test_tap_rate_follows_depth(self):
+        m = self.mapper("J=tap:F24")
+        m.virtual_keys = a.VirtualKeys(m.key_outputs)
+        fd = hold(m.virtual_keys.path)
+        m.update({"J": 3.5}, 0.1)  # one straight away, then 20 a second for 0.1 s
+        self.assertEqual(drain(fd), [(a.EV_KEY, 194, 1), (a.EV_KEY, 194, 0)] * 3)
+        m.update({}, 0.1)
+        self.assertEqual(drain(fd, 0.05), [])
+        os.close(fd)
+
+    def test_run_starts_a_command_and_never_overlaps(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "ran")
+            m = self.mapper(f"J=run:sleep 0.2; echo x >> {path}")
+            for _ in range(5):
+                m.update({"J": 3.5}, 0.5)
+            m.maps[0].process.wait(timeout=3)
+            with open(path) as f:
+                self.assertEqual(f.read(), "x\n")
+
+    def typer(self, **options):
+        typer = a.PressureTyper(pause_key=None, **options)
+        typer.virtual_keys = a.VirtualKeys(typer.key_outputs)
+        self.addCleanup(typer.close)
+        return typer, hold(typer.virtual_keys.path)
+
+    def test_light_press_is_lowercase_after_it_settles(self):
+        t, fd = self.typer()
+        t.update({"J": 2.0}, 0.01)
+        self.assertEqual(drain(fd, 0.05), [])
+        t.update({"J": 1.6}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 36, 1)])
+        t.update({}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 36, 0)])
+        os.close(fd)
+
+    def test_deep_press_is_a_capital(self):
+        t, fd = self.typer()
+        t.update({"J": 2.0}, 0.01)
+        t.update({"J": 3.5}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 42, 1), (a.EV_KEY, 36, 1), (a.EV_KEY, 42, 0)])
+        t.update({}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 36, 0)])
+        os.close(fd)
+
+    def test_keys_go_out_in_the_order_pressed(self):
+        t, fd = self.typer()
+        t.update({"K": 2.0}, 0.01)
+        t.update({"K": 2.0, "A": 2.0}, 0.01)  # A sorts first but was pressed second
+        self.assertEqual(drain(fd), [(a.EV_KEY, 37, 1)])
+        t.update({"K": 0.0, "A": 3.5}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 42, 1), (a.EV_KEY, 30, 1), (a.EV_KEY, 42, 0), (a.EV_KEY, 37, 0)])
+        os.close(fd)
+
+    def test_a_quick_tap_still_types(self):
+        t, fd = self.typer()
+        t.update({"J": 2.0}, 0.01)
+        t.update({}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 36, 1), (a.EV_KEY, 36, 0)])
+        os.close(fd)
+
+    def test_held_key_settles_so_it_can_repeat(self):
+        t, fd = self.typer()
+        t.update({"J": 2.0}, 0.01)
+        t.update({"J": 2.0}, 0.2)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 36, 1)])
+        os.close(fd)
+
+    def test_shortcuts_stay_instant(self):
+        t, fd = self.typer()
+        t.update({"LCTRL": 3.0, "C": 2.0}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 46, 1)])
+        os.close(fd)
+
+    def test_deep_combo_replaces_the_capital(self):
+        t, fd = self.typer(combos={"K": "F24"})
+        t.update({"K": 3.5}, 0.01)
+        t.update({"K": 3.5}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 194, 1), (a.EV_KEY, 194, 0)])
+        t.update({}, 0.01)
+        self.assertEqual(drain(fd, 0.05), [])
+        os.close(fd)
 
 
 if __name__ == "__main__":

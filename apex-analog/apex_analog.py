@@ -3,8 +3,14 @@
 
   apex-analog                   live bars for whatever you press
   apex-analog gamepad           W S A D become throttle, brake and steering on a virtual controller
-  apex-analog map W=rt A=lx-    any key to any controller axis or button, the mouse, or a keystroke
+  apex-analog map W=rt A=lx-    any key to a controller, pedals, the mouse, a keystroke, or a command
+  apex-analog midi              play it as a MIDI instrument, with velocity and per-key pressure
+  apex-analog type              press deep for capitals or key combos
   apex-analog stream            one JSON line per update, for piping into anything
+  apex-analog overlay           key pressure on your stream, as an OBS browser source
+  apex-analog profile           how you type, and what it means for your actuation point
+  apex-analog health            check every switch for drift, noise and short range
+  apex-analog typeprint         experiment: recognise you by how you press keys
   apex-analog info              the keyboard, your access, and every key's actuation settings
 
   from apex_analog import Keyboard
@@ -15,22 +21,27 @@ Only ever sends the read commands in ALLOWED, and only to the firmware they were
 """
 import argparse
 import base64
+import ctypes
+import ctypes.util
 import fcntl
 import glob
 import hashlib
 import json
+import math
 import os
 import select
 import signal
 import socket
+import statistics
 import struct
+import subprocess
 import sys
 import termios
 import threading
 import time
 from typing import NamedTuple
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"
@@ -525,6 +536,42 @@ class Mouse:
         self.device.close()
 
 
+class Pedals:
+    """Extra analog levers on a device of their own, so they reach a game with no default bindings to collide with.
+
+    with Pedals() as pedals:
+        pedals.set(clutch=0.5, handbrake=1.0)
+    """
+    AXES = {"clutch": 0x00, "handbrake": 0x01, "pedal3": 0x02, "pedal4": 0x03, "pedal5": 0x04, "pedal6": 0x05}
+    MAX = 4095
+
+    def __init__(self, name="Apex Analog Pedals"):
+        self.device = _Uinput(name, (BUS_USB, 0x1209, 0x0003, 1), keys=[0x120], abses={code: (0, self.MAX) for code in self.AXES.values()})
+        self.path = self.device.path
+        self._sent = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def set(self, **values):
+        changed = False
+        for name, value in values.items():
+            number = int(max(0.0, min(1.0, value)) * self.MAX)
+            if self._sent.get(name, 0) != number:
+                self._sent[name] = number
+                self.device.emit(EV_ABS, self.AXES[name], number)
+                changed = True
+        if changed:
+            self.device.sync()
+
+    def close(self):
+        self.set(**{name: 0.0 for name in self.AXES})
+        self.device.close()
+
+
 # Names for keystroke outputs: every key with a sensor, plus the ones without.
 KEYCODES = {name: code for name, (_, _, code) in BY_NAME.items() if code is not None}
 KEYCODES.update({"ESC": 1, "PRTSC": 99, "SCRLK": 70, "PAUSE": 119, "INSERT": 110, "DELETE": 111, "HOME": 102, "END": 107, "PGUP": 104,
@@ -682,6 +729,15 @@ PRESETS = {
     "drive": "W=rt S=lt A=lx- D=lx+",
     "stick": "W=ly- S=ly+ A=lx- D=lx+",
     "mouse": "I=mouse-y- K=mouse-y+ J=mouse-x- L=mouse-x+ U=wheel+ O=wheel- H=mouse-left ;=mouse-right",
+    "drive2": "W=rt S=lt A=lx- D=lx+ I=p2:rt K=p2:lt J=p2:lx- L=p2:lx+",
+    "stick2": "W=ly- S=ly+ A=lx- D=lx+ I=p2:ly- K=p2:ly+ J=p2:lx- L=p2:lx+",
+    "manual": "W=rt S=lt A=lx- D=lx+ LSHIFT=clutch SPACE=handbrake",
+}
+RUN_TARGETS = {
+    "volume+": "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 2%+",
+    "volume-": "wpctl set-volume @DEFAULT_AUDIO_SINK@ 2%-",
+    "brightness+": "brightnessctl -q set +2%",
+    "brightness-": "brightnessctl -q set 2%-",
 }
 HYSTERESIS_MM = 0.15
 
@@ -716,13 +772,25 @@ class Mapping:
         source = text[0] + source
         self.text, self.key = text, key_name(source)
         at = 1.0
-        if "@" in target:
-            target, at_text = target.rsplit("@", 1)
-            at = float(at_text)
+        self.player = 1
         self.sign = 1
         self.digital = None
+        self.owed, self.active, self.process = 0.0, False, None
+        if target.startswith("p2:"):
+            self.player, target = 2, target[3:]
+        if "@" in target and not target.startswith("run:"):
+            target, at_text = target.rsplit("@", 1)
+            at = float(at_text)
         if target.startswith("key:"):
             self.kind, self.target = "key", keycode(target[4:])
+        elif target.startswith("tap:"):
+            self.kind, self.target = "tap", keycode(target[4:])
+        elif target.startswith("run:") and target[4:]:
+            self.kind, self.target = "run", target[4:]
+        elif target in RUN_TARGETS:
+            self.kind, self.target = "run", RUN_TARGETS[target]
+        elif target in Pedals.AXES:
+            self.kind, self.target = "pedal", target
         elif target.startswith("mouse-") and target[6:] in Mouse.BUTTONS:
             self.kind, self.target = "mouse-button", target[6:]
         elif target.replace("-", "_") in Gamepad.BUTTONS or target.replace("-", "_") in Gamepad.DPAD:
@@ -736,8 +804,12 @@ class Mapping:
         else:
             raise ValueError(f"unknown output {target!r} in {text!r}. Sticks: lx- lx+ ly- ly+ rx- rx+ ry- ry+. Triggers: lt rt. "
                              f"Buttons: {' '.join(Gamepad.BUTTONS)} dpad-up dpad-down dpad-left dpad-right. "
+                             "Add p2: for a second controller. Pedals: " + " ".join(Pedals.AXES) + ". "
                              "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
-                             "Keystroke: key:F13")
+                             "Keystroke: key:F13. Repeating keystroke: tap:RIGHT. Desktop: volume+ volume- brightness+ brightness-. "
+                             "Command: run:your-command")
+        if self.player == 2 and self.kind not in ("stick", "trigger", "button"):
+            raise ValueError(f"{text!r}: p2: only applies to controller outputs")
         if self.kind in ("key", "mouse-button", "button"):
             self.digital = Digital(at, rapid)
 
@@ -749,45 +821,31 @@ def expand_maps(items):
     return out
 
 
-class Mapper:
-    """Turns key depths into controller, mouse and keystroke output. Nothing is created until it is needed."""
+class _KeyHolder:
+    """What every key-driven mode shares: holding its keys back from typing, the virtual keyboard, and the pause key."""
 
-    def __init__(self, maps, deadzone=0.3, full=3.5, curve=1.0, rapid=0.0, mouse_speed=1200.0, wheel_speed=15.0, swallow=True, pause_key="PAUSE"):
-        if not full > deadzone:
-            raise ValueError("--full must be deeper than --deadzone")
-        self.maps = [Mapping(m, rapid) for m in expand_maps(maps)]
-        if not self.maps:
-            raise ValueError("nothing to map. Try: apex-analog map drive")
-        self.deadzone, self.full, self.curve = deadzone, full, curve
-        self.mouse_speed, self.wheel_speed = mouse_speed, wheel_speed
+    def __init__(self, swallow=True, pause_key="PAUSE"):
         self.want_swallow, self.pause_code = swallow, keycode(pause_key) if pause_key else None
-        self.keys = sorted({m.key for m in self.maps}, key=lambda n: BY_NAME[n][0])
-        kinds = {m.kind for m in self.maps}
-        self.pad = Gamepad() if kinds & {"stick", "trigger", "button"} else None
-        self.mouse = Mouse() if kinds & {"mouse-axis", "mouse-button"} else None
+        self.keys, self.key_outputs = [], set()
         self.virtual_keys, self.swallow = None, None
-        self.key_outputs = {m.target for m in self.maps if m.kind == "key"}
-        self.remainder = {}
-        self.values = {}
         self.warned = False
 
     @property
     def paused(self):
         return bool(self.swallow and self.swallow.paused)
 
-    def shape(self, mm):
-        x = (mm - self.deadzone) / (self.full - self.deadzone)
-        return max(0.0, min(1.0, x)) ** self.curve
+    def held_keys(self):
+        return self.keys
 
     def attach(self):
-        """Hold back the mapped keys and pass the rest through. Without access this still maps; the keys also keep typing."""
-        blocked = {BY_NAME[m.key][2] for m in self.maps if BY_NAME[m.key][2] is not None}
+        """Hold back these keys and pass the rest through. Without access this still works; the keys also keep typing."""
+        blocked = {BY_NAME[k][2] for k in self.held_keys() if BY_NAME[k][2] is not None}
         swallow = None
         if self.want_swallow:
             try:
                 swallow = Swallow(blocked, None, self.pause_code)
             except OSError as e:
-                self._warn(f"Mapped keys will keep typing: no access to the keyboard's input devices ({e}). Run ./install.sh once.")
+                self._warn(f"These keys will keep typing: no access to the keyboard's input devices ({e}). Run ./install.sh once.")
         codes = set(self.key_outputs)
         if swallow:
             codes |= swallow.capabilities()
@@ -799,46 +857,115 @@ class Mapper:
             if swallow.grab():
                 self.swallow = swallow
             else:
-                self._warn("Mapped keys will keep typing: a key stayed held down, so the keyboard was not taken over.")
+                for fd in swallow.fds:
+                    os.close(fd)
+                self._warn("These keys will keep typing: a key stayed held down, so the keyboard was not taken over.")
 
     def _warn(self, message):
         if not self.warned:
             _say(message)
             self.warned = True
 
+    def stop_holding(self):
+        if self.swallow:
+            self.swallow.stop()
+            self.swallow = None
+
+
+class Mapper(_KeyHolder):
+    """Turns key depths into controller, pedal, mouse, keystroke and command output. Nothing is created until it is needed."""
+
+    def __init__(self, maps, deadzone=0.3, full=3.5, curve=1.0, rapid=0.0, mouse_speed=1200.0, wheel_speed=15.0,
+                 tap_rate=20.0, run_rate=8.0, swallow=True, pause_key="PAUSE"):
+        super().__init__(swallow, pause_key)
+        if not full > deadzone:
+            raise ValueError("--full must be deeper than --deadzone")
+        self.maps = [Mapping(m, rapid) for m in expand_maps(maps)]
+        if not self.maps:
+            raise ValueError("nothing to map. Try: apex-analog map drive")
+        self.deadzone, self.full, self.curve = deadzone, full, curve
+        self.mouse_speed, self.wheel_speed, self.tap_rate, self.run_rate = mouse_speed, wheel_speed, tap_rate, run_rate
+        self.keys = sorted({m.key for m in self.maps}, key=lambda n: BY_NAME[n][0])
+        self.pads = {}
+        for player in sorted({m.player for m in self.maps if m.kind in ("stick", "trigger", "button")}):
+            self.pads[player] = Gamepad(f"Apex Analog Player {player} (Xbox 360 layout)")
+        kinds = {m.kind for m in self.maps}
+        self.pedals = Pedals() if "pedal" in kinds else None
+        self.mouse = Mouse() if kinds & {"mouse-axis", "mouse-button"} else None
+        self.key_outputs = {m.target for m in self.maps if m.kind in ("key", "tap")}
+        self.remainder = {}
+        self.values = {}
+
+    @property
+    def pad(self):
+        return self.pads.get(1)
+
+    def shape(self, mm):
+        x = (mm - self.deadzone) / (self.full - self.deadzone)
+        return max(0.0, min(1.0, x)) ** self.curve
+
+    def _owed(self, m, rate, dt):
+        """How many repeats this key has earned. The first comes as soon as the press starts counting."""
+        if rate <= 0:
+            m.owed, m.active = 0.0, False
+            return 0
+        m.owed += rate * dt + (1.0 if not m.active else 0.0)
+        m.active = True
+        whole = int(m.owed)
+        m.owed -= whole
+        return whole
+
     def update(self, depths, dt):
         if self.paused:
             depths = {}
-        sticks, triggers, digital, keys, mice = {}, {}, {}, {}, {}
+        pad_values, pedal_values, keys, moves, clicks = {}, {}, {}, {}, {}
         for m in self.maps:
             mm = depths.get(m.key, 0.0)
+            amount = self.shape(mm)
+            slots = pad_values.setdefault(m.player, {})
             if m.kind == "stick":
-                sticks[m.target] = sticks.get(m.target, 0.0) + m.sign * self.shape(mm)
+                slots[m.target] = slots.get(m.target, 0.0) + m.sign * amount
             elif m.kind == "trigger":
-                triggers[m.target] = max(triggers.get(m.target, 0.0), self.shape(mm))
+                slots[m.target] = max(slots.get(m.target, 0.0), amount)
+            elif m.kind == "button":
+                slots[m.target] = m.digital.update(mm) or slots.get(m.target, False)
+            elif m.kind == "pedal":
+                pedal_values[m.target] = max(pedal_values.get(m.target, 0.0), amount)
             elif m.kind == "mouse-axis":
                 rate = self.wheel_speed if "wheel" in m.target else self.mouse_speed
-                mice[m.target] = mice.get(m.target, 0.0) + m.sign * self.shape(mm) * rate * dt
-            else:
-                state = m.digital.update(mm)
-                table = {"key": keys, "button": digital, "mouse-button": mice}[m.kind]
-                slot = ("button", m.target) if m.kind == "mouse-button" else m.target
-                table[slot] = table.get(slot, False) or state
-        if self.pad:
-            self.pad.set(**sticks, **triggers, **digital)
-        self.values = {**sticks, **triggers, **{k: v for k, v in digital.items()}}
+                moves[m.target] = moves.get(m.target, 0.0) + m.sign * amount * rate * dt
+            elif m.kind == "mouse-button":
+                clicks[m.target] = m.digital.update(mm) or clicks.get(m.target, False)
+            elif m.kind == "key":
+                keys[m.target] = m.digital.update(mm) or keys.get(m.target, False)
+            elif m.kind == "tap":
+                for _ in range(self._owed(m, amount * self.tap_rate, dt)):
+                    if self.virtual_keys:
+                        self.virtual_keys.send(m.target, 1)
+                        self.virtual_keys.send(m.target, 0)
+            elif m.kind == "run":
+                if self._owed(m, amount * self.run_rate, dt) and (m.process is None or m.process.poll() is not None):
+                    m.process = subprocess.Popen(m.target, shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        values = {}
+        for player, pad in self.pads.items():
+            pad.set(**pad_values.get(player, {}))
+            prefix = "" if player == 1 else f"p{player}:"
+            values.update({prefix + k: v for k, v in pad_values.get(player, {}).items()})
+        if self.pedals:
+            self.pedals.set(**pedal_values)
+            values.update(pedal_values)
+        self.values = values
         if self.mouse:
             whole = {}
-            for axis, amount in mice.items():
-                if isinstance(axis, tuple):
-                    if self.remainder.get(axis) != amount:
-                        self.remainder[axis] = amount
-                        self.mouse.button(axis[1], amount)
-                    continue
+            for axis, amount in moves.items():
                 total = self.remainder.get(axis, 0.0) + amount
                 whole[axis] = int(total)
                 self.remainder[axis] = total - whole[axis]
             self.mouse._rel(**whole)
+            for name, state in clicks.items():
+                if self.remainder.get(("button", name)) != state:
+                    self.remainder[("button", name)] = state
+                    self.mouse.button(name, state)
         if self.virtual_keys:
             for code, state in keys.items():
                 if state != (code in self.virtual_keys.down):
@@ -850,15 +977,430 @@ class Mapper:
             if m.digital:
                 m.digital.down = False
         self.update({}, 0.0)
-        if self.swallow:
-            self.swallow.stop()
-            self.swallow = None
+        self.stop_holding()
 
     def close(self):
         self.release()
-        for device in (self.pad, self.mouse, self.virtual_keys):
+        for device in (*self.pads.values(), self.pedals, self.mouse, self.virtual_keys):
             if device:
                 device.close()
+
+
+# ---- MIDI ------------------------------------------------------------------------------------------------------------
+
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+MIDI_NOTE_ON, MIDI_NOTE_OFF, MIDI_KEY_PRESSURE, MIDI_CONTROLLER, MIDI_CHANNEL_PRESSURE, MIDI_PITCH_BEND = 6, 7, 8, 10, 12, 13
+
+
+def note_name(note):
+    return f"{NOTE_NAMES[note % 12]}{note // 12 - 1}"
+
+
+def midi_layout(name="piano", octave=0):
+    """Key name -> MIDI note. Z is C3 in the piano layout; each --octave moves everything 12 notes."""
+    base = 48 + 12 * octave
+    if name == "piano":  # the shape of a piano: the row above each white-key row holds the black keys
+        rows = [("ZSXDCVGBHNJM,L.;/", base), ("Q2W3ER5T6Y7UI9O0P[=]", base + 12)]
+    elif name == "grid":  # every key one note up from its left neighbour, every row a fourth above the one below, like a guitar
+        rows = [("ZXCVBNM,./", base - 12), ("ASDFGHJKL;'", base - 7), ("QWERTYUIOP[]\\", base - 2), ("1234567890-=", base + 3)]
+    else:
+        raise ValueError(f"unknown layout {name!r}. Layouts: piano grid")
+    return {key_name(key): start + i for keys, start in rows for i, key in enumerate(keys) if 0 <= start + i <= 127}
+
+
+def midi_velocity(speed, soft=8.0, hard=160.0):
+    """Press speed in mm/s -> MIDI velocity 1-127, on a log scale, because that's how loudness feels."""
+    if speed <= soft:
+        return 1
+    return min(127, 1 + int(126 * math.log(speed / soft) / math.log(hard / soft)))
+
+
+class AlsaMidi:
+    """A virtual MIDI port any ALSA, JACK or PipeWire app can connect to. Uses libasound directly, so no Python packages."""
+
+    def __init__(self, name="Apex Analog"):
+        library = ctypes.util.find_library("asound")
+        if not library:
+            raise ApexError("MIDI needs libasound (alsa-lib), which wasn't found.")
+        self.lib = ctypes.CDLL(library)
+        void = ctypes.c_void_p
+        self.lib.snd_seq_open.argtypes = [ctypes.POINTER(void), ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+        self.lib.snd_seq_set_client_name.argtypes = [void, ctypes.c_char_p]
+        self.lib.snd_seq_create_simple_port.argtypes = [void, ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint]
+        self.lib.snd_seq_client_id.argtypes = [void]
+        self.lib.snd_seq_event_output_direct.argtypes = [void, ctypes.c_char_p]
+        self.lib.snd_seq_close.argtypes = [void]
+        self.seq = void()
+        if self.lib.snd_seq_open(ctypes.byref(self.seq), b"default", 1, 1) < 0:  # output only, never block the key loop
+            raise AccessDenied("Could not open the ALSA sequencer (/dev/snd/seq). Is your user in the audio group?")
+        self.lib.snd_seq_set_client_name(self.seq, name.encode())
+        read_and_subscribe, midi_application = (1 << 0) | (1 << 5), (1 << 1) | (1 << 20)
+        self.port = self.lib.snd_seq_create_simple_port(self.seq, name.encode(), read_and_subscribe, midi_application)
+        self.client = self.lib.snd_seq_client_id(self.seq)
+        self.address = f"{self.client}:{self.port}"
+
+    def _send(self, kind, data):
+        direct_queue, to_subscribers, unknown_port = 253, 254, 253
+        event = struct.pack("<BBBB8xBBBB12s", kind, 0, 0, direct_queue, 0, self.port, to_subscribers, unknown_port, data)
+        self.lib.snd_seq_event_output_direct(self.seq, event)
+
+    def note_on(self, channel, note, velocity):
+        self._send(MIDI_NOTE_ON, struct.pack("<BBBBI", channel, note, velocity, 0, 0))
+
+    def note_off(self, channel, note, velocity=64):
+        self._send(MIDI_NOTE_OFF, struct.pack("<BBBBI", channel, note, velocity, 0, 0))
+
+    def key_pressure(self, channel, note, pressure):
+        self._send(MIDI_KEY_PRESSURE, struct.pack("<BBBBI", channel, note, pressure, 0, 0))
+
+    def controller(self, channel, number, value):
+        self._send(MIDI_CONTROLLER, struct.pack("<B3xIi", channel, number, value))
+
+    def channel_pressure(self, channel, pressure):
+        self._send(MIDI_CHANNEL_PRESSURE, struct.pack("<B3xIi", channel, 0, pressure))
+
+    def pitch_bend(self, channel, value):
+        self._send(MIDI_PITCH_BEND, struct.pack("<B3xIi", channel, 0, value))
+
+    def close(self):
+        if self.seq:
+            self.lib.snd_seq_close(self.seq)
+            self.seq = None
+
+
+class MidiInstrument(_KeyHolder):
+    """Plays notes from key depth: press speed sets velocity, hold depth sets per-key pressure, SPACE sustains, LSHIFT is the
+    mod wheel, TAB and CAPS bend pitch up and down."""
+
+    def __init__(self, layout="piano", octave=0, channel=1, note_at=1.5, aftertouch="poly", soft=8.0, hard=160.0, ccs=None, output=None,
+                 swallow=True, pause_key="PAUSE"):
+        super().__init__(swallow, pause_key)
+        if aftertouch not in ("poly", "channel", "off"):
+            raise ValueError("--aftertouch should be poly, channel or off")
+        if not 1 <= channel <= 16:
+            raise ValueError("--channel should be 1 to 16")
+        self.notes = midi_layout(layout, octave)
+        self.channel, self.note_at, self.aftertouch, self.soft, self.hard = channel - 1, note_at, aftertouch, soft, hard
+        self.ccs = {"SPACE": 64, "LSHIFT": 1}
+        for key, number in (ccs or {}).items():
+            self.ccs[key_name(key)] = number
+        self.notes = {k: n for k, n in self.notes.items() if k not in self.ccs}
+        self.bend_down, self.bend_up = "CAPS", "TAB"
+        self.keys = sorted({*self.notes, *self.ccs, self.bend_down, self.bend_up}, key=lambda n: BY_NAME[n][0])
+        self.midi = output or AlsaMidi()
+        self.state = {key: {"on": False, "started": None, "pressure": 0} for key in self.notes}
+        self.sounding = {}
+        self.cc_values, self.bend = {}, 0
+        self.now = 0.0
+
+    def _press(self, note, velocity):
+        self.sounding[note] = self.sounding.get(note, 0) + 1
+        if self.sounding[note] == 1:  # two keys can share a note; it only starts once
+            self.midi.note_on(self.channel, note, velocity)
+
+    def _lift(self, note):
+        self.sounding[note] -= 1
+        if not self.sounding[note]:
+            del self.sounding[note]
+            self.midi.note_off(self.channel, note)
+
+    def update(self, depths, dt):
+        self.now += dt
+        if self.paused:
+            depths = {}
+        strongest = 0
+        for key, note in self.notes.items():
+            mm, state = depths.get(key, 0.0), self.state[key]
+            if not state["on"]:
+                if mm < AT_REST_MM:
+                    state["started"] = None
+                elif state["started"] is None:
+                    state["started"] = self.now - dt  # it left rest some time since the last reading
+                if mm >= self.note_at:
+                    speed = (self.note_at - AT_REST_MM) / max(self.now - state["started"], 0.001)
+                    state["on"], state["pressure"] = True, 0
+                    self._press(note, midi_velocity(speed, self.soft, self.hard))
+            elif mm <= self.note_at - 0.4:
+                state["on"], state["started"] = False, None
+                self._lift(note)
+            else:
+                pressure = int(127 * max(0.0, min(1.0, (mm - self.note_at) / (TRAVEL_MM - self.note_at))))
+                strongest = max(strongest, pressure)
+                if self.aftertouch == "poly" and (abs(pressure - state["pressure"]) >= 2 or (pressure in (0, 127) and pressure != state["pressure"])):
+                    state["pressure"] = pressure
+                    self.midi.key_pressure(self.channel, note, pressure)
+        if self.aftertouch == "channel" and strongest != self.cc_values.get("pressure", 0):
+            self.cc_values["pressure"] = strongest
+            self.midi.channel_pressure(self.channel, strongest)
+        for key, number in self.ccs.items():
+            value = int(127 * depths.get(key, 0.0) / TRAVEL_MM)
+            last = self.cc_values.get(key, 0)
+            if abs(value - last) >= 2 or (value in (0, 127) and value != last):
+                self.cc_values[key] = value
+                self.midi.controller(self.channel, number, value)
+        bend = int(8191 * (depths.get(self.bend_up, 0.0) - depths.get(self.bend_down, 0.0)) / TRAVEL_MM)
+        if abs(bend - self.bend) >= 64 or (bend == 0 and self.bend):
+            self.bend = bend
+            self.midi.pitch_bend(self.channel, bend)
+
+    def release(self):
+        self.update({}, 0.0)
+        self.midi.controller(self.channel, 123, 0)  # all notes off, in case a synth missed one
+        self.stop_holding()
+
+    def close(self):
+        self.release()
+        self.midi.close()
+        if self.virtual_keys:
+            self.virtual_keys.close()
+
+
+# ---- pressure typing -------------------------------------------------------------------------------------------------
+
+MODIFIERS = ("LSHIFT", "RSHIFT", "LCTRL", "RCTRL", "LALT", "RALT", "LGUI", "RGUI")
+TYPED_KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+
+
+class PressureTyper(_KeyHolder):
+    """Type lightly for lowercase and press deep for a capital, or for a key combo you choose per key.
+
+    A press only sends its keystroke once its depth is settled: it went deep, or it started rising, or another key went down,
+    or it has been held for `hold` seconds. Keystrokes always go out in the order they were pressed.
+    """
+
+    def __init__(self, at=1.5, deep=3.2, hold=0.15, combos=None, pause_key="PAUSE"):
+        super().__init__(True, pause_key)
+        if not deep > at:
+            raise ValueError("--deep must be deeper than --at")
+        self.at, self.deep, self.hold = at, deep, hold
+        self.combos = {key_name(k): [keycode(n) for n in v.split("+")] for k, v in (combos or {}).items()}
+        self.typed = [key_name(k) for k in TYPED_KEYS]
+        self.keys = sorted({*self.typed, *self.combos, *MODIFIERS}, key=lambda n: BY_NAME[n][0])
+        self.typed = [k for k in self.keys if k not in MODIFIERS]
+        self.key_outputs = {BY_NAME[k][2] for k in self.typed} | {BY_NAME["LSHIFT"][2]} | {c for combo in self.combos.values() for c in combo}
+        self.presses, self.queue = {}, []
+        self.now = 0.0
+
+    def held_keys(self):
+        return self.typed
+
+    def update(self, depths, dt):
+        self.now += dt
+        if self.paused:
+            depths = {}
+        modifier_held = any(depths.get(k, 0.0) >= self.at for k in MODIFIERS)
+        for key in self.typed:
+            mm, press = depths.get(key, 0.0), self.presses.get(key)
+            if press is None:
+                if mm >= self.at:
+                    for earlier in self.queue:  # another key went down, so earlier presses have settled
+                        earlier["fate"] = earlier["fate"] or "light"
+                    press = {"key": key, "peak": mm, "since": self.now, "fate": "light" if modifier_held else None, "sent": False, "released": False}
+                    self.presses[key] = press
+                    self.queue.append(press)
+                continue
+            press["peak"] = max(press["peak"], mm)
+            if press["fate"] is None:
+                if mm >= self.deep:
+                    press["fate"] = "deep"
+                elif mm <= press["peak"] - 0.3 or self.now - press["since"] >= self.hold:
+                    press["fate"] = "light"
+            if mm < self.at - HYSTERESIS_MM:
+                press["fate"] = press["fate"] or "light"
+                press["released"] = True
+        self._flush()
+
+    def _flush(self):
+        while self.queue and self.queue[0]["fate"]:
+            press = self.queue.pop(0)
+            if self.virtual_keys:
+                self._send_down(press)
+            press["sent"] = True
+        for key, press in list(self.presses.items()):
+            if press["released"] and press["sent"]:
+                if self.virtual_keys and press.get("code") is not None:
+                    self.virtual_keys.send(press["code"], 0)
+                del self.presses[key]
+
+    def _send_down(self, press):
+        code = BY_NAME[press["key"]][2]
+        output = self.virtual_keys
+        if press["fate"] == "deep" and press["key"] in self.combos:
+            combo = self.combos[press["key"]]
+            for c in combo:
+                output.send(c, 1)
+            for c in reversed(combo):
+                output.send(c, 0)
+            return
+        press["code"] = code
+        if press["fate"] == "deep":
+            shift = BY_NAME["LSHIFT"][2]
+            output.send(shift, 1)
+            output.send(code, 1)
+            output.send(shift, 0)
+        else:
+            output.send(code, 1)
+
+    def release(self):
+        self.update({}, 0.0)
+        self.stop_holding()
+
+    def close(self):
+        self.release()
+        if self.virtual_keys:
+            self.virtual_keys.close()
+
+
+# ---- how you type ----------------------------------------------------------------------------------------------------
+
+class Press(NamedTuple):
+    key: str
+    down: float
+    up: float
+    peak: float  # deepest point in mm
+    speed: float  # fastest going down, in mm/s
+
+
+class _PressLog:
+    """Turns key depths into finished presses."""
+
+    def __init__(self, down=0.5, up=0.3):
+        self.down, self.up = down, up
+        self.last, self.open = {}, {}
+
+    def update(self, depths, now):
+        finished = []
+        for key, mm in depths.items():
+            last_mm, last_time = self.last.get(key, (mm, now))
+            self.last[key] = (mm, now)
+            press = self.open.get(key)
+            if press is None:
+                if mm >= self.down:
+                    speed = (mm - last_mm) / (now - last_time) if now > last_time else 0.0
+                    self.open[key] = {"down": now, "peak": mm, "speed": max(speed, 0.0)}
+            else:
+                press["peak"] = max(press["peak"], mm)
+                if now > last_time:
+                    press["speed"] = max(press["speed"], (mm - last_mm) / (now - last_time))
+                if mm <= self.up:
+                    finished.append(Press(key, press["down"], now, press["peak"], press["speed"]))
+                    del self.open[key]
+        return finished
+
+
+TYPEPRINT_PHRASE = "pressure never lies"  # fixed on purpose: this file must never hold a real password
+TYPEPRINT_SAMPLES = 8
+TYPEPRINT_FLOOR = 0.12  # the least spread any measurement is allowed, so one lucky match can't dominate a score
+
+
+def _config_path(name):
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "apex-analog", name)
+
+
+def _state_path(name):
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    return os.path.join(base, "apex-analog", name)
+
+
+def _write_private(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temporary = path + ".tmp"
+    with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(data, f)
+    os.replace(temporary, path)
+
+
+def typing_features(presses):
+    """One attempt at the phrase -> numbers: for each key its depth, speed, how long it was held, and the gap since the last key."""
+    presses = sorted(presses, key=lambda p: p.down)
+    features = []
+    for i, press in enumerate(presses):
+        features += [press.peak, math.log(max(press.speed, 0.0) + 1), math.log(press.up - press.down + 0.001)]
+        features.append(math.log(press.down - presses[i - 1].down + 0.001) if i else 0.0)
+    return features
+
+
+def _typeprint_template(samples):
+    columns = list(zip(*samples))
+    return {"means": [statistics.fmean(c) for c in columns], "spreads": [max(statistics.pstdev(c), TYPEPRINT_FLOOR) for c in columns]}
+
+
+def typeprint_score(template, sample):
+    """Average distance from your usual typing, in spreads. Lower is more like you."""
+    return statistics.fmean(abs(x - m) / s for x, m, s in zip(sample, template["means"], template["spreads"]))
+
+
+def build_typeprint(samples):
+    """A template plus a limit set by how much your own attempts differ, testing each one against a template of the others."""
+    own = [typeprint_score(_typeprint_template(samples[:i] + samples[i + 1:]), s) for i, s in enumerate(samples)]
+    return {**_typeprint_template(samples), "limit": max(own) * 1.25, "own_scores": own}
+
+
+def _bins(mm):
+    return min(40, max(0, int(mm * 10)))
+
+
+class TypingProfile:
+    """Per-key totals of how you press. Never the order of keys, so it can't be read back as text."""
+
+    def __init__(self, data=None):
+        self.keys = (data or {}).get("keys", {})
+
+    def add(self, press, actuates_at=None):
+        stats = self.keys.setdefault(press.key, {"count": 0, "bins": [0] * 41, "speed": 0.0, "held": 0.0, "near_misses": 0})
+        stats["count"] += 1
+        stats["bins"][_bins(press.peak)] += 1
+        stats["speed"] += press.speed
+        stats["held"] += press.up - press.down
+        if actuates_at is not None and press.peak < actuates_at:
+            stats["near_misses"] += 1
+
+    @staticmethod
+    def _percentile(bins, fraction):
+        total, seen = sum(bins), 0
+        for i, count in enumerate(bins):
+            seen += count
+            if total and seen >= fraction * total:
+                return i / 10
+        return 0.0
+
+    def report(self, actuation=None):
+        if not self.keys:
+            return ["Nothing recorded yet. Run apex-analog profile and type for a while."]
+        bins = [sum(s["bins"][i] for s in self.keys.values()) for i in range(41)]
+        total = sum(bins)
+        near = sum(s["near_misses"] for s in self.keys.values())
+        light, typical = self._percentile(bins, 0.05), self._percentile(bins, 0.5)
+        bottom = sum(bins[37:]) / total
+        lines = [f"{total} presses on {len(self.keys)} keys.",
+                 f"Typical press reaches {typical:.1f} mm. {bottom:.0%} bottom out. Your lightest 5% stop by {light:.1f} mm."]
+        if actuation:
+            lines.append(f"{near} presses ({near / total:.1%}) stopped short of your {actuation:.2f} mm actuation point, so the keyboard ignored them.")
+            if near / total > 0.02:
+                lines.append(f"That's a lot of missed presses: an actuation point near {max(0.2, light * 0.8):.1f} mm would catch them.")
+            elif light > actuation + 0.5:
+                lines.append(f"Your presses comfortably clear it, so you have room to raise actuation toward {light * 0.8:.1f} mm for fewer accidental presses.")
+            else:
+                lines.append("Your actuation point suits how you type.")
+        lines += ["", f"{'key':8}{'presses':>8}{'typical mm':>12}{'mm/s':>8}{'held ms':>9}"]
+        for key, s in sorted(self.keys.items(), key=lambda kv: -kv[1]["count"])[:20]:
+            lines.append(f"{key:8}{s['count']:8d}{self._percentile(s['bins'], 0.5):12.1f}{s['speed'] / s['count']:8.0f}{1000 * s['held'] / s['count']:9.0f}")
+        return lines
+
+
+def key_health(offset, noise, span, typical_span):
+    """What looks wrong with one key: how far it rests from its calibrated zero, how much its reading jitters, and its range."""
+    problems = []
+    if offset > 80:
+        problems.append(f"rests {offset:.0f} counts high (held down, dirty, or worn)")
+    if offset < -30:
+        problems.append(f"rests {-offset:.0f} counts low (needs recalibrating?)")
+    if noise > 6:
+        problems.append(f"noisy reading ({noise:.1f} counts)")
+    if abs(span - typical_span) > 0.15 * typical_span:
+        problems.append(f"range {span} counts, others are about {typical_span}")
+    return problems
 
 
 # ---- outputs for other programs --------------------------------------------------------------------------------------
@@ -919,6 +1461,61 @@ class OscSink:
             pass
 
 
+OVERLAY_PAGE = r"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>apex-analog overlay</title><style>
+html, body { margin: 0; background: transparent; font: 600 15px system-ui, sans-serif; color: #f3f3f3; }
+#board { display: inline-flex; flex-direction: column; gap: 5px; padding: 10px; }
+.row { display: flex; gap: 5px; }
+.key { position: relative; height: 54px; border-radius: 7px; overflow: hidden; background: rgba(18, 20, 24, .78); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
+.key.absent { visibility: hidden; }
+.fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: #e8862e; }
+.key.deep .fill { background: #f6c343; }
+.key.deep .name, .key.deep .mm { color: #16181c; text-shadow: none; }
+.name, .mm { position: absolute; left: 7px; text-shadow: 0 1px 2px #000; }
+.name { top: 5px; }
+.mm { bottom: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+</style></head><body><div id="board"></div><script>
+const ROWS = [
+  [["`",1],["1",1],["2",1],["3",1],["4",1],["5",1],["6",1],["7",1],["8",1],["9",1],["0",1],["-",1],["=",1],["BKSP",2]],
+  [["TAB",1.5],["Q",1],["W",1],["E",1],["R",1],["T",1],["Y",1],["U",1],["I",1],["O",1],["P",1],["[",1],["]",1],["\\",1.5]],
+  [["CAPS",1.75],["A",1],["S",1],["D",1],["F",1],["G",1],["H",1],["J",1],["K",1],["L",1],[";",1],["'",1],["ENTER",2.25]],
+  [["LSHIFT",2.25],["Z",1],["X",1],["C",1],["V",1],["B",1],["N",1],["M",1],[",",1],[".",1],["/",1],["RSHIFT",2.75]],
+  [["LCTRL",1.25],["LGUI",1.25],["LALT",1.25],["SPACE",6.25],["RALT",1.25],["RGUI",1.25],["SS",1.25],["RCTRL",1.25]],
+];
+const LABELS = {LSHIFT: "SHIFT", RSHIFT: "SHIFT", LCTRL: "CTRL", RCTRL: "CTRL", LALT: "ALT", RALT: "ALT", LGUI: "WIN", RGUI: "WIN", BKSP: "BACK"};
+const UNIT = 54, GAP = 5, keys = {}, board = document.getElementById("board");
+for (const row of ROWS) {
+  const line = document.createElement("div");
+  line.className = "row";
+  for (const [name, width] of row) {
+    const key = document.createElement("div");
+    key.className = "key absent";
+    key.style.width = (width * UNIT + (width - 1) * GAP) + "px";
+    key.innerHTML = '<div class="fill"></div><div class="name"></div><div class="mm"></div>';
+    key.querySelector(".name").textContent = LABELS[name] || name;
+    line.appendChild(key);
+    keys[name] = key;
+  }
+  board.appendChild(line);
+}
+function connect() {
+  const socket = new WebSocket("ws://" + location.host);
+  socket.onmessage = event => {
+    const depths = JSON.parse(event.data);
+    for (const [name, mm] of Object.entries(depths)) {
+      const key = keys[name];
+      if (!key) continue;
+      key.classList.remove("absent");
+      key.classList.toggle("deep", mm >= 3.5);
+      key.querySelector(".fill").style.height = (mm / 4 * 100) + "%";
+      key.querySelector(".mm").textContent = mm > 0 ? mm.toFixed(1) : "";
+    }
+  };
+  socket.onclose = () => setTimeout(connect, 1000);
+}
+connect();
+</script></body></html>"""
+
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
@@ -972,8 +1569,9 @@ class ServeSink:
                 client.close()
                 return
             if "sec-websocket-key" not in headers:
-                body = json.dumps(self.latest).encode()
-                client.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: "
+                path = request.split(b" ", 2)[1] if request.count(b" ") >= 2 else b"/"
+                body, kind = (OVERLAY_PAGE.encode(), b"text/html") if path.split(b"?")[0] == b"/overlay" else (json.dumps(self.latest).encode(), b"application/json")
+                client.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: " + kind + b"\r\nConnection: close\r\nContent-Length: "
                                + str(len(body)).encode() + b"\r\n\r\n" + body)
                 client.close()
                 return
@@ -1083,7 +1681,7 @@ def _selected_keys(args):
     return None if args.keys in (None, "all") else key_names(args.keys)
 
 
-def _loop(hz, keys, mapper, on_frame):
+def _loop(hz, keys, holder, on_frame):
     """Read, map, send. Comes back after an unplug or a suspend, and lets go of every output while the keyboard is away."""
     Keyboard().close()  # a problem at the start should be reported, not waited on
     waiting = False
@@ -1093,23 +1691,23 @@ def _loop(hz, keys, mapper, on_frame):
                 if waiting:
                     _say("Keyboard is back.")
                     waiting = False
-                if mapper:
-                    missing = [k for k in mapper.keys if k not in kb.keys]
+                if holder:
+                    missing = [k for k in holder.keys if k not in kb.keys]
                     if missing:
                         raise ApexError(f"No sensor fitted on this keyboard for: {' '.join(missing)}")
-                    mapper.attach()
+                    holder.attach()
                 last = time.monotonic()
                 for depths in kb.stream(hz, keys):
                     now = time.monotonic()
-                    if mapper:
-                        mapper.update(depths, now - last)
+                    if holder:
+                        holder.update(depths, now - last)
                     last = now
                     on_frame(depths, now)
         except (Disconnected, NotFound, AccessDenied) as e:
             if isinstance(e, AccessDenied) and not waiting:
                 raise
-            if mapper:
-                mapper.release()
+            if holder:
+                holder.release()
             if not waiting:
                 _say("Keyboard went away. Waiting for it.")
                 waiting = True
@@ -1144,42 +1742,36 @@ def cmd_stream(args):
 def _map_lines(mapper, rate):
     lines = [f"apex-analog  {rate:.0f} updates/s  " + " ".join(m.text for m in mapper.maps), ""]
     for name, value in mapper.values.items():
-        if name in Gamepad.STICKS:
+        bare = name.split(":")[-1]
+        if bare in Gamepad.STICKS:
             half = 20
             left = int(half * max(0.0, -value))
             right = int(half * max(0.0, value))
-            lines.append(f"{name:7}|{' ' * (half - left)}{'#' * left}|{'#' * right}{' ' * (half - right)}| {value:+.2f}")
-        elif name in Gamepad.TRIGGERS:
+            lines.append(f"{name:10}|{' ' * (half - left)}{'#' * left}|{'#' * right}{' ' * (half - right)}| {value:+.2f}")
+        elif bare in Gamepad.TRIGGERS or bare in Pedals.AXES:
             n = int(41 * value)
-            lines.append(f"{name:7}|{'#' * n}{' ' * (41 - n)}| {value:.2f}")
+            lines.append(f"{name:10}|{'#' * n}{' ' * (41 - n)}| {value:.2f}")
         else:
-            lines.append(f"{name:7}{'ON' if value else 'off'}")
+            lines.append(f"{name:10}{'ON' if value else 'off'}")
     if mapper.mouse:
         lines.append("mouse is live")
     if mapper.key_outputs:
         lines.append("keystrokes are live")
-    lines.append("")
-    if mapper.paused:
-        lines.append("PAUSED: your keys type normally. Press Pause to resume.")
-    elif mapper.swallow:
-        lines.append("Mapped keys won't type while this runs. Pause key pauses. Ctrl-C quits.")
-    else:
-        lines.append("Ctrl-C quits.")
-    return lines
+    return lines + _holder_lines(mapper)
 
 
-def cmd_map(args):
-    sinks = _network_sinks(args)
-    explicit = _selected_keys(args)
-    maps = args.maps or (["drive"] if args.command == "gamepad" else [])
-    Keyboard().close()  # say what's wrong with the keyboard before creating virtual devices
-    mapper = Mapper(maps, args.deadzone, args.full, args.curve, args.rapid, args.mouse_speed, args.wheel_speed,
-                    not args.no_swallow, args.pause_key)
-    read = sorted({*mapper.keys, *(explicit or [])}, key=lambda n: BY_NAME[n][0]) if args.keys != "all" else None
+def _holder_lines(holder):
+    if holder.paused:
+        return ["", "PAUSED: your keys type normally. Press Pause to resume."]
+    if holder.swallow:
+        return ["", "These keys won't type while this runs. Pause key pauses. Ctrl-C quits."]
+    return ["", "Ctrl-C quits."]
+
+
+def _drive(holder, hz, read, lines, sinks=(), explicit=None):
+    """Run a key-driven mode: read the keyboard, feed the mode and any network outputs, and keep the screen up to date."""
     state = {"scans": 0, "rate": 0.0, "last": time.monotonic(), "drawn": 0.0}
     try:
-        if mapper.pad:
-            _say(f"Virtual controller ready: {mapper.pad.path}")
         with _Screen() as screen:
             def on_frame(depths, now):
                 for sink in sinks:
@@ -1189,10 +1781,223 @@ def cmd_map(args):
                     state.update(rate=state["scans"] / (now - state["last"]), scans=0, last=now)
                 if now - state["drawn"] >= 0.05:
                     state["drawn"] = now
-                    screen.draw(_map_lines(mapper, state["rate"]))
-            _loop(args.hz or 120, read, mapper, on_frame)
+                    screen.draw(lines(holder, state["rate"]))
+            _loop(hz, read, holder, on_frame)
     finally:
-        mapper.close()
+        holder.close()
+
+
+def cmd_map(args):
+    sinks = _network_sinks(args)
+    explicit = _selected_keys(args)
+    maps = args.maps or (["drive"] if args.command == "gamepad" else [])
+    Keyboard().close()  # say what's wrong with the keyboard before creating virtual devices
+    mapper = Mapper(maps, args.deadzone, args.full, args.curve, args.rapid, args.mouse_speed, args.wheel_speed,
+                    args.tap_rate, args.run_rate, not args.no_swallow, args.pause_key)
+    read = sorted({*mapper.keys, *(explicit or [])}, key=lambda n: BY_NAME[n][0]) if args.keys != "all" else None
+    for player, pad in mapper.pads.items():
+        _say(f"Virtual controller {player} ready: {pad.path}")
+    if mapper.pedals:
+        _say(f"Virtual pedals ready: {mapper.pedals.path}. They have no default bindings, so bind them in your game once.")
+    _drive(mapper, args.hz or 120, read, _map_lines, sinks, explicit)
+
+
+def _midi_lines(instrument, rate):
+    playing = " ".join(note_name(n) for n in sorted(instrument.sounding)) or "-"
+    lines = [f"apex-analog midi  {rate:.0f} updates/s  ALSA port {instrument.midi.address} \"Apex Analog\"", "",
+             f"Playing: {playing}",
+             f"Sustain {instrument.cc_values.get('SPACE', 0):3d}   Mod wheel {instrument.cc_values.get('LSHIFT', 0):3d}   Pitch bend {instrument.bend:+5d}",
+             "", "Z row and Q row are piano keys. SPACE sustains, LSHIFT is the mod wheel, TAB and CAPS bend pitch."]
+    return lines + _holder_lines(instrument)
+
+
+def _parse_pairs(items, label):
+    out = {}
+    for item in items or []:
+        key, separator, value = item[1:].partition("=")
+        if not separator or not value:
+            raise ValueError(f"{label} should look like J=something, not {item!r}")
+        out[item[0] + key] = value
+    return out
+
+
+def cmd_midi(args):
+    Keyboard().close()
+    ccs = {key: int(value) for key, value in _parse_pairs(args.cc, "--cc").items()}
+    instrument = MidiInstrument(args.layout, args.octave, args.channel, args.note_at, args.aftertouch, args.soft, args.hard, ccs,
+                                swallow=not args.no_swallow, pause_key=args.pause_key)
+    _say(f"MIDI port ready: {instrument.midi.address} \"Apex Analog\". Connect it from your synth or DAW, or with aconnect.")
+    _drive(instrument, args.hz or 300, instrument.keys, _midi_lines)
+
+
+def _type_lines(typer, rate):
+    lines = [f"apex-analog type  {rate:.0f} updates/s", "",
+             f"Press light for lowercase. Past {typer.deep:.1f} mm gives a capital or the other symbol on that key."]
+    if typer.combos:
+        lines.append("Deep combos: " + " ".join(typer.combos))
+    return lines + _holder_lines(typer)
+
+
+def cmd_type(args):
+    Keyboard().close()
+    typer = PressureTyper(args.at, args.deep, args.hold, _parse_pairs(args.combo, "--combo"), args.pause_key)
+    _drive(typer, args.hz or 300, typer.keys, _type_lines)
+
+
+def _capture_phrase(kb, screen, heading):
+    wanted = ["SPACE" if c == " " else c.upper() for c in TYPEPRINT_PHRASE]
+    log, presses = _PressLog(), []
+
+    def text():
+        ordered = sorted(presses, key=lambda p: p.down)
+        return "".join(" " if p.key == "SPACE" else p.key.lower() for p in ordered)
+
+    screen.draw([heading, "", f"Type:  {TYPEPRINT_PHRASE}", f"       {text()}", "", "Then press Enter. Type the way you normally type. Ctrl-C quits."])
+    for depths in kb.stream(400, sorted({*wanted, "ENTER"}, key=lambda n: BY_NAME[n][0])):
+        finished = log.update(depths, time.monotonic())
+        for press in finished:
+            if press.key == "ENTER":
+                ordered = sorted(presses, key=lambda p: p.down)
+                return typing_features(ordered) if [p.key for p in ordered] == wanted else None
+            presses.append(press)
+        if finished:
+            screen.draw([heading, "", f"Type:  {TYPEPRINT_PHRASE}", f"       {text()}", "", "Then press Enter. Type the way you normally type. Ctrl-C quits."])
+
+
+def cmd_typeprint(args):
+    path = _config_path("typeprint.json")
+    if args.action == "forget":
+        if os.path.exists(path):
+            os.remove(path)
+        print("Forgotten.")
+        return 0
+    if args.action == "check" and not os.path.exists(path):
+        raise ApexError("Nothing to compare against yet. Run: apex-analog typeprint enroll")
+    with Keyboard() as kb, _Screen() as screen:
+        if not screen.active:
+            raise ApexError("typeprint needs a terminal.")
+        if args.action == "enroll":
+            samples = []
+            while len(samples) < TYPEPRINT_SAMPLES:
+                sample = _capture_phrase(kb, screen, f"Attempt {len(samples) + 1} of {TYPEPRINT_SAMPLES}")
+                if sample is not None:
+                    samples.append(sample)
+            result = build_typeprint(samples)
+        else:
+            sample = None
+            while sample is None:
+                sample = _capture_phrase(kb, screen, "Prove it's you")
+            with open(path) as f:
+                stored = json.load(f)
+            score = typeprint_score(stored, sample)
+    if args.action == "enroll":
+        _write_private(path, result)
+        print(f"Saved your typing print. Your own attempts scored {min(result['own_scores']):.2f} to {max(result['own_scores']):.2f}, so the limit is {result['limit']:.2f}.")
+        print("Now try apex-analog typeprint check, then see whether anyone else can pass it.")
+        return 0
+    matched = score <= stored["limit"]
+    print(f"{'Match' if matched else 'No match'}: scored {score:.2f}, limit {stored['limit']:.2f}. Lower is more like you. This is an experiment, not security.")
+    return 0 if matched else 1
+
+
+def cmd_profile(args):
+    path = _state_path("typing-profile.json")
+    if args.reset:
+        if os.path.exists(path):
+            os.remove(path)
+        print("Cleared.")
+        return 0
+    data = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            data = json.load(f)
+    profile = TypingProfile(data)
+    if args.report:
+        with Keyboard() as kb:
+            settings = kb.actuation()
+        print("\n".join(profile.report(statistics.median(s["press"] for s in settings.values()))))
+        return 0
+    log = _PressLog()
+    started, saved = time.monotonic(), time.monotonic()
+    with Keyboard() as kb:
+        settings = kb.actuation()
+        _say("Recording how you press, as per-key totals only, never the order of keys. Type normally. Ctrl-C stops and shows the report.")
+        try:
+            for depths in kb.stream(args.hz or 150):
+                now = time.monotonic()
+                for press in log.update(depths, now):
+                    profile.add(press, settings.get(press.key, {}).get("press"))
+                if now - saved >= 30:
+                    _write_private(path, {"keys": profile.keys})
+                    saved = now
+                if args.minutes and now - started >= args.minutes * 60:
+                    break
+        except KeyboardInterrupt:
+            pass
+    _write_private(path, {"keys": profile.keys})
+    print("\n".join(profile.report(statistics.median(s["press"] for s in settings.values()))))
+    return 0
+
+
+def cmd_health(args):
+    with Keyboard() as kb:
+        samples = {k: [] for k in kb.keys}
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            for key, value in kb.raw().items():
+                samples[key].append(value)
+        spans = {k: top - rest for k, (top, rest) in kb._calibration.items()}
+        typical = int(statistics.median(spans.values()))
+        rows = []
+        for key, values in samples.items():
+            top, rest = kb._calibration[key]
+            offset, noise = statistics.fmean(values) - rest, statistics.pstdev(values)
+            rows.append((key, offset, noise, spans[key], key_health(offset, noise, spans[key], typical)))
+        peaks = {}
+        if args.press:
+            print(f"Press every key all the way down, one at a time. {args.press:.0f} seconds.", flush=True)
+            deadline = time.monotonic() + args.press
+            for depths in kb.stream(150):
+                for key, mm in depths.items():
+                    peaks[key] = max(peaks.get(key, 0.0), mm)
+                if time.monotonic() > deadline:
+                    break
+    bad = [r for r in rows if r[4]]
+    print(f"{len(rows)} keys checked. Rest offset {min(r[1] for r in rows):.0f} to {max(r[1] for r in rows):.0f} counts, "
+          f"noise up to {max(r[2] for r in rows):.1f}, typical range {typical}.")
+    if bad:
+        print(f"{len(bad)} to look at:")
+        for key, _, _, _, problems in bad:
+            print(f"  {key:8}{'; '.join(problems)}")
+    else:
+        print("Nothing looks wrong.")
+    if args.all:
+        print(f"\n{'key':8}{'offset':>8}{'noise':>7}{'range':>7}")
+        for key, offset, noise, span, _ in rows:
+            print(f"{key:8}{offset:8.0f}{noise:7.1f}{span:7d}")
+    if args.press:
+        untouched = [k for k in samples if peaks.get(k, 0.0) == 0.0]
+        short = {k: v for k, v in peaks.items() if 0.0 < v < 3.5}
+        print(f"\nPressed {len(samples) - len(untouched)} of {len(samples)} keys.")
+        if short:
+            print("Didn't reach the bottom: " + ", ".join(f"{k} {v:.1f} mm" for k, v in sorted(short.items(), key=lambda kv: kv[1])))
+        if untouched:
+            print("Not pressed: " + " ".join(untouched))
+    return 0
+
+
+def cmd_overlay(args):
+    every = args.keys == "all"
+    if every:
+        _say("Warning: --keys all shows everything you type, passwords included, to anyone watching your stream.")
+    explicit = key_names(args.keys) if not every else None
+    sink = ServeSink(args.port)
+    _say(f"Overlay ready. Add this as an OBS browser source: http://127.0.0.1:{args.port}/overlay")
+
+    def on_frame(depths, now):
+        sink.send({k: round(v, 2) for k, v in depths.items()})
+
+    _loop(args.hz or 60, explicit, None, on_frame)
 
 
 def cmd_info(args):
@@ -1239,12 +2044,15 @@ def build_parser():
     bars.set_defaults(func=cmd_bars)
 
     for name, summary in (("gamepad", "turn keys into a virtual controller; with no rules, W S A D drive"),
-                          ("map", "send keys to controller axes and buttons, the mouse, or keystrokes")):
+                          ("map", "send keys to controllers, pedals, the mouse, keystrokes, or commands")):
         p = commands.add_parser(name, help=summary, fromfile_prefix_chars="@", description=summary, epilog=(
             "Rules look like KEY=OUTPUT, or KEY=OUTPUT@mm for on/off outputs. Sticks: lx- lx+ ly- ly+ rx- rx+ ry- ry+. Triggers: lt rt. "
-            "Buttons: a b x y lb rb back start guide ls rs dpad-up dpad-down dpad-left dpad-right. "
+            "Buttons: a b x y lb rb back start guide ls rs dpad-up dpad-down dpad-left dpad-right. Add p2: for a second controller. "
+            "Pedals: clutch handbrake pedal3 pedal4 pedal5 pedal6. "
             "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
-            f"Keystroke: key:F13. Presets: {', '.join(PRESETS)}. Keep rules in a file, one per line, and pass @file."))
+            "Keystroke: key:F13. Repeating keystroke, faster the deeper you press: tap:RIGHT. "
+            "Desktop: volume+ volume- brightness+ brightness-. Any command: run:your-command. "
+            f"Presets: {', '.join(PRESETS)}. Keep rules in a file, one per line, and pass @file."))
         p.add_argument("maps", nargs="*", metavar="RULE", help="W=rt, A=lx-, J=key:F13@2.0, or a preset")
         p.add_argument("--deadzone", type=float, default=0.3, metavar="MM", help="axis stays 0 above this depth (default 0.3)")
         p.add_argument("--full", type=float, default=3.5, metavar="MM", help="axis reaches 1 at this depth (default 3.5)")
@@ -1252,6 +2060,8 @@ def build_parser():
         p.add_argument("--rapid", type=float, default=0.0, metavar="MM", help="on/off outputs re-trigger after moving this far either way")
         p.add_argument("--mouse-speed", type=float, default=1200.0, metavar="PX/S", help="cursor speed at full depth (default 1200)")
         p.add_argument("--wheel-speed", type=float, default=15.0, metavar="N/S", help="scroll speed at full depth (default 15)")
+        p.add_argument("--tap-rate", type=float, default=20.0, metavar="N/S", help="tap: repeats at full depth (default 20)")
+        p.add_argument("--run-rate", type=float, default=8.0, metavar="N/S", help="run: and desktop repeats at full depth (default 8)")
         p.add_argument("--no-swallow", action="store_true", help="let mapped keys keep typing as well")
         p.add_argument("--pause-key", default="PAUSE", metavar="KEY", help="key that pauses mapping so you can type (default PAUSE)")
         _add_network_options(p)
@@ -1264,6 +2074,51 @@ def build_parser():
     _add_network_options(s)
     s.set_defaults(func=cmd_stream)
 
+    m = commands.add_parser("midi", help="play the keyboard as a MIDI instrument")
+    m.add_argument("--layout", default="piano", choices=("piano", "grid"), help="piano: Z and Q rows shaped like piano keys. grid: every key a note, rows a fourth apart")
+    m.add_argument("--octave", type=int, default=0, help="shift everything by octaves (default 0, Z is C3)")
+    m.add_argument("--channel", type=int, default=1, help="MIDI channel 1-16")
+    m.add_argument("--note-at", type=float, default=1.5, metavar="MM", help="depth where a note starts (default 1.5)")
+    m.add_argument("--aftertouch", default="poly", choices=("poly", "channel", "off"), help="send hold depth per key, per channel, or not at all")
+    m.add_argument("--soft", type=float, default=8.0, metavar="MM/S", help="press speed that gives the quietest note (default 8)")
+    m.add_argument("--hard", type=float, default=160.0, metavar="MM/S", help="press speed that gives the loudest note (default 160)")
+    m.add_argument("--cc", action="append", metavar="KEY=NUMBER", help="send a key's depth as a MIDI controller, like --cc F=74")
+    m.add_argument("--no-swallow", action="store_true", help="let these keys keep typing as well")
+    m.add_argument("--pause-key", default="PAUSE", metavar="KEY", help="key that pauses playing so you can type (default PAUSE)")
+    m.add_argument("--hz", type=float, help="updates per second")
+    m.set_defaults(func=cmd_midi)
+
+    t = commands.add_parser("type", help="press deep for capitals or key combos, with no Shift")
+    t.add_argument("--at", type=float, default=1.5, metavar="MM", help="depth where a key counts as pressed (default 1.5)")
+    t.add_argument("--deep", type=float, default=3.2, metavar="MM", help="depth that counts as a deep press (default 3.2)")
+    t.add_argument("--hold", type=float, default=0.15, metavar="SEC", help="a press held this long without going deep stays light (default 0.15)")
+    t.add_argument("--combo", action="append", metavar="KEY=COMBO", help="deep press sends this instead of a capital, like --combo J=LCTRL+J or --combo K=F13")
+    t.add_argument("--pause-key", default="PAUSE", metavar="KEY", help="key that pauses this so you can type normally (default PAUSE)")
+    t.add_argument("--hz", type=float, help="updates per second")
+    t.set_defaults(func=cmd_type)
+
+    tp = commands.add_parser("typeprint", help="experiment: recognise you by how you press keys. Not security")
+    tp.add_argument("action", choices=("enroll", "check", "forget"), help="enroll: type a set phrase 8 times. check: try to pass. forget: delete it")
+    tp.set_defaults(func=cmd_typeprint)
+
+    pf = commands.add_parser("profile", help="learn how you type, as per-key totals only, and what that means for actuation")
+    pf.add_argument("--minutes", type=float, help="stop after this long (default: until Ctrl-C)")
+    pf.add_argument("--report", action="store_true", help="show what's recorded without recording more")
+    pf.add_argument("--reset", action="store_true", help="delete what's recorded")
+    pf.add_argument("--hz", type=float, help="updates per second")
+    pf.set_defaults(func=cmd_profile)
+
+    h = commands.add_parser("health", help="check every switch for drift, noise and short range")
+    h.add_argument("--press", type=float, metavar="SEC", help="also watch you press each key and report any that don't reach the bottom")
+    h.add_argument("--all", action="store_true", help="list every key")
+    h.set_defaults(func=cmd_health)
+
+    o = commands.add_parser("overlay", help="show key pressure in OBS or any browser")
+    o.add_argument("--port", type=int, default=8765)
+    o.add_argument("--keys", default="W,A,S,D,SPACE,LSHIFT,LCTRL", help="keys to show (default W,A,S,D,SPACE,LSHIFT,LCTRL). 'all' shows your typing to viewers")
+    o.add_argument("--hz", type=float, help="updates per second")
+    o.set_defaults(func=cmd_overlay)
+
     i = commands.add_parser("info", help="the keyboard, your access, and every key's actuation settings")
     i.add_argument("--json", action="store_true")
     i.set_defaults(func=cmd_info)
@@ -1274,7 +2129,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
-        args.func(args)
+        return args.func(args) or 0
     except KeyboardInterrupt:
         return 0
     except BrokenPipeError:
