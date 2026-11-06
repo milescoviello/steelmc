@@ -1072,6 +1072,18 @@ class Files(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
         self.assertTrue(os.path.exists(other))
 
+    def test_a_finished_process_doesnt_count_as_running(self):
+        child = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(child.wait)
+        self.assertTrue(a._running(child.pid))
+        child.kill()
+        for _ in range(100):
+            if not a._running(child.pid):
+                break
+            time.sleep(0.01)
+        self.assertFalse(a._running(child.pid))
+        self.assertFalse(a._running(99999999))
+
     def test_stop_never_touches_something_that_isnt_ours(self):
         sleeper = subprocess.Popen(["sleep", "30"])
         self.addCleanup(sleeper.wait)

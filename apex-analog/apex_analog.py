@@ -351,11 +351,11 @@ class Keyboard:
             raise ValueError(f"refused to send {payload[:1]!r}: not a known read command")
         packet = bytes([0, *payload]).ljust(65, b"\0")[:65]
         try:
-            for _ in range(3):
+            for _ in range(10):  # a reply normally takes 1 ms, but one can get lost right after a write, so retry soon
                 while select.select([self.fd], [], [], 0)[0]:  # replies carry no ID, so never leave an old one waiting
                     os.read(self.fd, 64)
                 os.write(self.fd, packet)
-                deadline = time.monotonic() + 0.1
+                deadline = time.monotonic() + 0.03
                 while True:
                     left = deadline - time.monotonic()
                     if left <= 0 or not select.select([self.fd], [], [], left)[0]:
@@ -2916,6 +2916,12 @@ def cmd_autostart(args):
     return 0
 
 
+def _running(pid):
+    """A finished process stays listed until its parent collects it, so a zombie doesn't count."""
+    stat = _read(f"/proc/{pid}/stat")
+    return bool(stat) and stat.rsplit(")", 1)[-1].split()[0] != "Z"
+
+
 def cmd_stop(args):
     path = _pid_path()
     pid = None
@@ -2929,9 +2935,9 @@ def cmd_stop(args):
         return 0
     os.kill(pid, signal.SIGTERM)
     deadline = time.monotonic() + 2.0
-    while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+    while _running(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
-    print("Stopped." if not os.path.exists(f"/proc/{pid}") else f"Asked it to stop, but process {pid} is still running.")
+    print("Stopped." if not _running(pid) else f"Asked it to stop, but process {pid} is still running.")
     return 0
 
 

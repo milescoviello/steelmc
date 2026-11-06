@@ -332,9 +332,9 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 - The typing print passed on real key presses, `health` ran on the real keyboard, and an actuation change on W was read back and felt on a real press.
 - **Tested only with simulated key depths so far:** MIDI playing feel, pressure typing, the typing profile's numbers, and two players or pedals inside a game. MIDI did reach a real ALSA client, the overlay did run in a real browser, and the extra controllers and pedals did appear to Linux as joysticks.
 - `lights --keep` and the glow in `lights` work on the real keyboard.
-- `rapid`, `preset`, `magnet`, `info` and the actuation display ran on the real keyboard as reads. `parec` ran for `music`.
-- **Not yet confirmed on the real keyboard:** `lights` taking the whole board dark, the new effects, `paint`, setting keys with `actuation`, `rapid` or `preset use`, `save`, `auto`, macros firing from a key, and `oled` on the panel.
-- `rev` hasn't received data from a running game yet. Its packet format is taken from BeamNG's own source.
+- Sent to the real keyboard and read back correctly: `actuation`, `rapid`, `preset use`, and `save` (the keyboard answered again after 0.5 s with its settings intact).
+- Ran on the real keyboard without errors, with key presses and music simulated: every lighting effect, `paint`, `auto`, `type`, `midi`, every `map` preset, and frames through the real `apex-oledd`. Whether they look and feel right still needs someone watching.
+- `rev` read real UDP packets in BeamNG's format from its own source, but hasn't received them from a running game. A `save` that changes a setting hasn't been followed by a replug yet.
 
 ## Safety
 
