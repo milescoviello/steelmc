@@ -120,6 +120,8 @@ These tools can see everything you type, so network outputs make you choose keys
 - **61 keys have sensors**, the main block. ESC, the F row, nav keys and arrows don't, so they can't report depth.
 - **One run at a time.** The keyboard's replies carry no ID, so two readers would mix them up. A second copy refuses to start. Give one run several outputs instead.
 - **Millimetres come from the firmware's own actuation table**, not a physical measurement.
+- **Online games:** virtual controllers and rapid-trigger keys can break the rules of games with anti-cheat. Check before using them there.
+- **BeamNG can rewrite its controller bindings.** In testing it saved `settings/inputmaps/xidevice.diff` while the controller was connected and dropped bindings for actions it couldn't load. What triggered the save isn't known, so back up that folder if you rely on bindings like those.
 - **Network and pipe rates:** 60 updates a second by default, `--hz` to change it. Reading every key tops out near 190 a second, and reading keys from two rows near 490. Mapping defaults to 120.
 
 ## What's been tested
@@ -128,7 +130,7 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 
 - The test suite (`python3 -m unittest`) needs no keyboard.
 - Checked on real hardware: sensor reads, the virtual controller as seen by Linux, holding back keys, and UDP, OSC, WebSocket and HTTP clients.
-- **Not yet checked:** a game running through Proton, and how fine control feels on 4 mm of travel.
+- A real drive: BeamNG.drive 0.40.4 through Proton saw it as `XBox Controller 1` with no setup, and it drove well on W, S, A and D. That's one person and one short session.
 
 ## Safety
 
