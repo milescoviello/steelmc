@@ -686,6 +686,48 @@ class LightsLogic(unittest.TestCase):
         args = a.build_parser().parse_args(["lights"])
         self.assertEqual(a._lights_from(args).base, (0, 0, 0))
 
+    def test_keep_mode_leaves_normal_lighting_until_a_press(self):
+        kb, lights = FakeLightKeyboard(), a.GlowOverNormal(fade=0, hz=30)
+        lights.start(kb)
+        self.assertEqual(kb.calls, [("clear",)])
+        kb.calls.clear()
+        lights.update(kb, {"W": 0.0, "A": 0.0}, 1.0)
+        self.assertEqual(kb.calls, [])
+
+    def test_keep_mode_gets_brighter_white_with_depth(self):
+        kb, lights = FakeLightKeyboard(), a.GlowOverNormal(fade=0, hz=30)
+        lights.update(kb, {"W": 1.0}, 1.0)
+        shallow = kb.calls.pop()[1]["W"]
+        lights.update(kb, {"W": 4.0}, 1.1)
+        deep = kb.calls.pop()[1]["W"]
+        self.assertEqual(deep, (255, 255, 255))
+        self.assertEqual(shallow[0], shallow[1])
+        self.assertEqual(shallow[1], shallow[2])
+        self.assertLess(0, shallow[0])
+        self.assertLess(shallow[0], deep[0])
+
+    def test_keep_mode_letting_go_restores_normal_and_keeps_held_keys(self):
+        kb, lights = FakeLightKeyboard(), a.GlowOverNormal(fade=0, hz=30)
+        lights.update(kb, {"W": 4.0, "A": 2.0}, 1.0)
+        kb.calls.clear()
+        lights.update(kb, {"W": 0.0, "A": 2.0}, 1.1)
+        self.assertEqual(kb.calls[0], ("clear",))
+        self.assertEqual(list(kb.calls[1][1]), ["A"])
+        kb.calls.clear()
+        lights.update(kb, {"W": 0.0, "A": 2.0}, 1.2)
+        self.assertEqual(kb.calls, [])
+        lights.update(kb, {"W": 0.0, "A": 0.0}, 1.3)
+        self.assertEqual(kb.calls, [("clear",)])
+
+    def test_keep_flag_picks_white_and_works_on_other_modes(self):
+        chosen = a._lights_from(a.build_parser().parse_args(["lights", "--keep"]))
+        self.assertIsInstance(chosen, a.GlowOverNormal)
+        self.assertEqual(chosen.color, (255, 255, 255))
+        self.assertEqual(a._lights_from(a.build_parser().parse_args(["gamepad", "--lights", "--keep", "--color", "00C8FF"])).color, (0, 200, 255))
+        dark = a._lights_from(a.build_parser().parse_args(["lights"]))
+        self.assertNotIsInstance(dark, a.GlowOverNormal)
+        self.assertEqual((dark.color, dark.fade), ((255, 90, 0), 0.25))
+
     def test_rate_is_capped(self):
         kb, lights = FakeLightKeyboard(), a.Lights(hz=30)
         lights.update(kb, {"W": 4.0}, 1.0)

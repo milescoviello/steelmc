@@ -45,7 +45,7 @@ import threading
 import time
 from typing import NamedTuple
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"
@@ -1373,6 +1373,44 @@ class Lights:
             pass  # a replug resets the lighting anyway
 
 
+class GlowOverNormal(Lights):
+    """Leaves the keyboard's normal lighting alone: a pressed key glows brighter the deeper it goes, then goes back to normal.
+
+    The firmware can only release every key at once, so letting go of one releases them all and re-sends the ones still held.
+    A key's normal colour can't be read, so a press starts from a dim version of `color` rather than blending from it.
+    """
+    FLOOR = 0.25  # brightness of the lightest touch, as a share of `color`
+
+    def __init__(self, color=(255, 255, 255), fade=0.1, hz=30.0):
+        super().__init__(color, (0, 0, 0), fade, hz)
+
+    def start(self, kb):
+        self.levels, self.shown = {}, {}
+        kb.clear_colors()
+
+    def update(self, kb, depths, now):
+        elapsed = now - self.last
+        if elapsed < self.period:
+            return
+        self.last = now
+        wanted = {}
+        for key, mm in depths.items():
+            level = mm / TRAVEL_MM
+            if self.fade > 0:
+                level = max(level, self.levels.get(key, 0.0) - elapsed / self.fade)
+            self.levels[key] = level
+            if level > 0:
+                strength = self.FLOOR + (1 - self.FLOOR) * level
+                wanted[key] = tuple(int(c * strength) for c in self.color)
+        if set(self.shown) - set(wanted):
+            kb.clear_colors()
+            self.shown = {}
+        changes = {k: v for k, v in wanted.items() if self.shown.get(k) != v}
+        if changes:
+            kb.set_colors(changes)
+        self.shown = wanted
+
+
 # ---- how you type ----------------------------------------------------------------------------------------------------
 
 class Press(NamedTuple):
@@ -1877,7 +1915,9 @@ def _rgb(text):
 
 
 def _lights_from(args):
-    return Lights(_rgb(args.color), _rgb(args.base), args.fade)
+    if args.keep:
+        return GlowOverNormal(_rgb(args.color or "FFFFFF"), 0.1 if args.fade is None else args.fade)
+    return Lights(_rgb(args.color or "FF5A00"), _rgb(args.base), 0.25 if args.fade is None else args.fade)
 
 
 def cmd_lights(args):
@@ -1889,7 +1929,8 @@ def cmd_lights(args):
     lights = _lights_from(args)
     keys = key_names(args.keys) if args.keys else None
     with _Screen() as screen:
-        screen.draw(["apex-analog lights", "", "The keyboard goes dark, then keys glow as you press them. Ctrl-C quits and restores your normal lighting."])
+        screen.draw(["apex-analog lights", "", ("Your normal lighting stays on, and keys glow as you press them." if args.keep else "The keyboard goes dark, then keys glow as you press them.")
+                     + " Ctrl-C quits and restores your normal lighting."])
         _loop(args.hz or 60, keys, None, lambda depths, now: None, lights)
 
 
@@ -2208,9 +2249,10 @@ def cmd_actuation(args):
 
 
 def _add_light_options(parser):
-    parser.add_argument("--color", default="FF5A00", metavar="RRGGBB", help="colour of a key at full depth (default FF5A00)")
+    parser.add_argument("--keep", action="store_true", help="keep your normal lighting: pressed keys glow white, then go back to normal")
+    parser.add_argument("--color", metavar="RRGGBB", help="colour of a key at full depth (default FF5A00, or FFFFFF with --keep)")
     parser.add_argument("--base", default="000000", metavar="RRGGBB", help="colour of everything else (default 000000, dark)")
-    parser.add_argument("--fade", type=float, default=0.25, metavar="SEC", help="how long a key takes to fade after you let go (default 0.25)")
+    parser.add_argument("--fade", type=float, metavar="SEC", help="how long a key takes to fade after you let go (default 0.25, or 0.1 with --keep)")
 
 
 def _add_network_options(parser):
