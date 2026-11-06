@@ -1,6 +1,6 @@
 # apex-analog
 
-See how far every key is pressed on a SteelSeries Apex Pro Gen 3 on Linux, in millimetres, and wire it to anything: a game, the mouse, keystrokes, or your own program.
+Linux control for the SteelSeries Apex Pro Gen 3. See how far every key is pressed, in millimetres, and wire it to a game, the mouse, keystrokes, or your own program. Set per-key lighting, actuation and rapid tap, with no vendor software.
 
 [![tests](https://github.com/milescoviello/apex-analog/actions/workflows/tests.yml/badge.svg)](https://github.com/milescoviello/apex-analog/actions/workflows/tests.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
