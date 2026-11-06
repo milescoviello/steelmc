@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+.venv/
+
+# SteelSeries firmware is theirs and never belongs in this repo
+*.bin
+*.elf
+*.dis

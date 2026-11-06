@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apex-analog"
+version = "0.1.0"
+description = "See how far every key is pressed on a SteelSeries Apex Pro Gen 3 on Linux, and wire it to anything."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+apex-analog = "apex_analog:main"
+
+[tool.setuptools]
+py-modules = ["apex_analog"]
