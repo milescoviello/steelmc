@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `lights --effect heatmap` now updates as you type, instead of showing the totals from when it started
+- `shortcut`: hold the SteelSeries key and press another key to fire a keystroke, macro or command
 
 ## 0.1.0 — 2026-11-05
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """python3 -m unittest    No keyboard needed. Virtual device tests hold their own output so nothing reaches your desktop."""
+import contextlib
+import io
+import json
 import fcntl
 import math
 import os
@@ -1198,6 +1201,141 @@ class Macros(unittest.TestCase):
         m.update({"J": 3.5}, 0.01)
         self.assertEqual(drain(fd), [(a.EV_KEY, 194, 1), (a.EV_KEY, 194, 0)])
         os.close(fd)
+
+
+class Shortcuts(unittest.TestCase):
+    def mapper(self, *rules):
+        m = a.Mapper(list(rules), swallow=True, pause_key=None)
+        self.addCleanup(m.close)
+        return m
+
+    def runner(self):
+        started = []
+        real = a.subprocess.Popen
+
+        class Done:
+            def poll(self):
+                return 0
+
+        def popen(command, **kwargs):
+            started.append(command)
+            return Done()
+
+        a.subprocess.Popen = popen
+        self.addCleanup(setattr, a.subprocess, "Popen", real)
+        return started
+
+    def test_needs_the_steelseries_key_held(self):
+        started = self.runner()
+        m = self.mapper("SS+J=run:hello")
+        m.update({"SS": 0.0, "J": 3.0}, 0.01)
+        self.assertEqual(started, [])
+        m.update({"SS": 0.0, "J": 0.0}, 0.01)
+        m.update({"SS": 3.0, "J": 0.0}, 0.01)
+        m.update({"SS": 3.0, "J": 3.0}, 0.01)
+        self.assertEqual(started, ["hello"])
+
+    def test_fires_once_per_press(self):
+        started = self.runner()
+        m = self.mapper("SS+J=run:hello")
+        for _ in range(50):
+            m.update({"SS": 3.0, "J": 3.0}, 0.01)
+        self.assertEqual(started, ["hello"])
+        m.update({"SS": 3.0, "J": 0.0}, 0.01)
+        m.update({"SS": 3.0, "J": 3.0}, 0.01)
+        self.assertEqual(started, ["hello", "hello"])
+
+    def test_a_key_already_down_doesnt_count(self):
+        started = self.runner()
+        m = self.mapper("SS+J=run:hello")
+        m.update({"SS": 0.0, "J": 3.0}, 0.01)  # typing J
+        m.update({"SS": 3.0, "J": 3.0}, 0.01)  # then SS, with J still down
+        self.assertEqual(started, [])
+        m.update({"SS": 3.0, "J": 0.0}, 0.01)
+        m.update({"SS": 3.0, "J": 3.0}, 0.01)
+        self.assertEqual(started, ["hello"])
+
+    def test_never_grabs_the_keyboard(self):
+        m = self.mapper("SS+J=run:hello")
+        self.assertFalse(m.want_swallow)
+        self.assertEqual(m.held_keys(), [])
+        self.assertEqual(set(m.keys), {"SS", "J"})
+
+    def test_a_normal_rule_alongside_still_holds_only_its_own_key(self):
+        m = self.mapper("SS+J=run:hello", "K=run:there")
+        self.assertTrue(m.want_swallow)
+        self.assertEqual(m.held_keys(), ["K"])
+
+    def test_the_keyboards_own_combos_are_refused(self):
+        for key in ("Q", "I", "O", "T", "LGUI", "SS"):
+            with self.assertRaisesRegex(ValueError, "belongs to the keyboard"):
+                a.Mapping(f"SS+{key}=run:x")
+
+    def test_the_equals_key_and_lower_case(self):
+        self.assertEqual(a.Mapping("SS+==run:x").key, "=")
+        self.assertEqual(a.Mapping("ss+j=run:x").chord, "SS")
+        self.assertEqual(a.Mapping("SS+J=run:x").text, "SS+J=run:x")
+
+    def test_plain_rules_are_unchanged(self):
+        rule = a.Mapping("J=run:x")
+        self.assertIsNone(rule.chord)
+        self.assertIsNone(rule.digital)
+
+    def saved_config(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        saved = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = folder.name
+        self.addCleanup(lambda: os.environ.pop("XDG_CONFIG_HOME") if saved is None else os.environ.__setitem__("XDG_CONFIG_HOME", saved))
+        applied = []
+        real = a._apply_shortcuts
+        a._apply_shortcuts = applied.append
+        self.addCleanup(setattr, a, "_apply_shortcuts", real)
+        return applied
+
+    def command(self, *argv):
+        args = a.build_parser().parse_args(["shortcut", *argv])
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            args.func(args)
+        return out.getvalue()
+
+    def test_add_list_remove(self):
+        applied = self.saved_config()
+        self.command("add", "j", "volume+")
+        self.assertEqual(json.loads(self.command("list", "--json")), {"J": "volume+"})
+        self.assertEqual(applied[-1], {"J": "volume+"})
+        self.command("remove", "J")
+        self.assertEqual(json.loads(self.command("list", "--json")), {})
+        self.assertEqual(applied[-1], {})
+
+    def test_bad_rules_arent_saved(self):
+        self.saved_config()
+        for key, output in (("Q", "volume+"), ("J", "nonsense")):
+            with self.assertRaises(ValueError):
+                self.command("add", key, output)
+        self.assertEqual(json.loads(self.command("list", "--json")), {})
+
+    def test_punctuation_keys(self):
+        self.saved_config()
+        self.command("add", "COMMA", "volume-")
+        self.assertEqual(json.loads(self.command("list", "--json")), {",": "volume-"})
+
+    def test_daemon_brings_them_back_unless_turned_off(self):
+        with tempfile.TemporaryDirectory() as folder:
+            started = []
+            daemon = a.Daemon.__new__(a.Daemon)
+            daemon.state_path = os.path.join(folder, "daemon.json")
+            daemon.start_job = lambda slot, *_: started.append(slot)
+            a._write_private(daemon.state_path, {"lights": None, "recording": False})
+            daemon.start_saved_jobs()
+            self.assertEqual(started, [])
+            a._write_private(os.path.join(folder, "shortcuts.json"), {"J": "volume+"})
+            daemon.start_saved_jobs()
+            self.assertEqual(started, ["shortcuts"])
+            started.clear()
+            a._write_private(daemon.state_path, {"lights": None, "recording": False, "shortcuts": False})
+            daemon.start_saved_jobs()
+            self.assertEqual(started, [])
 
 
 class Oled(unittest.TestCase):

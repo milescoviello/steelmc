@@ -72,6 +72,18 @@ apex-analog map "]=volume+" "[=volume-"          # hold harder to change volume 
 apex-analog map "X=tap:LEFT" "C=tap:RIGHT"       # scrub through a video, faster the deeper you press
 ```
 
+### Shortcuts on the SteelSeries key
+
+Hold the SteelSeries key and press another key to fire something. The keyboard stops that key typing by itself while the SteelSeries key is held, so nothing has to grab your keyboard, and shortcuts run alongside everything else.
+
+```
+apex-analog shortcut add J volume+               # also key:F13, macro:NAME, run:your-command
+apex-analog shortcut list
+apex-analog shortcut remove J
+```
+
+The keys the keyboard uses for its own settings light up red while you hold it. Those are refused here: Q, I, O, T and the left Meta key.
+
 `manual` puts the clutch and handbrake on a separate pedals device, so they can't collide with any controller bindings. Bind those two axes once in your game's controls menu.
 
 Save a setup as a file with one rule or option per line, then use it with `apex-analog map @myprofile.txt`.

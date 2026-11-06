@@ -996,15 +996,25 @@ class Digital:
         return self.down
 
 
+SHORTCUT_HOLD = "SS"  # hold the SteelSeries key and press another. The keyboard stops that key typing by itself
+SHORTCUT_DOWN = 0.5  # mm
+SHORTCUT_TAKEN = ("Q", "I", "O", "T", "LGUI")  # the keyboard's own combos, lit red while SS is held. F9-F12 and the arrows have no sensors
+
+
 class Mapping:
-    """One 'KEY=OUTPUT' or 'KEY=OUTPUT@mm' rule."""
+    """One 'KEY=OUTPUT' or 'KEY=OUTPUT@mm' rule, or 'SS+KEY=OUTPUT' to need the SteelSeries key held."""
 
     def __init__(self, text, rapid=0.0):
+        self.chord = SHORTCUT_HOLD if text[:3].upper() == SHORTCUT_HOLD + "+" and len(text) > 3 else None
+        self.ready = True
+        whole, text = text, text[3:] if self.chord else text
         source, separator, target = text[1:].partition("=")  # text[0] may itself be the = key
         if not separator or not target:
             raise ValueError(f"{text!r} should look like W=rt or J=key:F13@2.0")
         source = text[0] + source
-        self.text, self.key = text, key_name(source)
+        self.text, self.key = whole, key_name(source)
+        if self.chord and self.key in (*SHORTCUT_TAKEN, SHORTCUT_HOLD):
+            raise ValueError(f"SS+{self.key} belongs to the keyboard. Hold SS to see the keys it uses, lit red.")
         at = 1.0
         self.player = 1
         self.sign = 1
@@ -1046,7 +1056,7 @@ class Mapping:
                              "Command: run:your-command. Macro: macro:NAME")
         if self.player == 2 and self.kind not in ("stick", "trigger", "button"):
             raise ValueError(f"{text!r}: p2: only applies to controller outputs")
-        if self.kind in ("key", "mouse-button", "button", "macro"):
+        if self.kind in ("key", "mouse-button", "button", "macro") or (self.chord and self.kind == "run"):
             self.digital = Digital(at, rapid)
 
 
@@ -1183,7 +1193,9 @@ class Mapper(_KeyHolder):
             raise ValueError("nothing to map. Try: apex-analog map drive")
         self.deadzone, self.full, self.curve = deadzone, full, curve
         self.mouse_speed, self.wheel_speed, self.tap_rate, self.run_rate = mouse_speed, wheel_speed, tap_rate, run_rate
-        self.keys = sorted({m.key for m in self.maps}, key=lambda n: BY_NAME[n][0])
+        self.keys = sorted({m.key for m in self.maps} | {m.chord for m in self.maps if m.chord}, key=lambda n: BY_NAME[n][0])
+        self.held = sorted({m.key for m in self.maps if not m.chord}, key=lambda n: BY_NAME[n][0])
+        self.want_swallow = self.want_swallow and bool(self.held)  # shortcuts never need to grab the keyboard
         self.pads = {}
         for player in sorted({m.player for m in self.maps if m.kind in ("stick", "trigger", "button")}):
             self.pads[player] = Gamepad(f"Apex Analog Player {player} (Xbox 360 layout)")
@@ -1207,6 +1219,19 @@ class Mapper(_KeyHolder):
     def pad(self):
         return self.pads.get(1)
 
+    def held_keys(self):
+        return self.held
+
+    def _depth(self, m, depths):
+        """How far a rule's key counts as pressed. A shortcut's key only counts if SS went down first."""
+        mm = depths.get(m.key, 0.0)
+        if not m.chord:
+            return mm
+        if depths.get(m.chord, 0.0) < SHORTCUT_DOWN or not m.ready:
+            m.ready = mm < SHORTCUT_DOWN
+            return 0.0
+        return mm
+
     def shape(self, mm):
         x = (mm - self.deadzone) / (self.full - self.deadzone)
         return max(0.0, min(1.0, x)) ** self.curve
@@ -1227,7 +1252,7 @@ class Mapper(_KeyHolder):
             depths = {}
         pad_values, pedal_values, keys, moves, clicks = {}, {}, {}, {}, {}
         for m in self.maps:
-            mm = depths.get(m.key, 0.0)
+            mm = self._depth(m, depths)
             amount = self.shape(mm)
             slots = pad_values.setdefault(m.player, {})
             if m.kind == "stick":
@@ -1256,7 +1281,12 @@ class Mapper(_KeyHolder):
                         self.virtual_keys.send(m.target, 1)
                         self.virtual_keys.send(m.target, 0)
             elif m.kind == "run":
-                if self._owed(m, amount * self.run_rate, dt) and (m.process is None or m.process.poll() is not None):
+                if m.chord:  # once per press, however long it's held
+                    state = m.digital.update(mm)
+                    fire, m.active = state and not m.active, state
+                else:
+                    fire = self._owed(m, amount * self.run_rate, dt)
+                if fire and (m.process is None or m.process.poll() is not None):
                     m.process = subprocess.Popen(m.target, shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         values = {}
         for player, pad in self.pads.items():
@@ -2573,7 +2603,7 @@ OP_OPEN, OP_ASK, OP_WRITE, OP_JOB, OP_OFF, OP_STATUS, OP_QUIT = range(7)
 STATUS_OK, STATUS_LOST, STATUS_NOT_FOUND, STATUS_DENIED, STATUS_ERROR = range(5)
 _FRAME = struct.Struct("<BI")
 # What each long-running command occupies. Starting another in the same slot replaces it.
-SLOTS = {"lights": "lights", "auto": "lights", "gamepad": "input", "map": "input", "midi": "input", "type": "input", "overlay": "overlay", "oled": "oled", "stream": "stream"}
+SLOTS = {"shortcuts": "shortcuts", "lights": "lights", "auto": "lights", "gamepad": "input", "map": "input", "midi": "input", "type": "input", "overlay": "overlay", "oled": "oled", "stream": "stream"}
 DEFAULT_LIGHTS = ["lights", "--keep"]
 
 
@@ -2712,6 +2742,8 @@ class Daemon:
                 self._remember(lights=argv)
             if slot == "recording":
                 self._remember(recording=True)
+            if slot == "shortcuts" and ok:
+                self._remember(shortcuts=True)
             return {"ok": ok, "log": _read(log_path) or ""}
 
     def stop_job(self, slot):
@@ -2733,6 +2765,8 @@ class Daemon:
                 self._remember(lights=None)
             if slot == "recording":
                 self._remember(recording=False)
+            if slot == "shortcuts":
+                self._remember(shortcuts=False)
             return found
 
     def status(self):
@@ -2817,6 +2851,8 @@ class Daemon:
             self.start_job("lights", lights[0], lights)
         if state.get("recording", True):
             self.start_job("recording", "recording", ["record"])
+        if state.get("shortcuts", True) and _load_json(os.path.join(os.path.dirname(self.state_path), "shortcuts.json")):
+            self.start_job("shortcuts", "shortcuts", ["shortcuts"])
 
     def shutdown(self):
         self.done.set()
@@ -2952,6 +2988,8 @@ your terminal back, and several can run at once. Add --watch to keep one in the 
   * midi                 play it as an instrument
   * type                 press deep for capitals
     macro add|record|run save and replay keystrokes. Fire one with: map J=macro:NAME@3.0
+    shortcut add KEY OUT hold the SteelSeries key and press KEY to fire OUT, like: shortcut add J volume+
+  * shortcuts            run the saved shortcuts. shortcut add starts this for you
     typeprint            experiment: recognise you by how you press
 
   Lighting and screen
@@ -3532,6 +3570,56 @@ def cmd_map(args):
     _drive(mapper, args.hz or 120, read, _map_lines, sinks, explicit, _lights_from(args) if args.lights else None)
 
 
+def _apply_shortcuts(saved):
+    """Run the shortcuts as they now stand, or stop if there are none left."""
+    client = daemon_client()
+    if client is None:
+        return
+    try:
+        if saved:
+            result = _job_call(client, OP_JOB, {"slot": "shortcuts", "label": "shortcuts", "argv": ["shortcuts"], "cwd": os.getcwd()})
+            if not result["ok"]:
+                raise ApexError(result["log"].strip().replace("apex-analog: ", "", 1) or "It stopped straight away.")
+        else:
+            _job_call(client, OP_OFF, b"shortcuts")
+    finally:
+        client.close()
+
+
+def cmd_shortcut(args):
+    """Hold the SteelSeries key and press another key to fire an output."""
+    path = _config_path("shortcuts.json")
+    saved = _load_json(path)
+    if args.action == "list":
+        if args.json:
+            print(json.dumps(saved))
+        else:
+            print("\n".join(f"SS+{key}: {output}" for key, output in sorted(saved.items())) or "No shortcuts yet. Try: apex-analog shortcut add J volume+")
+        return 0
+    if not args.key:
+        raise ValueError(f"Name the key: apex-analog shortcut {args.action} J")
+    key = key_name(args.key)
+    if args.action == "add":
+        if not args.output:
+            raise ValueError("Say what it does, like: apex-analog shortcut add J key:F13, macro:NAME, run:your-command or volume+")
+        Mapping(f"SS+{key}={args.output}")  # refuses a bad rule before it's saved
+        saved[key] = args.output
+    else:
+        saved.pop(key, None)
+    _write_private(path, saved)
+    _apply_shortcuts(saved)
+    print(f"SS+{key}: {saved[key]}" if key in saved else f"SS+{key} removed.")
+    return 0
+
+
+def cmd_shortcuts(args):
+    saved = _load_json(_config_path("shortcuts.json"))
+    if not saved:
+        raise ApexError("No shortcuts yet. Add one with: apex-analog shortcut add J volume+")
+    mapper = Mapper([f"SS+{key}={output}" for key, output in saved.items()], swallow=False, pause_key=None)
+    _drive(mapper, args.hz or 120, mapper.keys, _map_lines)
+
+
 def _midi_lines(instrument, rate):
     playing = " ".join(note_name(n) for n in sorted(instrument.sounding)) or "-"
     lines = [f"apex-analog midi  {rate:.0f} updates/s  ALSA port {instrument.midi.address} \"Apex Analog\"", "",
@@ -3978,6 +4066,17 @@ def build_parser():
     o.add_argument("--keys", default="W,A,S,D,SPACE,LSHIFT,LCTRL", help="keys to show (default W,A,S,D,SPACE,LSHIFT,LCTRL). 'all' shows your typing to viewers")
     o.add_argument("--hz", type=float, help="updates per second")
     o.set_defaults(func=cmd_overlay)
+
+    sc = commands.add_parser("shortcut", help="hold the SteelSeries key and press another to fire something")
+    sc.add_argument("action", choices=("add", "remove", "list"))
+    sc.add_argument("key", nargs="?")
+    sc.add_argument("output", nargs="?", help="key:F13, macro:NAME, run:your-command, volume+, or anything else map takes")
+    sc.add_argument("--json", action="store_true")
+    sc.set_defaults(func=cmd_shortcut)
+
+    ss = commands.add_parser("shortcuts", help="run your saved shortcuts. shortcut add starts this for you")
+    ss.add_argument("--hz", type=float, help="updates per second")
+    ss.set_defaults(func=cmd_shortcuts)
 
     i = commands.add_parser("info", help="the keyboard, your access, and every key's actuation settings")
     i.add_argument("--json", action="store_true")
