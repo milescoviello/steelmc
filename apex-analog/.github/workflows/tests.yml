@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: test suite, no keyboard needed
+        run: python -m unittest
+      - name: installs and runs
+        run: |
+          pip install .
+          apex-analog --version
+          apex-analog help >/dev/null
+
+  grammar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: stays inside the 3.8 grammar
+        run: |
+          python -c "import ast; ast.parse(open('apex_analog.py').read(), feature_version=(3, 8))"
+          python -c "import ast; ast.parse(open('test_apex_analog.py').read(), feature_version=(3, 8))"
