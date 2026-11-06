@@ -120,7 +120,36 @@ apex-analog lights --keys WASD
 apex-analog lights --off             # normal lighting again, if something quit without restoring it
 ```
 
-## Change where keys actuate
+More effects, also available on `gamepad`, `map` and `midi` with `--lights --effect NAME`:
+
+```
+apex-analog lights --effect ripple              # a wave spreads from each key you press, stronger the faster you press
+apex-analog lights --effect music               # bars that move with whatever this computer is playing
+apex-analog lights --effect stats               # CPU on the F row and RAM on the number row. Also: --stats cpu,ram,temp,battery
+apex-analog lights --effect heatmap             # each key by how much you use it, from apex-analog profile
+apex-analog lights --effect rev                 # BeamNG RPM across the number row, flashing at the shift point, with your gear on the F row
+apex-analog gamepad --lights --effect rev       # the same while driving with W S A D
+```
+
+`ripple`, `music` and `heatmap` take `--keep` to run over your normal lighting. `stats` and `rev` only touch the rows they use.
+
+For `rev`, turn on OutGauge in BeamNG under Options, Other, Protocols, with address `127.0.0.1` and the same port as `--port` (default 4444). It needs nothing else from the game. `music` uses `parec` to listen to your output and doesn't record anything.
+
+## Set colours from your own program
+
+```
+echo '{"W": "FF0000", "ESC": [0, 255, 0]}' | apex-analog paint --stay
+your-program | apex-analog paint          # one JSON object per line. {"all": "000000"} and {"clear": true} work too
+```
+
+```python
+with Keyboard() as kb:
+    kb.set_colors({"W": (255, 0, 0), "F1": (0, 0, 255)})
+    kb.set_all_colors(0, 0, 0)
+    kb.clear_colors()
+```
+
+## Change keyboard settings
 
 No GG needed.
 
@@ -129,11 +158,73 @@ apex-analog actuation                # see what every key is set to
 apex-analog actuation W 1.0          # W fires at 1.0 mm
 apex-analog actuation WASD 1.2
 apex-analog actuation all 1.8        # the level every key on this board was on before any changes
+apex-analog rapid WASD on            # the keyboard's own rapid tap, per key
 ```
 
-It uses the nearest of the firmware's 20 levels and reads the result back to check it. LGUI can't be changed this way.
+Each uses what the firmware offers and reads the result back to check it. LGUI's actuation can't be changed this way.
 
-The change lives in the keyboard's memory. What happens to it after a replug hasn't been tested yet.
+These live in the keyboard's memory. To make them survive a replug, write them to flash:
+
+```
+apex-analog save                     # asks first, and shows the one command it will send
+```
+
+It replaces the active saved config with all current settings, using the same code as the keyboard's own Save Config menu. `--slot` picks another of the five.
+
+Keep setups on this computer and switch between them. This doesn't touch the keyboard's flash:
+
+```
+apex-analog preset save gaming
+apex-analog preset use gaming
+apex-analog preset list
+```
+
+## Switch by app
+
+```
+apex-analog auto --example > ~/.config/apex-analog/auto.json     # then edit it
+apex-analog auto
+```
+
+It follows the focused window and applies that app's preset and lighting. It needs KDE and `kdotool`.
+
+## Macros
+
+```
+apex-analog macro add hello 'text:Hi there!' 100 LCTRL+C    # type text, wait 100 ms, press a combo
+apex-analog macro record mymacro                            # press keys, then Pause to finish
+apex-analog macro run hello
+apex-analog map J=macro:hello                               # fire it from a key
+apex-analog map J=macro:hello@3.0                           # only on a deep press
+```
+
+Macros are saved on this computer and only run while `apex-analog` does. A recording stores what you press, in order, in a private file, so don't type passwords during one. Text assumes a US layout.
+
+## Start at login
+
+```
+apex-analog autostart on                         # the white press glow from lights --keep
+apex-analog autostart on lights --effect ripple  # or anything else
+apex-analog autostart off
+apex-analog stop                                 # stop whichever one is running, before using another command
+```
+
+## On the keyboard's own screen
+
+```
+apex-analog oled          # the deepest key's name, depth and actuation point, while you press
+apex-analog oled --map    # a live pressure map of every key
+```
+
+This hands frames to `apex-oledd` from `apex-oled`, so that daemon has to be running.
+
+## Watch a magnet
+
+```
+apex-analog magnet
+```
+
+Shows how far every one of the 70 sensors has moved from rest, including the ones with no switch fitted. A strong magnet can act like a key press, so use a weak one and keep it away from anything that matters.
 
 ## Put it on your stream
 
@@ -241,13 +332,15 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 - The typing print passed on real key presses, `health` ran on the real keyboard, and an actuation change on W was read back and felt on a real press.
 - **Tested only with simulated key depths so far:** MIDI playing feel, pressure typing, the typing profile's numbers, and two players or pedals inside a game. MIDI did reach a real ALSA client, the overlay did run in a real browser, and the extra controllers and pedals did appear to Linux as joysticks.
 - `lights --keep` and the glow in `lights` work on the real keyboard.
-- **Not yet confirmed on the real keyboard:** `lights` taking the whole board dark, and setting keys with the `actuation` command.
+- `rapid`, `preset`, `magnet`, `info` and the actuation display ran on the real keyboard as reads. `parec` ran for `music`.
+- **Not yet confirmed on the real keyboard:** `lights` taking the whole board dark, the new effects, `paint`, setting keys with `actuation`, `rapid` or `preset use`, `save`, `auto`, macros firing from a key, and `oled` on the panel.
+- `rev` hasn't received data from a running game yet. Its packet format is taken from BeamNG's own source.
 
 ## Safety
 
-Unless you run `lights` or set `actuation`, this only reads the keyboard. Every command it can send is listed here, and each one's firmware handler was read first. None of them reach a flash save or a reset.
+Unless you run something that sets colours or settings, this only reads the keyboard. Every command it can send is listed here, and each one's firmware handler was read first. Only `apex-analog save` reaches flash, and none of them reset the keyboard.
 
-These five only copy memory into the reply:
+These six only copy memory into the reply:
 
 | Send | Reply | |
 |---|---|---|
@@ -256,14 +349,22 @@ These five only copy memory into the reply:
 | `B1 <n> [<hid> 0 0]...` | `<hid> <press> <release>`... | actuation points, n/255 of the key's range |
 | `B2 <n> [<hid> 0]...` | `<hid> <mode>`... | per-key mode byte |
 | `9E` | 1 byte | OLED `ACTUATION ICON` setting |
+| `E2` | active config, then 24 bytes | which saved config is active |
 
-These three change something in the keyboard's memory, and only when you ask:
+These four change something in the keyboard's memory, and only when you ask:
 
 | Send | | Used by |
 |---|---|---|
 | `3A <n> [<hid> <r> <g> <b>]...` | colours for up to 15 keys | `lights` |
 | `3B` | back to normal lighting | `lights` |
-| `31 <n> [<hid> <press> <release>]...` | actuation for up to 20 keys, as n/255 of the key's range | `actuation` |
+| `31 <n> [<hid> <press> <release>]...` | actuation for up to 20 keys, as n/255 of the key's range | `actuation`, `preset` |
+| `32 <n> [<hid> <mode>]...` | mode for up to 30 keys, 2 is rapid tap | `rapid`, `preset` |
+
+This one writes flash, and only `apex-analog save` sends it, after asking you:
+
+| Send | | |
+|---|---|---|
+| `09 <slot 1-5>` | all current settings, over that saved config | the firmware doesn't check the slot, so this tool does |
 
 It refuses to run on any firmware but 4.16.8, and there's no override, because on other firmware the same bytes could do something else.
 

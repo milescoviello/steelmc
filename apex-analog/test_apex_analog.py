@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """python3 -m unittest    No keyboard needed. Virtual device tests hold their own output so nothing reaches your desktop."""
 import fcntl
+import math
 import os
 import random
 import select
@@ -9,6 +10,7 @@ import socket
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 
@@ -80,7 +82,7 @@ class Safety(unittest.TestCase):
                 kb._ask([command])
 
     def test_allowlist_has_not_grown_by_accident(self):
-        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E})
+        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2})
 
     def test_stray_report_is_not_taken_for_sensor_data(self):
         self.assertFalse(a._valid_bank(bytes([7, 1]) + bytes(62)))
@@ -789,7 +791,431 @@ class Actuation(unittest.TestCase):
         self.assertNotIn(a.BY_NAME["LGUI"][1], second[3:9:3])
 
     def test_settings_command_list_stays_short(self):
-        self.assertEqual(set(a.SETTING_COMMANDS), {0x31})
+        self.assertEqual(set(a.SETTING_COMMANDS), {0x31, 0x32})
+        self.assertEqual(a.SAVE_COMMAND, 0x09)
+
+
+class FakeKb(FakeLightKeyboard):
+    keys = ["W", "A", "S", "D"]
+
+    def set_actuation_points(self, names, press, release):
+        self.calls.append(("points", sorted(names), press, release))
+
+    def set_mode(self, names, mode):
+        self.calls.append(("mode", sorted(names), mode))
+
+
+class EffectEngine(unittest.TestCase):
+    class Fixed(a.Effect):
+        def __init__(self, frames, **options):
+            super().__init__(**options)
+            self.frames = frames
+
+        def frame(self, depths, now, elapsed):
+            return self.frames.pop(0)
+
+    def test_dark_mode_sends_only_changes_and_returns_keys_to_base(self):
+        kb = FakeKb()
+        effect = self.Fixed([{"W": (1, 1, 1)}, {"W": (1, 1, 1)}, {}], base=(2, 2, 2))
+        effect.start(kb)
+        self.assertEqual(kb.calls.pop(), ("all", 2, 2, 2))
+        effect.update(kb, {}, 1.0)
+        self.assertEqual(kb.calls.pop(), ("keys", {"W": (1, 1, 1)}))
+        effect.update(kb, {}, 1.1)
+        self.assertEqual(kb.calls, [])
+        effect.update(kb, {}, 1.2)
+        self.assertEqual(kb.calls.pop(), ("keys", {"W": (2, 2, 2)}))
+
+    def test_keep_mode_releases_when_nothing_is_left_and_limits_how_often(self):
+        kb = FakeKb()
+        effect = self.Fixed([{"W": (1, 1, 1), "A": (1, 1, 1)}, {"A": (1, 1, 1)}, {"A": (1, 1, 1)}, {}], keep=True)
+        effect.last_clear = 1.0
+        effect.update(kb, {}, 1.0)
+        kb.calls.clear()
+        effect.update(kb, {}, 1.1)  # W ended, but a release was too recent
+        self.assertEqual(kb.calls, [])
+        effect.update(kb, {}, 1.3)  # now it's allowed: release all, re-send what's still on
+        self.assertEqual(kb.calls[0], ("clear",))
+        self.assertEqual(kb.calls[1], ("keys", {"A": (1, 1, 1)}))
+        kb.calls.clear()
+        effect.update(kb, {}, 1.35)
+        self.assertEqual(kb.calls, [("clear",)])
+
+    def test_every_key_used_by_effects_has_an_led(self):
+        for key in a.POSITIONS:
+            self.assertIn(a.led_hid(key), a.LED_HIDS, key)
+        for row in a.STAT_ROWS + [a.RevLights.ROW]:
+            for key in row:
+                self.assertIn(key, a.POSITIONS)
+        for name in a.BY_NAME:
+            if not name.startswith("INT") and name not in ("#", "ISO\\"):
+                self.assertIn(name, a.POSITIONS)
+
+    def test_led_names(self):
+        self.assertEqual(a.led_hid("esc"), 0x29)
+        self.assertEqual(a.led_hid("F12"), 0x45)
+        self.assertEqual(a.led_hid("w"), 0x1A)
+        with self.assertRaisesRegex(ValueError, "LED"):
+            a.led_hid("nope")
+
+    def test_ripple_travels_outward_then_ends(self):
+        ripple = a.Ripple((200, 0, 0))
+        ripple.frame({"W": 0.0}, 0.0, 0.04)
+        first = ripple.frame({"W": 2.0}, 0.04, 0.04)
+        self.assertIn("W", first)
+        self.assertNotIn("L", first)
+        later = ripple.frame({"W": 0.0}, 0.04 + 7 / a.Ripple.SPEED, 0.04)
+        self.assertIn("I", later)
+        self.assertNotIn("W", later)
+        self.assertEqual(ripple.frame({"W": 0.0}, 2.0, 0.04), {})
+
+    def test_audio_bands_find_the_right_pitch_and_ignore_silence(self):
+        rate, count = 11025, 256
+        tone = [0.5 * math.sin(2 * math.pi * 600 * i / rate) for i in range(count)]
+        bands = a.audio_bands(tone, rate)
+        centre = [60.0 * (4500.0 / 60.0) ** (i / 13) for i in range(14)]
+        loudest = max(range(14), key=lambda i: bands[i])
+        self.assertLess(abs(math.log(centre[loudest] / 600)), 0.6)
+        self.assertEqual(a.audio_bands([0.0] * count, rate), [0.0] * 14)
+
+    def test_music_bars_fill_from_the_bottom_row(self):
+        bars = a.MusicBars().bars([0.25] * 14)
+        self.assertIn("SPACE", bars)
+        self.assertNotIn("F1", bars)
+        self.assertEqual(a.MusicBars().bars([0.0] * 14), {})
+        self.assertIn("F1", a.MusicBars().bars([1.0] * 14))
+
+    def test_stats_meter_lights_the_right_share_of_a_row(self):
+        class Stats:
+            def cpu(self):
+                return 0.5
+
+            def ram(self):
+                return 1.0
+        meter = a.StatsMeter(("cpu", "ram"), Stats())
+        wanted = meter.frame({}, 1.0, 1.0)
+        self.assertEqual(sum(wanted[f"F{i}"] != (0, 0, 0) for i in range(1, 13)), 6)
+        self.assertTrue(all(wanted[k] != (0, 0, 0) for k in "1234567890-="))
+        self.assertNotIn("Q", wanted)
+        with self.assertRaisesRegex(ValueError, "--stats"):
+            a.StatsMeter(("nope",))
+
+    def test_real_stats_read_in_range(self):
+        stats = a.SystemStats()
+        stats.cpu()
+        for name in ("cpu", "ram", "temp", "battery"):
+            self.assertTrue(0.0 <= getattr(stats, name)() <= 1.0, name)
+
+    def packet(self, gear=2, rpm=3000.0, show=0):
+        return a.OUTGAUGE.pack(0, b"beam", 0, gear, 0, 20.0, rpm, 0.0, 90.0, 0.5, 0.0, 90.0, 1, show, 0.5, 0.0, 0.0, b"", b"")
+
+    def test_outgauge_matches_beamngs_struct_size_and_fields(self):
+        self.assertEqual(a.OUTGAUGE.size, 92)
+        self.assertEqual(a.parse_outgauge(self.packet(3, 4200.0, 1)), (3, 4200.0, True))
+        self.assertEqual(a.parse_outgauge(self.packet() + bytes(4)), (2, 3000.0, False))
+        self.assertIsNone(a.parse_outgauge(b"short"))
+
+    def test_rev_lights_bar_gear_shift_flash_and_stale_data(self):
+        rev = a.RevLights(redline=6000)
+        rev.latest, rev.received = (3, 3000.0, False), 10.0
+        wanted = rev.frame({}, 10.0, 0.03)
+        self.assertEqual(sum(wanted[k] != (0, 0, 0) for k in rev.ROW), 6)
+        self.assertEqual(wanted["F2"], (255, 255, 255))
+        rev.latest = (3, 5900.0, False)
+        flash = [rev.frame({}, 10.0 + i / 8, 0.03)["1"] for i in range(2)]
+        self.assertNotEqual(flash[0], flash[1])
+        rev.latest = (3, 1000.0, True)
+        self.assertIn(rev.frame({}, 10.0, 0.03)["1"], ((255, 0, 0), (255, 255, 255)))
+        rev.latest = (0, 1000.0, False)
+        self.assertEqual(rev.frame({}, 10.0, 0.03)["ESC"], (255, 0, 0))
+        self.assertEqual(rev.frame({}, 12.0, 0.03), {})
+
+    def test_heatmap_uses_totals_and_explains_itself_with_none(self):
+        heat = a.TypingHeatmap(totals={"E": 1000, "Q": 1})
+        wanted = heat.frame({}, 1.0, 1.0)
+        self.assertEqual(wanted["E"], a._heat_color(1.0))
+        self.assertLess(wanted["Q"][0], wanted["E"][0] + 1)
+        self.assertEqual(a.TypingHeatmap(totals={}).frame({}, 1.0, 1.0), {})
+        original = a._state_path
+        self.addCleanup(setattr, a, "_state_path", original)
+        a._state_path = lambda name: "/nonexistent/x"
+        with self.assertRaisesRegex(a.ApexError, "profile"):
+            a.TypingHeatmap()
+
+    def test_effect_flags_choose_the_right_thing(self):
+        parse = a.build_parser().parse_args
+        for flags, kind in ((["--effect", "ripple"], a.Ripple), (["--effect", "music"], a.MusicBars), (["--effect", "stats"], a.StatsMeter),
+                            (["--effect", "rev"], a.RevLights), (["--keep"], a.GlowOverNormal), ([], a.Lights)):
+            self.assertIsInstance(a._lights_from(parse(["lights", *flags])), kind)
+        self.assertTrue(a._lights_from(parse(["lights", "--effect", "ripple", "--keep"])).keep)
+        self.assertEqual(a._lights_from(parse(["gamepad", "--lights", "--effect", "rev", "--port", "5000"])).port, 5000)
+
+
+class Writes(unittest.TestCase):
+    def setUp(self):
+        self.read, write = os.pipe()
+        self.kb = a.Keyboard.__new__(a.Keyboard)
+        self.kb.fd = write
+        self.kb.keys = list(a.BY_NAME)
+        self.addCleanup(os.close, self.read)
+        self.addCleanup(os.close, write)
+
+    def packet(self):
+        return os.read(self.read, 65)
+
+    def test_rapid_tap_bytes(self):
+        self.kb.set_mode("W", a.RAPID_TAP_MODE)
+        self.assertEqual(self.packet()[:5], bytes([0, 0x32, 1, 0x1A, 2]))
+        self.kb.set_mode("WA", 0)
+        self.assertEqual(self.packet()[:7], bytes([0, 0x32, 2, 0x1A, 0, 0x04, 0]))
+
+    def test_many_modes_split(self):
+        self.kb.set_mode(list(a.BY_NAME)[:31], 0)
+        self.assertEqual(self.packet()[2], 30)
+        self.assertEqual(self.packet()[2], 1)
+
+    def test_save_refuses_a_bad_slot_before_sending_anything(self):
+        for bad in (0, 6, -1, 255, "1", None):
+            with self.assertRaisesRegex(ValueError, "slot"):
+                self.kb.save_to_keyboard(bad)
+        self.assertFalse(select.select([self.read], [], [], 0)[0])
+
+    def test_save_sends_exactly_the_one_command(self):
+        self.kb._ask = lambda payload, valid=None: bytes([3])
+        self.kb.save_to_keyboard(3)
+        self.assertEqual(self.packet()[:3], bytes([0, 0x09, 3]))
+        self.assertFalse(select.select([self.read], [], [], 0)[0])
+
+    def test_save_waits_while_the_keyboard_is_busy(self):
+        answers = [a.Disconnected("busy"), a.Disconnected("busy"), bytes([1])]
+
+        def ask(payload, valid=None):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        self.kb._ask = ask
+        self.kb.save_to_keyboard(1)
+        self.assertEqual(answers, [])
+
+    def test_write_refuses_everything_else(self):
+        for command in (0x01, 0x81, 0x58, 0x59, 0x5A, 0x74, 0x7F, 0x30, 0x33, 0x65):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                self.kb._write([command])
+        self.assertFalse(select.select([self.read], [], [], 0)[0])
+
+    def test_apply_preset_groups_and_skips_keys_not_on_this_board(self):
+        kb = FakeKb()
+        a.apply_preset(kb, {"W": [23, 21, 2], "A": [23, 21, 0], "S": [50, 46, 0], "#": [1, 1, 0]})
+        self.assertIn(("points", ["A", "W"], 23, 21), kb.calls)
+        self.assertIn(("points", ["S"], 50, 46), kb.calls)
+        self.assertIn(("mode", ["W"], 2), kb.calls)
+        self.assertIn(("mode", ["A", "S"], 0), kb.calls)
+        self.assertFalse([c for c in kb.calls if "#" in str(c)])
+
+
+class Auto(unittest.TestCase):
+    def setUp(self):
+        self.titles = ["Firefox"]
+        self.auto = a.AutoProfiles(
+            {"rules": [{"window": "beamng", "preset": "gaming", "lights": "ripple"}], "default": {"lights": "glow-keep"}},
+            {"gaming": {"W": [23, 21, 0]}}, title=lambda: self.titles[0])
+
+    def test_matches_case_insensitively_and_falls_back(self):
+        self.assertEqual(self.auto.choose("BeamNG.drive - 0.40").get("preset"), "gaming")
+        self.assertIs(self.auto.choose("Firefox"), self.auto.default)
+
+    def test_switching_applies_preset_and_swaps_effect_once(self):
+        kb = FakeKb()
+        self.auto.window = "Firefox"
+        self.auto.update(kb, {}, 1.0)
+        self.assertIsInstance(self.auto.effect, a.GlowOverNormal)
+        kb.calls.clear()
+        self.auto.window = "BeamNG.drive"
+        self.auto.update(kb, {}, 2.0)
+        self.assertIn(("points", ["W"], 23, 21), kb.calls)
+        self.assertIsInstance(self.auto.effect, a.Ripple)
+        kb.calls.clear()
+        self.auto.update(kb, {}, 2.01)
+        self.assertEqual([c for c in kb.calls if c[0] == "points"], [])
+        self.auto.stop(kb)
+        self.assertIn(("clear",), kb.calls)
+
+
+class Files(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        saved = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = self.folder.name
+        self.addCleanup(lambda: os.environ.pop("XDG_CONFIG_HOME") if saved is None else os.environ.__setitem__("XDG_CONFIG_HOME", saved))
+
+    def run_cli(self, *argv):
+        return a.build_parser().parse_args(list(argv))
+
+    def test_autostart_writes_and_removes_its_own_file_only(self):
+        args = self.run_cli("autostart", "on")
+        a.cmd_autostart(args)
+        path = a._autostart_path()
+        self.assertTrue(path.startswith(self.folder.name))
+        with open(path) as f:
+            text = f.read()
+        self.assertIn("lights --keep", text)
+        self.assertIn("Type=Application", text)
+        a.cmd_autostart(self.run_cli("autostart", "on", "lights", "--effect", "ripple"))
+        with open(path) as f:
+            self.assertIn("lights --effect ripple", f.read())
+        other = os.path.join(os.path.dirname(path), "someone-else.desktop")
+        with open(other, "w") as f:
+            f.write("x")
+        a.cmd_autostart(self.run_cli("autostart", "off"))
+        self.assertFalse(os.path.exists(path))
+        self.assertTrue(os.path.exists(other))
+
+    def test_stop_never_touches_something_that_isnt_ours(self):
+        sleeper = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(sleeper.wait)
+        self.addCleanup(sleeper.kill)
+        saved = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self.folder.name
+        self.addCleanup(lambda: os.environ.__setitem__("XDG_RUNTIME_DIR", saved) if saved else os.environ.pop("XDG_RUNTIME_DIR"))
+        with open(a._pid_path(), "w") as f:
+            f.write(str(sleeper.pid))
+        a.cmd_stop(self.run_cli("stop"))
+        self.assertIsNone(sleeper.poll())
+
+    def test_macro_add_list_delete_and_private_file(self):
+        a.cmd_macro(self.run_cli("macro", "add", "hi", "text:Hi!", "100", "LCTRL+C"))
+        path = a._config_path("macros.json")
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        with open(path) as f:
+            import json
+            self.assertEqual(json.load(f)["hi"], [{"text": "Hi!"}, 100.0, "LCTRL+C"])
+        a.cmd_macro(self.run_cli("macro", "delete", "hi"))
+        with self.assertRaisesRegex(ValueError, "No macro"):
+            a.cmd_macro(self.run_cli("macro", "delete", "hi"))
+        with self.assertRaisesRegex(ValueError, "unknown key"):
+            a.cmd_macro(self.run_cli("macro", "add", "bad", "NOPE+C"))
+
+    def test_unknown_macro_in_a_rule_is_explained(self):
+        with self.assertRaisesRegex(ValueError, "No macro called nope"):
+            a.Mapper(["J=macro:nope"], swallow=False, pause_key=None)
+
+
+class Macros(unittest.TestCase):
+    def test_compile_combo_wait_and_text(self):
+        ctrl, c = a.keycode("LCTRL"), a.keycode("C")
+        events = a.compile_macro(["LCTRL+C", 100, {"text": "a"}])
+        self.assertEqual([e[:2] for e in events[:4]], [(ctrl, 1), (c, 1), (c, 0), (ctrl, 0)])
+        self.assertEqual(events[4][:2], (a.keycode("A"), 1))
+        self.assertEqual(events[4][2], a.MACRO_GAP_MS + 100)
+
+    def test_capitals_and_symbols_use_shift(self):
+        shift, one = a.keycode("LSHIFT"), a.keycode("1")
+        self.assertEqual([e[:2] for e in a.compile_macro([{"text": "!"}])], [(shift, 1), (one, 1), (one, 0), (shift, 0)])
+        self.assertEqual(a.compile_macro([{"text": "B"}])[0][:2], (shift, 1))
+        self.assertEqual(a.compile_macro([{"text": " "}])[0][:2], (a.keycode("SPACE"), 1))
+
+    def test_recording_format(self):
+        self.assertEqual(a.compile_macro([{"events": [[30, 1, 0], [30, 0, 50]]}]), [(30, 1, 0), (30, 0, 50)])
+
+    def test_bad_step(self):
+        with self.assertRaisesRegex(ValueError, "macro step"):
+            a.compile_macro([[1, 2]])
+
+    def test_play_never_leaves_a_key_held(self):
+        class Output:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, code, value):
+                self.sent.append((code, value))
+        output = Output()
+        a.play_macro(output, [(30, 1, 0), (31, 1, 0)])
+        self.assertEqual(sorted(output.sent[2:]), [(30, 0), (31, 0)])
+
+    @unittest.skipUnless(HAVE_UINPUT, "no /dev/uinput access")
+    def test_deep_press_fires_once_per_press(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        saved = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = folder.name
+        self.addCleanup(lambda: os.environ.pop("XDG_CONFIG_HOME") if saved is None else os.environ.__setitem__("XDG_CONFIG_HOME", saved))
+        a._write_private(a._config_path("macros.json"), {"go": ["F24"]})
+        m = a.Mapper(["J=macro:go@3.0"], swallow=False, pause_key=None)
+        self.addCleanup(m.close)
+        m.virtual_keys = a.VirtualKeys(m.key_outputs)
+        fd = hold(m.virtual_keys.path)
+        m.update({"J": 2.0}, 0.01)
+        self.assertEqual(drain(fd, 0.1), [])
+        m.update({"J": 3.5}, 0.01)
+        m.update({"J": 3.6}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 194, 1), (a.EV_KEY, 194, 0)])
+        m.update({"J": 0.0}, 0.01)
+        m.macro_thread.join(2)
+        m.update({"J": 3.5}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_KEY, 194, 1), (a.EV_KEY, 194, 0)])
+        os.close(fd)
+
+
+class Oled(unittest.TestCase):
+    def test_page_major_bit_layout(self):
+        frame = a.OledFrame()
+        frame.pixel(3, 0)
+        frame.pixel(3, 9)
+        self.assertEqual(frame.data[3], 1)
+        self.assertEqual(frame.data[128 + 3], 2)
+        self.assertEqual(len(frame.data), 640)
+        frame.pixel(500, 500)
+        self.assertEqual(len(frame.data), 640)
+
+    def test_font_covers_every_sensor_key_name(self):
+        for name in a.BY_NAME:
+            for character in name:
+                self.assertIn(character, a.FONT, name)
+        self.assertTrue(all(len(v) == 10 for v in a.FONT.values()))
+
+    def test_depth_frame_bar_follows_depth(self):
+        half = a.oled_depth_frame("W", 2.0, 1.0)
+        self.assertTrue(half.is_set(10, 33))
+        self.assertFalse(half.is_set(100, 33))
+        self.assertTrue(a.oled_depth_frame("W", 4.0).is_set(120, 33))
+
+    def test_map_fits_the_screen_including_the_bottom_row(self):
+        frame = a.oled_map_frame({k: 4.0 for k in a.POSITIONS})
+        for key, (x, y) in a.POSITIONS.items():
+            left, top = int(x * 6.9), int(y * 6.2)
+            self.assertLessEqual(left + 5, a.OLED_WIDTH, key)
+            self.assertLessEqual(top + 6, a.OLED_HEIGHT, key)
+            self.assertTrue(frame.is_set(left + 1, top + 3), key)
+
+    def test_map_shows_pressed_key(self):
+        idle = a.oled_map_frame({"W": 0.0})
+        pressed = a.oled_map_frame({"W": 4.0})
+        self.assertGreater(sum(bin(b).count("1") for b in pressed.data), sum(bin(b).count("1") for b in idle.data))
+
+    def test_frame_reaches_the_daemon_in_its_format(self):
+        import base64
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "s")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.addCleanup(server.close)
+            server.bind(path)
+            server.listen(1)
+            frame = a.oled_depth_frame("W", 1.0)
+            client_thread = threading.Thread(target=a.oled_send, args=(frame, 0.6, path))
+            client_thread.start()
+            connection, _ = server.accept()
+            with connection:
+                line = b""
+                while not line.endswith(b"\n"):
+                    line += connection.recv(4096)
+                connection.sendall(b'{"ok": true}\n')
+            client_thread.join(2)
+            message = json.loads(line)
+            self.assertEqual(message["cmd"], "notify")
+            self.assertEqual(base64.b64decode(message["fb"]), bytes(frame.data))
 
 
 if __name__ == "__main__":

@@ -6,13 +6,21 @@
   apex-analog map W=rt A=lx-    any key to a controller, pedals, the mouse, a keystroke, or a command
   apex-analog midi              play it as a MIDI instrument, with velocity and per-key pressure
   apex-analog type              press deep for capitals or key combos
-  apex-analog lights            make keys glow with how far they are pressed
+  apex-analog lights            keys glow with depth; effects: ripple, music, stats, rev, heatmap
+  apex-analog paint             set key colours from any program, one JSON line at a time
   apex-analog stream            one JSON line per update, for piping into anything
   apex-analog overlay           key pressure on your stream, as an OBS browser source
   apex-analog profile           how you type, and what it means for your actuation point
   apex-analog health            check every switch for drift, noise and short range
   apex-analog typeprint         experiment: recognise you by how you press keys
   apex-analog actuation W 1.0   set where keys actuate, no GG needed
+  apex-analog rapid WASD on     turn the keyboard's rapid tap on or off per key
+  apex-analog preset save NAME  keep setups on this computer, then preset use NAME
+  apex-analog save              write the current settings to the keyboard's flash
+  apex-analog auto              switch presets and lighting by the focused window
+  apex-analog macro add NAME    save a sequence of keystrokes, then fire it with J=macro:NAME
+  apex-analog oled              show key depth on the keyboard's own screen
+  apex-analog magnet            watch the sensors react to a magnet
   apex-analog info              the keyboard, your access, and every key's actuation settings
 
   from apex_analog import Keyboard
@@ -20,7 +28,8 @@
       print(kb.read()["W"])     # millimetres
 
 Only sends the read commands in ALLOWED, plus LIGHT_COMMANDS when you ask for lights and SETTING_COMMANDS when you set
-actuation, and only to the firmware they were checked on. No dependencies.
+actuation or rapid tap, and only to the firmware they were checked on. The one flash write, SAVE_COMMAND, runs only from
+`apex-analog save` after you confirm it. No dependencies.
 """
 import argparse
 import base64
@@ -34,6 +43,7 @@ import math
 import os
 import re
 import select
+import shutil
 import signal
 import socket
 import statistics
@@ -45,7 +55,7 @@ import threading
 import time
 from typing import NamedTuple
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"
@@ -59,6 +69,7 @@ ALLOWED = {
     0xB1: "each key's press and release actuation points",
     0xB2: "each key's mode byte",
     0x9E: "whether the OLED's ACTUATION ICON is on",
+    0xE2: "which saved config is active",
 }
 
 # The only commands that change anything, sent only for lights. Each handler was read on both chips: they store colours in the
@@ -80,7 +91,11 @@ LED_HIDS = [
 # Changes a setting, only when you ask. Its handler stores in memory and reaches no flash save. It ignores LGUI (hid 0xE3).
 SETTING_COMMANDS = {
     0x31: "set the press and release points of up to 20 keys",
+    0x32: "set the mode byte of up to 30 keys",
 }
+RAPID_TAP_MODE = 2  # the value the keyboard's own RAPID TAP menu sets
+# The one command that writes flash: all current settings, over one of the five saved configs. Same code as the Save Config menu.
+SAVE_COMMAND = 0x09
 
 # Sensor channel -> (HID usage, name, Linux key code), from the keyboard's own key table.
 # ESC, the F row, nav keys and arrows are not here: they have no sensor. INT1-5, # and ISO\ exist only on JIS or ISO boards.
@@ -106,6 +121,43 @@ ALIASES = {
     "BACKSPACE": "BKSP", "CAPSLOCK": "CAPS", "COMMA": ",", "PERIOD": ".", "SLASH": "/", "BACKSLASH": "\\", "SEMICOLON": ";",
     "QUOTE": "'", "GRAVE": "`", "TILDE": "`", "MINUS": "-", "EQUALS": "=", "LBRACKET": "[", "RBRACKET": "]",
 }
+# Keys with an LED but no sensor, by HID usage.
+NO_SENSOR_HIDS = {"ESC": 0x29, **{f"F{i}": 0x39 + i for i in range(1, 13)}, "PRTSC": 0x46, "SCRLK": 0x47, "PAUSE": 0x48, "INSERT": 0x49, "HOME": 0x4A,
+                  "PGUP": 0x4B, "DELETE": 0x4C, "END": 0x4D, "PGDN": 0x4E, "RIGHT": 0x4F, "LEFT": 0x50, "DOWN": 0x51, "UP": 0x52, "MENU": 0x65}
+
+
+def _key_positions():
+    """Where each key sits on an ANSI board, in key widths, for effects that move across the keyboard."""
+    out = {}
+
+    def place(y, x, names):
+        for i, name in enumerate(names):
+            out[name] = (x + i, y)
+    place(0, 0, ["ESC"])
+    place(0, 2, ["F1", "F2", "F3", "F4"])
+    place(0, 6.5, ["F5", "F6", "F7", "F8"])
+    place(0, 11, ["F9", "F10", "F11", "F12"])
+    place(0, 15.25, ["PRTSC", "SCRLK", "PAUSE"])
+    place(1.25, 0, list("`1234567890-="))
+    out["BKSP"] = (13.5, 1.25)
+    place(1.25, 15.25, ["INSERT", "HOME", "PGUP"])
+    out["TAB"] = (0.25, 2.25)
+    place(2.25, 1.5, list("QWERTYUIOP[]"))
+    out["\\"] = (13.75, 2.25)
+    place(2.25, 15.25, ["DELETE", "END", "PGDN"])
+    out["CAPS"] = (0.4, 3.25)
+    place(3.25, 1.75, list("ASDFGHJKL;'"))
+    out["ENTER"] = (13.4, 3.25)
+    out["LSHIFT"] = (0.6, 4.25)
+    place(4.25, 2.25, list("ZXCVBNM,./"))
+    out["RSHIFT"] = (13.4, 4.25)
+    out["UP"] = (16.25, 4.25)
+    out.update({"LCTRL": (0.1, 5.25), "LGUI": (1.35, 5.25), "LALT": (2.6, 5.25), "SPACE": (6.5, 5.25), "RALT": (10.1, 5.25), "RGUI": (11.35, 5.25),
+                "SS": (12.6, 5.25), "RCTRL": (13.85, 5.25), "LEFT": (15.25, 5.25), "DOWN": (16.25, 5.25), "RIGHT": (17.25, 5.25)})
+    return out
+
+
+POSITIONS = _key_positions()
 NO_MAGNET = (2900, 928)  # calibration the firmware leaves on channels with no switch fitted
 BANK_SIZE = 14
 WRITE_GAP = 0.005  # seconds to leave after a command that gets no reply
@@ -169,6 +221,21 @@ def key_name(key):
     if name not in BY_NAME:
         raise ValueError(f"{key!r} has no sensor. Keys with one: " + " ".join(sorted(k for k in BY_NAME if not k.startswith("INT"))))
     return name
+
+
+def led_hid(key):
+    """The HID usage of any key with an LED, sensor or not."""
+    name = key.upper() if len(key) > 1 or key.isalpha() else key
+    name = ALIASES.get(name, name)
+    if name in BY_NAME:
+        return BY_NAME[name][1]
+    if name in NO_SENSOR_HIDS:
+        return NO_SENSOR_HIDS[name]
+    raise ValueError(f"{key!r} isn't a key with an LED. Known: " + " ".join(sorted(k for k in {*BY_NAME, *NO_SENSOR_HIDS} if not k.startswith("INT"))))
+
+
+def _pid_path():
+    return os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "apex-analog.pid")
 
 
 def key_names(keys):
@@ -249,8 +316,13 @@ class Keyboard:
         except OSError:
             os.close(self.fd)
             self.fd = None
-            raise ApexError("Another apex-analog is already reading the keyboard. Replies carry no ID, so only one can run at a time. "
-                            "To feed several things, give one run several outputs.") from None
+            raise ApexError("Another apex-analog is already reading the keyboard, and only one can run at a time because replies carry no ID. "
+                            "Stop it with: apex-analog stop") from None
+        try:
+            with open(_pid_path(), "w") as f:
+                f.write(str(os.getpid()))
+        except OSError:
+            pass
         self._calibration = {}
         try:
             for name, value in self._per_key(0xDA, 5, 5, list(BY_NAME)):
@@ -261,6 +333,7 @@ class Keyboard:
             self.close()
             raise
         self.keys = sorted(self._calibration, key=lambda n: BY_NAME[n][0])
+        self.channel_names = {BY_NAME[n][0]: n for n in self.keys}
 
     def __enter__(self):
         return self
@@ -371,15 +444,54 @@ class Keyboard:
 
     def set_actuation(self, keys, mm):
         """Set where these keys actuate, at the nearest firmware level. Returns the level used. LGUI can't be changed this way."""
-        names = [n for n in key_names(keys) if n != "LGUI"]
         level, press, release = actuation_level(mm)
+        self.set_actuation_points(keys, press, release)
+        return level
+
+    def set_actuation_points(self, keys, press, release):
+        """The same in the firmware's own units, n/255 of each key's range."""
+        names = [n for n in key_names(keys) if n != "LGUI"]
         for start in range(0, len(names), 20):
             part = names[start:start + 20]
             self._write([0x31, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], press, release)])
-        return level
+
+    def set_mode(self, keys, mode):
+        """Set each key's mode byte. RAPID_TAP_MODE turns on the keyboard's own rapid tap, 0 turns it off."""
+        names = key_names(keys)
+        for start in range(0, len(names), 30):
+            part = names[start:start + 30]
+            self._write([0x32, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], mode)])
+
+    def active_slot(self):
+        """Which of the five saved configs is active: the number on the OLED's home screen."""
+        return self._ask([0xE2])[0]
+
+    def save_to_keyboard(self, slot):
+        """Write all current settings to flash over saved config 1 to 5. The firmware does no range check, so it happens here."""
+        if not isinstance(slot, int) or not 1 <= slot <= 5:
+            raise ValueError(f"config slot must be 1 to 5, not {slot!r}")
+        self._write([SAVE_COMMAND, slot])
+        deadline = time.monotonic() + 8.0
+        while True:  # the keyboard is busy while it writes
+            try:
+                self._ask([0xE2])
+                return
+            except Disconnected:
+                if time.monotonic() > deadline:
+                    raise
+
+    def channels(self):
+        """Filtered sensor value of all 70 channels, including those with no switch fitted."""
+        out = {}
+        for bank in range(5):
+            for i, value in enumerate(self._bank(bank + 1)):
+                out[bank * BANK_SIZE + i] = value
+        return out
 
     def _write(self, payload):
         """Send a command that gets no reply, then give the keyboard time to act on it. One that arrives straight after appears to replace it."""
+        if not payload or (payload[0] not in LIGHT_COMMANDS and payload[0] not in SETTING_COMMANDS and payload[0] != SAVE_COMMAND):
+            raise ValueError(f"refused to send {payload[:1]!r}: not a known write command")
         try:
             os.write(self.fd, bytes([0, *payload]).ljust(65, b"\0")[:65])
         except OSError as e:
@@ -398,7 +510,7 @@ class Keyboard:
 
     def set_colors(self, colors):
         """{'W': (255, 80, 0)}. Stays that colour until you change it, call clear_colors(), or replug."""
-        self._send_colors([[BY_NAME[key_name(key)][1], *color] for key, color in colors.items()])
+        self._send_colors([[led_hid(key), *color] for key, color in colors.items()])
 
     def set_all_colors(self, red, green, blue):
         """Every key on the board, including the ones with no sensor."""
@@ -864,7 +976,9 @@ class Mapping:
         if "@" in target and not target.startswith("run:"):
             target, at_text = target.rsplit("@", 1)
             at = float(at_text)
-        if target.startswith("key:"):
+        if target.startswith("macro:") and target[6:]:
+            self.kind, self.target = "macro", target[6:]
+        elif target.startswith("key:"):
             self.kind, self.target = "key", keycode(target[4:])
         elif target.startswith("tap:"):
             self.kind, self.target = "tap", keycode(target[4:])
@@ -890,11 +1004,69 @@ class Mapping:
                              "Add p2: for a second controller. Pedals: " + " ".join(Pedals.AXES) + ". "
                              "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
                              "Keystroke: key:F13. Repeating keystroke: tap:RIGHT. Desktop: volume+ volume- brightness+ brightness-. "
-                             "Command: run:your-command")
+                             "Command: run:your-command. Macro: macro:NAME")
         if self.player == 2 and self.kind not in ("stick", "trigger", "button"):
             raise ValueError(f"{text!r}: p2: only applies to controller outputs")
-        if self.kind in ("key", "mouse-button", "button"):
+        if self.kind in ("key", "mouse-button", "button", "macro"):
             self.digital = Digital(at, rapid)
+
+
+TEXT_SHIFTED = dict(zip('!@#$%^&*()_+{}|:"~<>?', "1234567890-=[]\\;'`,./"))
+TEXT_NAMES = {" ": "SPACE", "\n": "ENTER", "\t": "TAB"}
+MACRO_GAP_MS = 8  # between keystrokes, so apps see each one
+
+
+def _text_events(text):
+    """What to press to type this, on a US layout."""
+    shift = keycode("LSHIFT")
+    events = []
+    for character in text:
+        shifted = character.isupper() or character in TEXT_SHIFTED
+        base = TEXT_SHIFTED.get(character, character)
+        code = keycode(TEXT_NAMES.get(base, base))
+        if shifted:
+            events.append((shift, 1, MACRO_GAP_MS))
+        events += [(code, 1, MACRO_GAP_MS), (code, 0, MACRO_GAP_MS)]
+        if shifted:
+            events.append((shift, 0, MACRO_GAP_MS))
+    return events
+
+
+def compile_macro(steps):
+    """Saved steps -> (key code, down or up, ms to wait first). A step is a number of ms to wait, a combo like "LCTRL+C",
+    {"text": "hello"}, or {"events": [[code, value, ms], ...]} from a recording."""
+    events, wait = [], 0
+    for step in steps:
+        if isinstance(step, (int, float)) and not isinstance(step, bool):
+            wait += step
+            continue
+        if isinstance(step, str):
+            codes = [keycode(name) for name in step.split("+")]
+            new = [(c, 1, MACRO_GAP_MS) for c in codes] + [(c, 0, MACRO_GAP_MS) for c in reversed(codes)]
+        elif isinstance(step, dict) and "text" in step:
+            new = _text_events(step["text"])
+        elif isinstance(step, dict) and "events" in step:
+            new = [(int(c), int(v), int(ms)) for c, v, ms in step["events"]]
+        else:
+            raise ValueError(f"unknown macro step {step!r}")
+        if new and wait:
+            new[0] = (new[0][0], new[0][1], new[0][2] + wait)
+            wait = 0
+        events += new
+    return events
+
+
+def play_macro(output, events):
+    pressed = set()
+    try:
+        for code, value, delay in events:
+            if delay:
+                time.sleep(delay / 1000)
+            output.send(code, value)
+            (pressed.add if value else pressed.discard)(code)
+    finally:
+        for code in pressed:  # nothing may stay held
+            output.send(code, 0)
 
 
 def expand_maps(items):
@@ -976,6 +1148,15 @@ class Mapper(_KeyHolder):
         self.pedals = Pedals() if "pedal" in kinds else None
         self.mouse = Mouse() if kinds & {"mouse-axis", "mouse-button"} else None
         self.key_outputs = {m.target for m in self.maps if m.kind in ("key", "tap")}
+        self.macros, self.macro_thread = {}, None
+        wanted = {m.target for m in self.maps if m.kind == "macro"}
+        if wanted:
+            saved = _load_json(_config_path("macros.json"))
+            missing = sorted(wanted - set(saved))
+            if missing:
+                raise ValueError(f"No macro called {' '.join(missing)}. Save one with: apex-analog macro add NAME STEP...")
+            self.macros = {name: compile_macro(saved[name]) for name in wanted}
+            self.key_outputs |= {code for events in self.macros.values() for code, _, _ in events}
         self.remainder = {}
         self.values = {}
 
@@ -1021,6 +1202,11 @@ class Mapper(_KeyHolder):
                 clicks[m.target] = m.digital.update(mm) or clicks.get(m.target, False)
             elif m.kind == "key":
                 keys[m.target] = m.digital.update(mm) or keys.get(m.target, False)
+            elif m.kind == "macro":
+                state = m.digital.update(mm)
+                if state and not m.active:
+                    self._play(m.target)
+                m.active = state
             elif m.kind == "tap":
                 for _ in range(self._owed(m, amount * self.tap_rate, dt)):
                     if self.virtual_keys:
@@ -1054,6 +1240,12 @@ class Mapper(_KeyHolder):
                 if state != (code in self.virtual_keys.down):
                     self.virtual_keys.send(code, int(state))
 
+    def _play(self, name):
+        """One macro at a time, so a held or repeated press can't pile them up. It never holds up the key loop."""
+        if self.virtual_keys and not (self.macro_thread and self.macro_thread.is_alive()):
+            self.macro_thread = threading.Thread(target=play_macro, args=(self.virtual_keys, self.macros[name]), daemon=True)
+            self.macro_thread.start()
+
     def release(self):
         """Let go of everything: nothing may stay pressed once the keyboard is gone."""
         for m in self.maps:
@@ -1064,6 +1256,8 @@ class Mapper(_KeyHolder):
 
     def close(self):
         self.release()
+        if self.macro_thread:
+            self.macro_thread.join(10)
         for device in (*self.pads.values(), self.pedals, self.mouse, self.virtual_keys):
             if device:
                 device.close()
@@ -1563,6 +1757,572 @@ def key_health(offset, noise, span, typical_span):
     return problems
 
 
+# ---- lighting effects ------------------------------------------------------------------------------------------------
+
+def _scale(color, amount):
+    return tuple(int(c * max(0.0, min(1.0, amount))) for c in color)
+
+
+def _meter_color(t):
+    """Green at the bottom of a meter, through yellow, to red at the top."""
+    if t < 0.6:
+        return (int(255 * t / 0.6), 200, 0)
+    return (255, int(200 * (1 - (t - 0.6) / 0.4)), 0)
+
+
+def _heat_color(t):
+    """Blue for rarely used, through magenta and red, to yellow for most used."""
+    if t < 0.5:
+        return (int(510 * t), 0, int(255 * (1 - 2 * t)))
+    return (255, int(400 * (t - 0.5)), 0)
+
+
+class Effect:
+    """A lighting effect: each frame says what colour keys should be. Keys it leaves out go dark, or back to normal with keep."""
+
+    def __init__(self, keep=False, base=(0, 0, 0), hz=30.0):
+        self.keep, self.base, self.period = keep, base, 1.0 / hz
+        self.shown = {}
+        self.last = self.last_clear = 0.0
+
+    def start(self, kb):
+        self.shown = {}
+        self.last = self.last_clear = 0.0
+        if self.keep:
+            kb.clear_colors()
+        else:
+            kb.set_all_colors(*self.base)
+
+    def frame(self, depths, now, elapsed):
+        return {}
+
+    def update(self, kb, depths, now):
+        elapsed = now - self.last
+        if elapsed < self.period:
+            return
+        self.last = now
+        self.draw(kb, self.frame(depths, now, elapsed), now)
+
+    def draw(self, kb, wanted, now):
+        gone = set(self.shown) - set(wanted)
+        changes = {}
+        if self.keep:
+            if gone and (not wanted or now - self.last_clear >= 0.2):  # the firmware can only release every key at once
+                kb.clear_colors()
+                self.last_clear = now
+                self.shown = {}
+            elif gone:
+                wanted = {**{k: self.shown[k] for k in gone}, **wanted}
+        else:
+            changes = {k: self.base for k in gone}
+        changes.update({k: v for k, v in wanted.items() if self.shown.get(k) != v})
+        if changes:
+            kb.set_colors(changes)
+        self.shown = wanted
+
+    def stop(self, kb):
+        try:
+            kb.clear_colors()
+        except Disconnected:
+            pass
+
+
+class Ripple(Effect):
+    """Pressing a key sends a wave across the keyboard. Pressing faster makes it stronger."""
+    SPEED, WIDTH, LIFE = 24.0, 1.6, 0.9
+
+    def __init__(self, color=(0, 170, 255), keep=False, base=(0, 0, 0)):
+        super().__init__(keep, base, 25.0)
+        self.color = color
+        self.tracker = _Tracker(0.5, 0.3)
+        self.waves = []
+
+    def frame(self, depths, now, elapsed):
+        for event in self.tracker.update(depths, now):
+            if event.kind == "down" and event.key in POSITIONS:
+                self.waves.append((POSITIONS[event.key], now, min(1.0, 0.35 + event.velocity / 250)))
+        self.waves = [w for w in self.waves if now - w[1] < self.LIFE]
+        wanted = {}
+        for key, (x, y) in POSITIONS.items():
+            level = depths.get(key, 0.0) / TRAVEL_MM
+            for (wave_x, wave_y), started, strength in self.waves:
+                age = now - started
+                ring = max(0.0, 1 - abs(math.hypot(x - wave_x, y - wave_y) - age * self.SPEED) / self.WIDTH)
+                level = max(level, ring * strength * (1 - age / self.LIFE))
+            if level >= 0.04:
+                wanted[key] = _scale(self.color, level)
+        return wanted
+
+
+def audio_bands(samples, rate=11025, bands=14, low=60.0, high=4500.0):
+    """How loud each log-spaced frequency band is, 0 to about 0.5, measured with one Goertzel filter per band."""
+    out = []
+    count = len(samples)
+    if not count:
+        return [0.0] * bands
+    for band in range(bands):
+        frequency = low * (high / low) ** (band / (bands - 1))
+        coefficient = 2 * math.cos(2 * math.pi * frequency / rate)
+        previous = before = 0.0
+        for sample in samples:
+            previous, before = sample + coefficient * previous - before, previous
+        power = max(0.0, previous * previous + before * before - coefficient * previous * before)
+        out.append(math.sqrt(power) / count)
+    return out
+
+
+class AudioMeter(threading.Thread):
+    """Listens to whatever this computer is playing, through the default output's monitor. Nothing is recorded or kept."""
+    RATE, WINDOW = 11025, 256
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.levels = [0.0] * 14
+        self.peak = 0.02
+        self.process = None
+
+    def run(self):
+        command = ["parec", "--device=@DEFAULT_MONITOR@", f"--rate={self.RATE}", "--channels=1", "--format=s16le", "--latency-msec=30"]
+        try:
+            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            _say("The music effect needs parec (pulseaudio-utils or pipewire-pulse).")
+            return
+        size = self.WINDOW * 2
+        while True:
+            data = self.process.stdout.read(size)
+            if not data or len(data) < size:
+                return
+            samples = [s / 32768 for s in struct.unpack(f"<{self.WINDOW}h", data)]
+            self.update_levels(audio_bands(samples, self.RATE, len(self.levels)))
+
+    def update_levels(self, bands):
+        self.peak = max(self.peak * 0.997, max(bands), 0.02)
+        self.levels = [max(math.sqrt(b / self.peak) if b > 0.0015 else 0.0, old - 0.06) for b, old in zip(bands, self.levels)]
+
+    def close(self):
+        if self.process:
+            self.process.terminate()
+
+
+class MusicBars(Effect):
+    """Bars across the keyboard that move with whatever is playing."""
+    WIDTH_UNITS, HEIGHT_UNITS = 18.25, 5.25
+
+    def __init__(self, keep=False, base=(0, 0, 0)):
+        super().__init__(keep, base, 30.0)
+        self.meter = None
+
+    def start(self, kb):
+        super().start(kb)
+        if self.meter is None:
+            self.meter = AudioMeter()
+            self.meter.start()
+
+    def bars(self, levels):
+        wanted = {}
+        for key, (x, y) in POSITIONS.items():
+            column = min(len(levels) - 1, int(x / self.WIDTH_UNITS * len(levels)))
+            height = 1 - y / self.HEIGHT_UNITS
+            if levels[column] > 0.02 and height <= levels[column]:
+                wanted[key] = _meter_color(height)
+        return wanted
+
+    def frame(self, depths, now, elapsed):
+        return self.bars(self.meter.levels)
+
+    def stop(self, kb):
+        if self.meter:
+            self.meter.close()
+            self.meter = None
+        super().stop(kb)
+
+
+def _read_number(path):
+    try:
+        with open(path) as f:
+            return float(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+class SystemStats:
+    """Each reading runs 0 to 1. A reading this machine doesn't have comes back as 0."""
+
+    def __init__(self):
+        self.cpu_last = None
+
+    def cpu(self):
+        with open("/proc/stat") as f:
+            fields = [int(x) for x in f.readline().split()[1:]]
+        idle, total = fields[3] + fields[4], sum(fields)
+        last, self.cpu_last = self.cpu_last, (idle, total)
+        if not last or total == last[1]:
+            return 0.0
+        return 1 - (idle - last[0]) / (total - last[1])
+
+    def ram(self):
+        info = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                name, _, value = line.partition(":")
+                info[name] = int(value.split()[0])
+        return 1 - info["MemAvailable"] / info["MemTotal"]
+
+    def temp(self):
+        for folder in glob.glob("/sys/class/hwmon/hwmon*"):
+            if _read(f"{folder}/name") in ("coretemp", "k10temp", "zenpower"):
+                value = _read_number(f"{folder}/temp1_input")
+                if value:
+                    return max(0.0, min(1.0, (value / 1000 - 30) / 70))
+        value = _read_number("/sys/class/thermal/thermal_zone0/temp")
+        return max(0.0, min(1.0, (value / 1000 - 30) / 70)) if value else 0.0
+
+    def battery(self):
+        for folder in glob.glob("/sys/class/power_supply/BAT*"):
+            value = _read_number(f"{folder}/capacity")
+            if value is not None:
+                return value / 100
+        return 0.0
+
+    def gpu(self):
+        try:
+            out = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=2).stdout
+            return float(out.split()[0]) / 100
+        except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+            return 0.0
+
+
+STAT_ROWS = [[f"F{i}" for i in range(1, 13)], list("1234567890-="), list("QWERTYUIOP[]"), list("ASDFGHJKL;'")]
+STAT_NAMES = ("cpu", "ram", "temp", "battery", "gpu")
+
+
+class StatsMeter(Effect):
+    """Rows of keys as meters: the first reading on the F row, then the number row, then down. Other keys stay as they are."""
+
+    def __init__(self, names=("cpu", "ram"), stats=None):
+        super().__init__(True, (0, 0, 0), 1.0)
+        unknown = [n for n in names if n not in STAT_NAMES]
+        if unknown or not 1 <= len(names) <= len(STAT_ROWS):
+            raise ValueError(f"--stats takes up to {len(STAT_ROWS)} of: {' '.join(STAT_NAMES)}")
+        self.names, self.stats = names, stats or SystemStats()
+        self.stats.cpu()
+
+    def frame(self, depths, now, elapsed):
+        wanted = {}
+        for name, row in zip(self.names, STAT_ROWS):
+            lit = round(getattr(self.stats, name)() * len(row))
+            for i, key in enumerate(row):
+                wanted[key] = _meter_color(i / (len(row) - 1)) if i < lit else (0, 0, 0)
+        return wanted
+
+
+OUTGAUGE = struct.Struct("<I4sHBB7fII3f16s16s")
+OUTGAUGE_SHIFT_LIGHT = 1
+
+
+def parse_outgauge(data):
+    """BeamNG's car data, in the OutGauge format. Returns (gear, rpm, shift light on) or None. Gear: 0 reverse, 1 neutral, 2 first."""
+    if len(data) < OUTGAUGE.size:
+        return None
+    fields = OUTGAUGE.unpack_from(data)
+    return fields[3], fields[6], bool(fields[13] & OUTGAUGE_SHIFT_LIGHT)
+
+
+class RevLights(Effect):
+    """Live RPM across the number row, flashing at the shift point, and the current gear on the F row, from BeamNG's OutGauge data.
+
+    Turn it on in BeamNG under Options, Other, Protocols, with address 127.0.0.1 and the same port as here.
+    """
+    ROW = list("1234567890-=")
+
+    def __init__(self, port=4444, redline=None):
+        super().__init__(True, (0, 0, 0), 30.0)
+        self.port, self.redline = port, redline
+        self.highest = 0.0
+        self.latest, self.received = None, 0.0
+        self.socket = None
+
+    def start(self, kb):
+        super().start(kb)
+        if self.socket is None:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.socket.setblocking(False)
+            try:
+                self.socket.bind(("127.0.0.1", self.port))
+            except OSError as e:
+                raise ApexError(f"Can't listen on UDP port {self.port}: {e}") from None
+
+    def receive(self, now):
+        while self.socket:
+            try:
+                packet = parse_outgauge(self.socket.recv(256))
+            except OSError:
+                return
+            if packet:
+                self.latest, self.received = packet, now
+
+    def frame(self, depths, now, elapsed):
+        self.receive(now)
+        if not self.latest or now - self.received > 1.0:
+            return {}
+        gear, rpm, shift_light = self.latest
+        self.highest = max(self.highest, rpm if rpm < 25000 else 0.0)
+        redline = self.redline or max(self.highest, 3000.0)
+        fraction = min(1.0, rpm / redline)
+        wanted = {}
+        if shift_light or fraction >= 0.93:
+            flash = (255, 0, 0) if int(now * 8) % 2 else (255, 255, 255)
+            wanted.update({key: flash for key in self.ROW})
+        else:
+            lit = round(fraction * len(self.ROW))
+            for i, key in enumerate(self.ROW):
+                wanted[key] = _meter_color(i / (len(self.ROW) - 1)) if i < lit else (0, 0, 0)
+        if gear == 0:
+            wanted["ESC"] = (255, 0, 0)
+        elif 2 <= gear <= 13:
+            wanted[f"F{gear - 1}"] = (255, 255, 255)
+        return wanted
+
+    def stop(self, kb):
+        if self.socket:
+            self.socket.close()
+            self.socket = None
+        super().stop(kb)
+
+
+class TypingHeatmap(Effect):
+    """Lights each key by how much you use it, from your apex-analog profile totals."""
+
+    def __init__(self, keep=False, base=(0, 0, 0), totals=None):
+        super().__init__(keep, base, 1.0)
+        if totals is None:
+            path = _state_path("typing-profile.json")
+            if not os.path.exists(path):
+                raise ApexError("No typing profile yet. Run apex-analog profile and type for a while first.")
+            with open(path) as f:
+                totals = {k: v["count"] for k, v in json.load(f).get("keys", {}).items()}
+        self.totals = totals
+
+    def frame(self, depths, now, elapsed):
+        top = max(self.totals.values(), default=0)
+        if not top:
+            return {}
+        return {k: _heat_color(math.log(c + 1) / math.log(top + 1)) for k, c in self.totals.items() if c}
+
+
+EFFECTS = ("glow", "ripple", "music", "stats", "rev", "heatmap")
+USES_DEPTH = ("glow", "ripple")
+
+
+def make_effect(name, color=None, base=(0, 0, 0), fade=None, keep=False, stats=("cpu", "ram"), port=4444, redline=None):
+    if name == "glow":
+        if keep:
+            return GlowOverNormal(color or (255, 255, 255), 0.1 if fade is None else fade)
+        return Lights(color or (255, 90, 0), base, 0.25 if fade is None else fade)
+    if name == "ripple":
+        return Ripple(color or (0, 170, 255), keep, base)
+    if name == "music":
+        return MusicBars(keep, base)
+    if name == "stats":
+        return StatsMeter(stats)
+    if name == "rev":
+        return RevLights(port, redline)
+    if name == "heatmap":
+        return TypingHeatmap(keep, base)
+    raise ValueError(f"unknown effect {name!r}. Effects: {' '.join(EFFECTS)}")
+
+
+# ---- presets and per-app profiles ------------------------------------------------------------------------------------
+
+def _load_json(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        return json.load(f)
+
+
+def apply_preset(kb, keys):
+    """Put keys back to a saved {'W': [press, release, mode]}."""
+    points, modes = {}, {}
+    for key, (press, release, mode) in keys.items():
+        if key in kb.keys:
+            points.setdefault((press, release), []).append(key)
+            modes.setdefault(mode, []).append(key)
+    for (press, release), names in points.items():
+        kb.set_actuation_points(names, press, release)
+    for mode, names in modes.items():
+        kb.set_mode(names, mode)
+
+
+def _window_title():
+    tool = shutil.which("kdotool") or os.path.expanduser("~/.cargo/bin/kdotool")
+    out = subprocess.run([tool, "getactivewindow", "getwindowname"], capture_output=True, text=True, timeout=3)
+    return out.stdout.strip()
+
+
+AUTO_EXAMPLE = {
+    "rules": [{"window": "BeamNG", "preset": "gaming", "lights": "ripple"}, {"window": "Firefox", "lights": "glow-keep"}],
+    "default": {"preset": "typing", "lights": "glow-keep"},
+}
+
+
+class AutoProfiles:
+    """Follows the focused window: applies a saved preset and a lighting effect for each app, from a small JSON file.
+
+    Used in place of a Lights object. `lights` can be off, glow, glow-keep, ripple, ripple-keep, music, music-keep, stats, rev or heatmap.
+    """
+
+    def __init__(self, config, presets, title=None):
+        self.rules, self.default = config.get("rules", []), config.get("default", {})
+        self.presets, self.title = presets, title or _window_title
+        self.window, self.current, self.effect, self.done = "", None, None, False
+        self.warned = set()
+
+    def choose(self, window):
+        for rule in self.rules:
+            if rule.get("window", "").lower() in window.lower():
+                return rule
+        return self.default
+
+    def _poll(self):
+        while not self.done:
+            try:
+                self.window = self.title()
+            except (OSError, subprocess.SubprocessError):
+                pass
+            time.sleep(1.5)
+
+    def start(self, kb):
+        self.current = None
+        self.done = False
+        threading.Thread(target=self._poll, daemon=True).start()
+
+    def apply(self, kb, rule):
+        self.current = rule
+        name = rule.get("preset")
+        if name:
+            if name in self.presets:
+                apply_preset(kb, self.presets[name])
+            elif name not in self.warned:
+                self.warned.add(name)
+                _say(f"No preset called {name!r}. Save one with: apex-analog preset save {name}")
+        if self.effect:
+            self.effect.stop(kb)
+            self.effect = None
+        lights = rule.get("lights", "off")
+        if lights != "off":
+            name, _, flag = lights.partition("-")
+            self.effect = make_effect(name, keep=flag == "keep")
+            self.effect.start(kb)
+
+    def update(self, kb, depths, now):
+        rule = self.choose(self.window)
+        if rule is not self.current:
+            self.apply(kb, rule)
+        if self.effect:
+            self.effect.update(kb, depths, now)
+
+    def stop(self, kb):
+        self.done = True
+        if self.effect:
+            self.effect.stop(kb)
+            self.effect = None
+        else:
+            try:
+                kb.clear_colors()
+            except Disconnected:
+                pass
+
+
+# ---- drawing on the OLED ---------------------------------------------------------------------------------------------
+
+FONT = {
+    "0": "3E5149453E", "1": "00427F4000", "2": "4261514946", "3": "2141454B31", "4": "1814127F10", "5": "2745454539", "6": "3C4A494930", "7": "0171090503",
+    "8": "3649494936", "9": "064949291E", "A": "7E1111117E", "B": "7F49494936", "C": "3E41414122", "D": "7F4141221C", "E": "7F49494941", "F": "7F09090901",
+    "G": "3E4149497A", "H": "7F0808087F", "I": "00417F4100", "J": "2040413F01", "K": "7F08142241", "L": "7F40404040", "M": "7F020C027F", "N": "7F0408107F",
+    "O": "3E4141413E", "P": "7F09090906", "Q": "3E4151215E", "R": "7F09192946", "S": "4649494931", "T": "01017F0101", "U": "3F4040403F", "V": "1F2040201F",
+    "W": "3F4038403F", "X": "6314081463", "Y": "0708700807", "Z": "6151494543", ".": "0060600000", ",": "0050300000", "-": "0808080808", "=": "1414141414",
+    "/": "2010080402", "\\": "0204081020", ";": "0056360000", "'": "0005030000", "`": "0001020400", "[": "007F414100", "]": "0041417F00", "#": "147F147F14",
+    " ": "0000000000", "m": "7C04180478",
+}
+OLED_WIDTH, OLED_HEIGHT, OLED_BYTES = 128, 40, 640
+
+
+class OledFrame:
+    """A 128x40 picture in the panel's format: 5 pages of 128 columns, with bit N of a byte being pixel N of that page."""
+
+    def __init__(self):
+        self.data = bytearray(OLED_BYTES)
+
+    def pixel(self, x, y):
+        if 0 <= x < OLED_WIDTH and 0 <= y < OLED_HEIGHT:
+            self.data[(y // 8) * OLED_WIDTH + x] |= 1 << (y % 8)
+
+    def is_set(self, x, y):
+        return bool(self.data[(y // 8) * OLED_WIDTH + x] >> (y % 8) & 1)
+
+    def rect(self, x, y, width, height):
+        for column in range(x, x + width):
+            for row in range(y, y + height):
+                self.pixel(column, row)
+
+    def text(self, value, x, y, scale=1):
+        for character in value:
+            columns = bytes.fromhex(FONT.get(character, FONT[" "]))
+            for i, bits in enumerate(columns):
+                for row in range(7):
+                    if bits >> row & 1:
+                        self.rect(x + i * scale, y + row * scale, scale, scale)
+            x += 6 * scale
+
+
+def oled_depth_frame(name, mm, actuates_at=None):
+    frame = OledFrame()
+    frame.text(name, 0, 0, 2)
+    frame.text(f"{mm:.1f}", 76, 0, 3)
+    filled = int(OLED_WIDTH * mm / TRAVEL_MM)
+    frame.rect(0, 28, filled, 11)
+    for x in range(0, OLED_WIDTH, 2):
+        frame.pixel(x, 27)
+        frame.pixel(x, 39)
+    if actuates_at is not None:
+        mark = min(OLED_WIDTH - 1, int(OLED_WIDTH * actuates_at / TRAVEL_MM))
+        frame.rect(mark, 24, 1, 16)
+    return frame
+
+
+def oled_map_frame(depths):
+    frame = OledFrame()
+    for key, (x, y) in POSITIONS.items():
+        left, top = int(x * 6.9), int(y * 6.2)
+        mm = depths.get(key)
+        if mm is None:
+            continue
+        frame.pixel(left + 2, top + 5)
+        if mm > 0:
+            height = 1 + int(5 * mm / TRAVEL_MM)
+            frame.rect(left, top + 6 - height, 5, height)
+    return frame
+
+
+def oled_socket_path():
+    return os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "apex-oledd.sock")
+
+
+def oled_send(frame, seconds=0.6, path=None):
+    """Hand a frame to apex-oledd, which decides what's on the panel, so this never fights it. It lasts `seconds` unless replaced."""
+    message = {"cmd": "notify", "secs": seconds, "invert": False, "fb": base64.b64encode(bytes(frame.data)).decode()}
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(0.5)
+        client.connect(path or oled_socket_path())
+        client.sendall((json.dumps(message) + "\n").encode())
+        try:
+            client.recv(4096)
+        except socket.timeout:
+            pass
+
+
 # ---- outputs for other programs --------------------------------------------------------------------------------------
 
 def _host_port(text):
@@ -1914,10 +2674,17 @@ def _rgb(text):
     return tuple(bytes.fromhex(value))
 
 
+def _rgb_any(value):
+    if isinstance(value, str):
+        return _rgb(value)
+    if isinstance(value, (list, tuple)) and len(value) == 3 and all(isinstance(c, int) and 0 <= c <= 255 for c in value):
+        return tuple(value)
+    raise ValueError(f"{value!r} should be a colour like \"FF5A00\" or [255, 90, 0]")
+
+
 def _lights_from(args):
-    if args.keep:
-        return GlowOverNormal(_rgb(args.color or "FFFFFF"), 0.1 if args.fade is None else args.fade)
-    return Lights(_rgb(args.color or "FF5A00"), _rgb(args.base), 0.25 if args.fade is None else args.fade)
+    return make_effect(args.effect, _rgb(args.color) if args.color else None, _rgb(args.base), args.fade, args.keep,
+                       tuple(args.stats.split(",")), args.port, args.redline)
 
 
 def cmd_lights(args):
@@ -1927,11 +2694,306 @@ def cmd_lights(args):
         print("Back to your normal lighting.")
         return 0
     lights = _lights_from(args)
-    keys = key_names(args.keys) if args.keys else None
+    keys = key_names(args.keys) if args.keys else (None if args.effect in USES_DEPTH else ["W"])
     with _Screen() as screen:
-        screen.draw(["apex-analog lights", "", ("Your normal lighting stays on, and keys glow as you press them." if args.keep else "The keyboard goes dark, then keys glow as you press them.")
-                     + " Ctrl-C quits and restores your normal lighting."])
+        screen.draw([f"apex-analog lights: {args.effect}", "", "Ctrl-C quits and restores your normal lighting."])
         _loop(args.hz or 60, keys, None, lambda depths, now: None, lights)
+
+
+def cmd_paint(args):
+    """Colours from any program: one JSON object per line, like {"W": "FF0000", "ESC": [0, 255, 0]}, {"all": "000000"}, {"clear": true}."""
+    with Keyboard() as kb:
+        try:
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                message = json.loads(line)
+                if message.pop("clear", False):
+                    kb.clear_colors()
+                if "all" in message:
+                    kb.set_all_colors(*_rgb_any(message.pop("all")))
+                if message:
+                    kb.set_colors({key: _rgb_any(value) for key, value in message.items()})
+        finally:
+            if not args.stay:
+                kb.clear_colors()
+    return 0
+
+
+def cmd_rapid(args):
+    with Keyboard() as kb:
+        if args.keys is not None:
+            if args.state is None:
+                raise ValueError("Say on or off too, like: apex-analog rapid WASD on")
+            names = list(kb.keys) if args.keys == "all" else key_names(args.keys)
+            missing = [n for n in names if n not in kb.keys]
+            if missing:
+                raise ValueError(f"No sensor fitted on this keyboard for: {' '.join(missing)}")
+            mode = RAPID_TAP_MODE if args.state == "on" else 0
+            kb.set_mode(names, mode)
+            time.sleep(0.1)
+            settings = kb.actuation(names)
+            wrong = [n for n in names if settings[n]["mode"] != mode]
+            if wrong:
+                raise ApexError(f"Sent, but these read back differently: {' '.join(wrong)}")
+            print(f"Rapid tap {args.state} for {len(names)} key{'s' if len(names) != 1 else ''}, and read it back.")
+        settings = kb.actuation()
+    on = [n for n, s in settings.items() if s["mode"] == RAPID_TAP_MODE]
+    print("Rapid tap on: " + (" ".join(on) if on else "no keys"))
+    return 0
+
+
+def cmd_preset(args):
+    path = _config_path("presets.json")
+    presets = _load_json(path)
+    if args.action == "list":
+        print("\n".join(sorted(presets)) if presets else "No presets yet. Save one with: apex-analog preset save NAME")
+        return 0
+    if not args.name:
+        raise ValueError(f"Name the preset: apex-analog preset {args.action} NAME")
+    if args.action == "delete":
+        if args.name not in presets:
+            raise ValueError(f"No preset called {args.name!r}")
+        del presets[args.name]
+        _write_private(path, presets)
+        print(f"Deleted {args.name}.")
+        return 0
+    with Keyboard() as kb:
+        if args.action == "save":
+            settings = kb.actuation()
+            presets[args.name] = {k: [s["press_raw"], s["release_raw"], s["mode"]] for k, s in settings.items()}
+            _write_private(path, presets)
+            print(f"Saved {args.name} on this computer, with {len(settings)} keys. The keyboard's flash wasn't touched.")
+            return 0
+        if args.name not in presets:
+            raise ValueError(f"No preset called {args.name!r}. You have: {' '.join(sorted(presets)) or 'none'}")
+        apply_preset(kb, presets[args.name])
+        time.sleep(0.1)
+        settings = kb.actuation()
+        wrong = [k for k, (press, release, mode) in presets[args.name].items()
+                 if k in settings and k != "LGUI" and (settings[k]["press_raw"], settings[k]["release_raw"], settings[k]["mode"]) != (press, release, mode)]
+        if wrong:
+            raise ApexError(f"Sent, but these read back differently: {' '.join(wrong)}")
+        print(f"Using {args.name}.")
+    return 0
+
+
+def cmd_save(args):
+    with Keyboard() as kb:
+        slot = args.slot or kb.active_slot()
+        if not 1 <= slot <= 5:
+            raise ApexError(f"The keyboard reports config slot {slot}, which isn't 1 to 5. Not writing anything.")
+        print(f"This writes all the keyboard's current settings to its flash, replacing saved config {slot}.")
+        print(f"It sends one command: 09 {slot:02X}. The keyboard's own Save Config menu runs the same code.")
+        if not args.yes and input("Type yes to write: ").strip() != "yes":
+            print("Nothing written.")
+            return 1
+        kb.save_to_keyboard(slot)
+        print(f"Saved to config {slot}, and the keyboard is answering again.")
+    return 0
+
+
+def cmd_auto(args):
+    path = args.config or _config_path("auto.json")
+    if args.example:
+        print(json.dumps(AUTO_EXAMPLE, indent=2))
+        return 0
+    if not os.path.exists(path):
+        raise ApexError(f"No rules yet. Put them in {path}. See an example with: apex-analog auto --example")
+    with open(path) as f:
+        config = json.load(f)
+    auto = AutoProfiles(config, _load_json(_config_path("presets.json")))
+    _say(f"Following the focused window with {len(auto.rules)} rule{'s' if len(auto.rules) != 1 else ''}. Ctrl-C quits and restores your normal lighting.")
+    _loop(args.hz or 60, None, None, lambda depths, now: None, auto)
+
+
+def _record_macro():
+    """Listens to the keyboard without taking it over. Ends on the Pause key."""
+    fds = []
+    for node in _physical_key_nodes():
+        fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+        if BY_NAME["W"][2] in _key_bits(fd):
+            fds.append(fd)
+        else:
+            os.close(fd)
+    if not fds:
+        raise ApexError("Couldn't find the keyboard's input devices.")
+    try:
+        while any(_any_key_held(fd) for fd in fds):
+            time.sleep(0.02)
+        size, events, last = struct.calcsize("llHHi"), [], None
+        pause = keycode("PAUSE")
+        while True:
+            for fd in select.select(fds, [], [], 0.2)[0]:
+                data = os.read(fd, size * 64)
+                for offset in range(0, len(data) - size + 1, size):
+                    _, _, kind, code, value = struct.unpack_from("llHHi", data, offset)
+                    if kind != EV_KEY or value == 2:
+                        continue
+                    if code == pause:
+                        return events
+                    now = time.monotonic()
+                    events.append([code, value, 0 if last is None else int((now - last) * 1000)])
+                    last = now
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
+def cmd_macro(args):
+    path = _config_path("macros.json")
+    macros = _load_json(path)
+    if args.action == "list":
+        print("\n".join(f"{name}: {len(compile_macro(steps))} key events" for name, steps in sorted(macros.items())) or "No macros yet. Try: apex-analog macro add hello text:hi")
+        return 0
+    if not args.name:
+        raise ValueError(f"Name the macro: apex-analog macro {args.action} NAME")
+    if args.action == "add":
+        steps = []
+        for step in args.steps:
+            if step.startswith("text:"):
+                steps.append({"text": step[5:]})
+            elif step.replace(".", "", 1).isdigit():
+                steps.append(float(step))
+            else:
+                steps.append(step)
+        if not steps:
+            raise ValueError('Give it some steps: a combo like LCTRL+C, a wait in ms like 100, or text:"hello there"')
+        compile_macro(steps)
+        macros[args.name] = steps
+        _write_private(path, macros)
+        print(f"Saved {args.name}. Fire it with: apex-analog map J=macro:{args.name}, or macro:{args.name}@3.0 for a deep press only.")
+        return 0
+    if args.action == "record":
+        print("Recording what you press, in order, into a private file on this computer, so don't type passwords. Press Pause to finish.", flush=True)
+        with _Screen():
+            events = _record_macro()
+        macros[args.name] = [{"events": events}]
+        _write_private(path, macros)
+        print(f"Saved {args.name}: {len(events)} key events.")
+        return 0
+    if args.name not in macros:
+        raise ValueError(f"No macro called {args.name!r}. You have: {' '.join(sorted(macros)) or 'none'}")
+    if args.action == "delete":
+        del macros[args.name]
+        _write_private(path, macros)
+        print(f"Deleted {args.name}.")
+        return 0
+    events = compile_macro(macros[args.name])
+    with VirtualKeys({code for code, _, _ in events}) as output:
+        time.sleep(0.3)  # let the desktop notice the new keyboard
+        play_macro(output, events)
+    return 0
+
+
+def _autostart_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "autostart", "apex-analog.desktop")
+
+
+def cmd_autostart(args):
+    path = _autostart_path()
+    if args.action == "off":
+        if os.path.exists(path):
+            os.remove(path)
+        print("It won't start at login any more. A copy that's already running keeps going until apex-analog stop.")
+        return 0
+    if args.action == "status":
+        if not os.path.exists(path):
+            print("Off.")
+            return 0
+        with open(path) as f:
+            print("On: " + next((l[5:].strip() for l in f if l.startswith("Exec=")), "unknown"))
+        return 0
+    command = args.command_args or ["lights", "--keep"]
+    program = shutil.which("apex-analog") or os.path.abspath(__file__)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(f"[Desktop Entry]\nType=Application\nName=apex-analog\nComment=Key depth for the Apex Pro Gen 3\nExec={program} {' '.join(command)}\nTerminal=false\n")
+    print(f"At your next login it will run: apex-analog {' '.join(command)}")
+    print("While it runs, stop it with apex-analog stop before using another apex-analog command.")
+    return 0
+
+
+def cmd_stop(args):
+    path = _pid_path()
+    pid = None
+    if os.path.exists(path):
+        with open(path) as f:
+            text = f.read().strip()
+        pid = int(text) if text.isdigit() else None
+    cmdline = _read(f"/proc/{pid}/cmdline") if pid else None
+    if not cmdline or "apex" not in cmdline or pid == os.getpid():
+        print("Nothing to stop.")
+        return 0
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 2.0
+    while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+        time.sleep(0.05)
+    print("Stopped." if not os.path.exists(f"/proc/{pid}") else f"Asked it to stop, but process {pid} is still running.")
+    return 0
+
+
+def cmd_oled(args):
+    if not os.path.exists(oled_socket_path()):
+        raise ApexError("apex-oledd isn't running. This hands its frames to that daemon so the two never fight over the panel.")
+    with Keyboard() as kb:
+        settings = kb.actuation()
+        _say("Press a key and watch the OLED. It goes back to its normal view when you let go. Ctrl-C quits.")
+        last, sent = None, 0.0
+        for depths in kb.stream(args.hz or 30):
+            now = time.monotonic()
+            pressed = [(mm, name) for name, mm in depths.items() if mm > 0]
+            if args.map:
+                frame = oled_map_frame(depths)
+            elif pressed:
+                mm, name = max(pressed)
+                frame = oled_depth_frame(name, mm, settings[name]["press"])
+            else:
+                continue
+            data = bytes(frame.data)
+            if data != last or now - sent >= 0.3:
+                try:
+                    oled_send(frame)
+                except OSError as e:
+                    raise ApexError(f"Lost apex-oledd: {e}") from None
+                last, sent = data, now
+
+
+def cmd_magnet(args):
+    with Keyboard() as kb, _Screen() as screen:
+        if not screen.active:
+            raise ApexError("The magnet view needs a terminal.")
+        screen.draw(["Measuring the resting field. Keep magnets away for a second."])
+        samples = []
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            samples.append(kb.channels())
+        baseline = {c: statistics.fmean(s[c] for s in samples) for c in samples[0]}
+        scans, rate, last = 0, 0.0, time.monotonic()
+        while True:
+            values = kb.channels()
+            scans += 1
+            now = time.monotonic()
+            if now - last >= 1:
+                rate, scans, last = scans / (now - last), 0, now
+            deltas = {c: values[c] - baseline[c] for c in values}
+            strongest = max(deltas, key=lambda c: abs(deltas[c]))
+            lines = [f"apex-analog magnet  {rate:.0f} updates/s. Change from resting, in sensor counts. * has no switch fitted. Ctrl-C quits.", ""]
+            for bank in range(5):
+                names, numbers = [], []
+                for i in range(BANK_SIZE):
+                    channel = bank * BANK_SIZE + i
+                    entry = CHANNELS.get(channel)
+                    bare = "*" if channel not in kb.channel_names else ""
+                    names.append(f"{(entry[1] if entry else '-')[:4] + bare:>6}")
+                    numbers.append(f"{deltas[channel]:+6.0f}")
+                lines += ["".join(names), "".join(numbers), ""]
+            name = CHANNELS.get(strongest, (0, f"channel {strongest}"))[1]
+            lines.append(f"Strongest: {name} {deltas[strongest]:+.0f}. A strong magnet can act like a key press, so keep it away from anything that matters.")
+            screen.draw(lines)
+            time.sleep(0.03)
 
 
 def _map_lines(mapper, rate):
@@ -2249,6 +3311,10 @@ def cmd_actuation(args):
 
 
 def _add_light_options(parser):
+    parser.add_argument("--effect", default="glow", choices=EFFECTS, help="glow (default), ripple, music, stats, rev or heatmap")
+    parser.add_argument("--stats", default="cpu,ram", help=f"for --effect stats: up to {len(STAT_ROWS)} of {','.join(STAT_NAMES)}, starting from the F row (default cpu,ram)")
+    parser.add_argument("--port", type=int, default=4444, help="for --effect rev: the UDP port set in BeamNG's OutGauge options (default 4444)")
+    parser.add_argument("--redline", type=float, metavar="RPM", help="for --effect rev: the bar's full scale. Otherwise it learns the highest RPM it sees")
     parser.add_argument("--keep", action="store_true", help="keep your normal lighting: pressed keys glow white, then go back to normal")
     parser.add_argument("--color", metavar="RRGGBB", help="colour of a key at full depth (default FF5A00, or FFFFFF with --keep)")
     parser.add_argument("--base", default="000000", metavar="RRGGBB", help="colour of everything else (default 000000, dark)")
@@ -2282,7 +3348,7 @@ def build_parser():
             "Pedals: clutch handbrake pedal3 pedal4 pedal5 pedal6. "
             "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
             "Keystroke: key:F13. Repeating keystroke, faster the deeper you press: tap:RIGHT. "
-            "Desktop: volume+ volume- brightness+ brightness-. Any command: run:your-command. "
+            "Desktop: volume+ volume- brightness+ brightness-. Any command: run:your-command. A saved macro: macro:NAME. "
             f"Presets: {', '.join(PRESETS)}. Keep rules in a file, one per line, and pass @file."))
         p.add_argument("maps", nargs="*", metavar="RULE", help="W=rt, A=lx-, J=key:F13@2.0, or a preset")
         p.add_argument("--deadzone", type=float, default=0.3, metavar="MM", help="axis stays 0 above this depth (default 0.3)")
@@ -2343,6 +3409,53 @@ def build_parser():
     ac.add_argument("keys", nargs="?", help="W, WASD, W,A,SPACE, or all. Leave out to just see the current settings")
     ac.add_argument("mm", nargs="?", type=float, help="depth from 0.1 to 4.0; uses the nearest of the firmware's 20 levels")
     ac.set_defaults(func=cmd_actuation)
+
+    pa = commands.add_parser("paint", help="set key colours from any program, one JSON line at a time on stdin")
+    pa.add_argument("--stay", action="store_true", help="leave the colours on at the end instead of restoring your normal lighting")
+    pa.set_defaults(func=cmd_paint)
+
+    ra = commands.add_parser("rapid", help="see or set the keyboard's own rapid tap, per key")
+    ra.add_argument("keys", nargs="?", help="W, WASD, W,A,SPACE, or all. Leave out to just see which keys have it on")
+    ra.add_argument("state", nargs="?", choices=("on", "off"))
+    ra.set_defaults(func=cmd_rapid)
+
+    pr = commands.add_parser("preset", help="keep named actuation and rapid tap setups on this computer")
+    pr.add_argument("action", choices=("save", "use", "list", "delete"))
+    pr.add_argument("name", nargs="?")
+    pr.set_defaults(func=cmd_preset)
+
+    sv = commands.add_parser("save", help="write the current settings to the keyboard's flash, so they survive a replug")
+    sv.add_argument("--slot", type=int, help="saved config 1 to 5 (default: the active one)")
+    sv.add_argument("--yes", action="store_true", help="don't ask first")
+    sv.set_defaults(func=cmd_save)
+
+    au = commands.add_parser("auto", help="switch presets and lighting by the focused window (KDE, needs kdotool)")
+    au.add_argument("--config", help="rules file (default ~/.config/apex-analog/auto.json)")
+    au.add_argument("--example", action="store_true", help="print an example rules file")
+    au.add_argument("--hz", type=float, help="updates per second")
+    au.set_defaults(func=cmd_auto)
+
+    st = commands.add_parser("autostart", help="run something at login. With nothing else named, the white press glow")
+    st.add_argument("action", choices=("on", "off", "status"))
+    st.add_argument("command_args", nargs=argparse.REMAINDER, metavar="...", help="what to run, like: lights --effect ripple")
+    st.set_defaults(func=cmd_autostart)
+
+    sp = commands.add_parser("stop", help="stop whichever apex-analog is running")
+    sp.set_defaults(func=cmd_stop)
+
+    mc = commands.add_parser("macro", help="save, record and run keystroke sequences, and fire them from any key with macro:NAME")
+    mc.add_argument("action", choices=("add", "record", "run", "list", "delete"))
+    mc.add_argument("name", nargs="?")
+    mc.add_argument("steps", nargs="*", metavar="STEP", help='for add: a combo like LCTRL+C, a wait in ms like 100, or text:"hello there"')
+    mc.set_defaults(func=cmd_macro)
+
+    ol = commands.add_parser("oled", help="show key depth on the keyboard's own screen, through apex-oledd")
+    ol.add_argument("--map", action="store_true", help="a live pressure map of every key, instead of the deepest key's depth")
+    ol.add_argument("--hz", type=float, help="updates per second")
+    ol.set_defaults(func=cmd_oled)
+
+    ma = commands.add_parser("magnet", help="watch every sensor react to a magnet, including the ones with no switch")
+    ma.set_defaults(func=cmd_magnet)
 
     tp = commands.add_parser("typeprint", help="experiment: recognise you by how you press keys. Not security")
     tp.add_argument("action", choices=("enroll", "check", "forget"), help="enroll: type a set phrase 8 times. check: try to pass. forget: delete it")
