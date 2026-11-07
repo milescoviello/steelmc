@@ -34,8 +34,8 @@ if [ ! -e "$RULE" ]; then
     echo
     echo "The udev rule needs root (so the panel works without sudo):"
     sudo install -m 0644 "$REPO/udev/99-steelseries-apex-oled.rules" "$RULE"
-    sudo udevadm control --reload-rules
-    sudo udevadm trigger --subsystem-match=hidraw --action=change
+    sudo udevadm control --reload-rules || true
+    sudo udevadm trigger --subsystem-match=hidraw --action=change || true
     echo "  installed $RULE"
 else
     echo "  kept existing $RULE"

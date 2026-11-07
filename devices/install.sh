@@ -15,7 +15,7 @@ if cmp -s "$repo/udev/70-steelmc-devices.rules" "$rule"; then
 else
     echo "Installing a udev rule so this works without sudo (asks for your password):"
     sudo install -m 0644 "$repo/udev/70-steelmc-devices.rules" "$rule"
-    sudo udevadm control --reload-rules
+    sudo udevadm control --reload-rules || true
     sudo udevadm trigger --subsystem-match=hidraw || true
     echo "Installed. If a device still can't be opened, replug it."
 fi

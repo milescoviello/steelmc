@@ -16,7 +16,7 @@ if cmp -s "$repo/udev/70-arctis.rules" "$rule"; then
 else
     echo "Installing a udev rule so this works without sudo (asks for your password):"
     sudo install -m 0644 "$repo/udev/70-arctis.rules" "$rule"
-    sudo udevadm control --reload-rules
+    sudo udevadm control --reload-rules || true
     sudo udevadm trigger --subsystem-match=hidraw || true
     echo "Installed. If arctis still can't open the transmitter, replug it."
 fi
