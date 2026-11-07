@@ -153,7 +153,80 @@ KEYS.update(dict(zip(("printscreen", "scrolllock", "pause", "insert", "home", "p
                       "down", "up"), range(0x46, 0x53))))
 KEYS.update(dict(zip(("leftctrl", "leftshift", "leftalt", "super", "rightctrl", "rightshift", "rightalt", "rightsuper"), range(0xE0, 0xE8))))
 KEYS.update({"esc": 0x29, "ctrl": 0xE0, "shift": 0xE1, "alt": 0xE2, "meta": 0xE3, "win": 0xE3})
+KEYS.update(dict(zip(("numlock", "kpslash", "kpasterisk", "kpminus", "kpplus", "kpenter"), range(0x53, 0x59))))
+KEYS.update({f"kp{i + 1}": 0x59 + i for i in range(9)})
+KEYS.update({"kp0": 0x62, "kpdot": 0x63, "nonusbackslash": 0x64, "menu": 0x65})
 MEDIA = {"mute": 0xE2, "playpause": 0xCD, "next": 0xB5, "previous": 0xB6, "stop": 0xB7, "volumeup": 0xE9, "volumedown": 0xEA}
+
+
+def parse_key(text):
+    """A key by name (w, f1, leftshift, kp5) or by HID usage number (0x1a or 26)."""
+    t = str(text).strip().lower()
+    if t in KEYS:
+        return KEYS[t]
+    try:
+        return int(t, 0)
+    except ValueError:
+        raise Refused(f"{text!r} isn't a key name. Use one like w, f1, space, leftshift, or a HID number like 0x1a.") from None
+
+
+def _key_value(s, text):
+    """The bytes for one key's value: a colour, or one of the setting's named values (numbers match 1.5 and 1.50 alike)."""
+    if s.get("value") == "color":
+        return parse_color(text)
+    values = s["values"]
+    t = str(text).strip().lower()
+    if t not in values:
+        try:
+            t = f"{float(t):.1f}"
+        except ValueError:
+            pass
+    if t not in values:
+        names = list(values)
+        shown = f"{names[0]} to {names[-1]}" if len(names) > 8 else ", ".join(names)
+        raise Refused(f"{text!r} isn't a value here. Use {shown}" + (f" {s['unit']}" if s.get("unit") else "") + ".")
+    return list(values[t])
+
+
+def encode_per_key(s, value):
+    """One value for every key, then KEY=VALUE for any key that should differ: 1.5 or 1.5,w=0.5,a=0.5.
+    Keys left out get the setting's default. Sends the key count, then each key's HID usage and its value."""
+    keys = s["keys"]
+    every, apart = None, {}
+    for part in (p.strip() for p in str(value).split(",")):
+        if not part:
+            continue
+        if "=" in part:
+            name, v = part.split("=", 1)
+            hid = parse_key(name)
+            if hid not in keys:
+                raise Refused(f"{name.strip()} isn't one of the keys this setting covers.")
+            apart[hid] = _key_value(s, v)
+        elif every is None:
+            every = _key_value(s, part)
+        else:
+            raise Refused("Give one value for every key first, then KEY=VALUE for the keys that differ.")
+    if every is None:
+        if s.get("default") is None:
+            raise Refused("Give a value for every key first, like 1.5 or 1.5,w=0.5.")
+        every = _key_value(s, s["default"])
+    out = ([len(keys)] if s.get("count", True) else []) + list(s.get("after_count", []))
+    for hid in keys:
+        out += [hid] + apart.get(hid, every)
+    return out
+
+
+def encode_zones(s, value):
+    """One colour for every zone, or one per zone in order, comma separated."""
+    parts = [p.strip() for p in str(value).split(",") if p.strip()]
+    if len(parts) == 1:
+        parts = parts * s["zones"]
+    if len(parts) != s["zones"]:
+        raise Refused(f"Give one colour, or {s['zones']} colours (one per zone).")
+    out = []
+    for p in parts:
+        out += parse_color(p) + list(s.get("zone_suffix", []))
+    return out
 
 
 def encode_buttons(s, value):
@@ -281,19 +354,31 @@ def encode_eq(s, value):
 ENCODERS = {
     "choice": encode_choice, "number": encode_number, "number_choice": encode_number_choice, "dpi_stages": encode_dpi_stages,
     "color": encode_color, "reactive_color": encode_reactive_color, "action": encode_action, "buttons": encode_buttons,
-    "gradient": encode_gradient, "gradient2": encode_gradient2, "eq": encode_eq,
+    "gradient": encode_gradient, "gradient2": encode_gradient2, "eq": encode_eq, "per_key": encode_per_key, "zones": encode_zones,
 }
 
 
-def frame(setting, value=None):
-    """The bytes a setting sends for a value, after the report ID. Raises Refused before anything is sent."""
+def frames(setting, value=None):
+    """Every report a setting sends for a value, after the report ID. Most send one; some send the same value to several
+    commands (also), like one brightness per zone. Raises Refused before anything is sent."""
     kind = setting["type"]
     if kind not in ENCODERS:
         raise Refused(f"Setting this kind of value ({kind}) isn't supported yet.")
-    data = list(setting["command"]) + ENCODERS[kind](setting, value) + list(setting.get("suffix", []))
-    if setting.get("packet_length"):
-        data += [0] * (setting["packet_length"] - len(data))
-    return data
+    body = ENCODERS[kind](setting, value) + list(setting.get("suffix", []))
+    out = []
+    for command in [setting["command"]] + list(setting.get("also", [])):
+        data = list(command) + body
+        if setting.get("packet_length"):
+            if len(data) > setting["packet_length"]:
+                raise Refused(f"That makes {len(data)} bytes, more than the {setting['packet_length']} this setting can send.")
+            data += [0] * (setting["packet_length"] - len(data))
+        out.append(data)
+    return out
+
+
+def frame(setting, value=None):
+    """The bytes a setting sends for a value, after the report ID (the first report, if it sends several)."""
+    return frames(setting, value)[0]
 
 
 # ---- reading replies -------------------------------------------------------------------------------------------------
@@ -331,8 +416,26 @@ def decode_battery(spec, reply):
 
 # ---- the device ------------------------------------------------------------------------------------------------------
 
-def find_node(pid, interface, hidraw=HIDRAW):
-    """The hidraw node for one interface of one product."""
+def top_usage(descriptor):
+    """(usage page, usage) of a HID report descriptor's first collection, or None."""
+    page, i = None, 0
+    while i < len(descriptor):
+        item = descriptor[i]
+        size = (0, 1, 2, 4)[item & 3]
+        data = int.from_bytes(bytes(descriptor[i + 1:i + 1 + size]), "little")
+        if item & 0xFC == 0x04:
+            page = data
+        elif item & 0xFC == 0x08 and page is not None:
+            return page, data
+        elif item & 0xFC == 0xA0:
+            return None
+        i += 1 + size
+    return None
+
+
+def find_node(pid, interface, usage_page=None, usage=None, hidraw=HIDRAW):
+    """The hidraw node for one product: the one whose report descriptor starts with the given usage page and usage, when the
+    definition names them, or else the one on the given interface."""
     for path in sorted(glob.glob(f"{hidraw}/hidraw*")):
         try:
             with open(f"{path}/device/uevent") as f:
@@ -340,6 +443,15 @@ def find_node(pid, interface, hidraw=HIDRAW):
         except OSError:
             continue
         if f":00001038:0000{pid.upper()}" not in uevent:
+            continue
+        if usage_page is not None:
+            try:
+                with open(f"{path}/device/report_descriptor", "rb") as f:
+                    top = top_usage(f.read())
+            except OSError:
+                continue
+            if top and top[0] == usage_page and (usage is None or top[1] == usage):
+                return "/dev/" + os.path.basename(path)
             continue
         intf = os.path.realpath(f"{path}/device/..")
         try:
@@ -371,9 +483,9 @@ class Gear:
         if fd is not None:
             self.fd = fd
             return
-        node = find_node(pid, self.product["interface"])
+        node = find_node(pid, self.product["interface"], self.product.get("usage_page"), self.product.get("usage"))
         if not node:
-            raise GearError(f"The {self.name} isn't plugged in, or its interface {self.product['interface']} isn't there.")
+            raise GearError(f"The {self.name} isn't plugged in, or its control interface isn't there.")
         try:
             self.fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
         except PermissionError:
@@ -411,16 +523,17 @@ class Gear:
         if name not in self.settings:
             raise Refused(f"The {self.name} has no setting {name!r}. It has: {', '.join(self.settings)}.")
         spec = self.settings[name]
-        data = frame(spec, value)
+        reports = frames(spec, value)
         for extra in spec.get("before", []):
             self.send(spec, extra)
-        self.send(spec, data)
-        if spec.get("readback_length"):
-            self.reply(spec["readback_length"])
+        for data in reports:
+            self.send(spec, data)
+            if spec.get("readback_length"):
+                self.reply(spec["readback_length"])
         for extra in spec.get("then", []):
             self.send(spec, extra)
         remember(self.pid, name, value)
-        return data
+        return reports[0]
 
     def status(self):
         """What the device reports about itself: battery, charging, whether a wireless one is connected, ChatMix."""
@@ -454,6 +567,13 @@ class Gear:
         if not spec:
             raise GearError(f"The {self.name} keeps its settings without saving, or saving isn't known for it.")
         data = list(spec["command"])
+        slot = spec.get("slot")
+        if slot:  # save over the config that's active now, which the device reports
+            self.send(slot, slot["command"])
+            current = self.reply(slot["length"])[slot["byte"]]
+            if not slot["first"] <= current <= slot["last"]:
+                raise GearError(f"The {self.name} reported config {current}, which isn't one it has. Nothing was saved.")
+            data.append(current)
         if spec.get("packet_length"):
             data += [0] * (spec["packet_length"] - len(data))
         self.send(spec, data)

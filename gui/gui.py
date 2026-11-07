@@ -2969,7 +2969,8 @@ class GearDevices:
 
 OWN_TABS = {"mouse": "Mouse", "keyboard": "Keyboard", "headset": "Headset"}
 SETTING_HINTS = {"dpi_stages": "400,800,1600", "buttons": "button4=f13,button5=disable", "gradient": "2000ms:red@0,blue@50,red@100",
-                 "gradient2": "2000ms:red@0,blue@50,red@100", "eq": "0,0,0,0,0,0,0,0,0,0"}
+                 "gradient2": "2000ms:red@0,blue@50,red@100", "eq": "0,0,0,0,0,0,0,0,0,0", "zones": "ff8000, or one colour per zone",
+                 "per_key": "every key, then KEY=VALUE: 1.5,w=0.5"}
 
 
 class DevicesPage(QWidget):
@@ -3071,8 +3072,10 @@ class DevicesPage(QWidget):
             layout.addStretch(1)
             return
         family, product = self.covered[pid]
-        warning = muted("Changing settings here is experimental: they come from how this model is known to work, but it hasn't been "
-                        "tried on a real one here.")
+        checked = product.get("firmware_checked")
+        warning = muted("Changing settings here is experimental: nobody has tried them on a real one yet. "
+                        + (f"Every command is in this model's firmware {checked}." if checked else
+                           "Its firmware couldn't be read, so they come from SteelSeries GG's device files alone."))
         warning.setWordWrap(True)
         layout.addWidget(warning)
         self.readout = muted("")
@@ -3131,6 +3134,18 @@ class DevicesPage(QWidget):
             if last:
                 box.setCurrentText(str(last))
             return box
+        if kind == "per_key" and s.get("value") != "color":
+            box = QComboBox()  # one value for every key; type KEY=VALUE after it for keys that differ
+            box.setEditable(True)
+            box.addItems([str(v) for v in s["values"]])
+            box.lineEdit().setPlaceholderText(SETTING_HINTS["per_key"])
+            box.setCurrentText(str(last if last is not None else s.get("default", "")))
+            box.setToolTip("Pick one value for every key, or type it followed by KEY=VALUE for keys that differ, like 1.5,w=0.5,a=0.5")
+            return box
+        if kind in ("per_key", "zones"):
+            edit = QLineEdit(str(last or ""))
+            edit.setPlaceholderText("RRGGBB or a name" + (", then KEY=COLOR" if kind == "per_key" else ", or one per zone"))
+            return edit
         if kind == "action":
             return None
         edit = QLineEdit(str(last or ""))

@@ -37,6 +37,20 @@ steelmc-devices set 2202 equalizer 2,1,0,0,0,0,0,1,2,3
 steelmc-devices show 2202
 ```
 
+## Settings for many more keyboards
+
+`families/keyboards.json` covers 37 more Apex keyboards. On the Hall-effect boards (the Apex Pro Mini, Apex Pro TKL 2022 and 2024, and their wireless versions) that's the actuation point, rapid trigger and its sensitivity, and rapid tap, per key or for every key at once. Others get what their firmware takes: key colours, lighting zones, brightness, the idle dimmer and timeout, which saved config is active, which key opens the SteelSeries layer, the lock key lights, and the polling rate. The wireless boards report their battery.
+
+```
+steelmc-devices settings 1642                       # an Apex Pro TKL (2024)
+steelmc-devices set 1642 actuation 1.5              # every key at 1.5 mm
+steelmc-devices set 1642 actuation 1.8,w=0.5,a=0.5  # W and A at 0.5 mm, the rest at 1.8 mm
+steelmc-devices set 1642 rapid_trigger on
+steelmc-devices set 1612 color ff8000               # an Apex 7, every key orange
+```
+
+For 22 of these, every command was checked against the keyboard's own firmware, as SteelSeries GG ships it, before it went in: `settings` says which firmware. The rest have firmware that can't be read (or none in GG), so their commands come from GG's device files alone, and `settings` says that too. For a few, which USB interface they use is a guess from their siblings, so the udev rule leaves them out (a wrong guess could open the interface keystrokes travel on) and they need sudo until someone reports `steelmc-devices probe` from a real one.
+
 The Apex Pro boards, the Aerox 9 Wireless and the Arctis 9 have tools of their own, which go further, and keep them.
 
 ## Devices that aren't supported yet

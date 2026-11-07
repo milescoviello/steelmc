@@ -145,10 +145,13 @@ def probe_report(device):
 
 
 def udev_rules():
-    """One rule per covered product, for the one interface its definition talks to."""
+    """One rule per covered product, for the one interface its definition talks to. A product whose interface is only a
+    guess gets none: a wrong guess could open the interface its keystrokes travel on."""
     lines = ["# steelmc-devices: let the logged-in user reach the interface each device's definition uses, and only that one.",
              "# Made from families/ by: steelmc-devices udev-rules. ATTRS must match on one parent each, hence two steps."]
     for pid, (family, product) in sorted(families().items()):
+        if product.get("interface_unconfirmed"):
+            continue
         tag = f"STEELMC_{pid.upper()}"
         lines.append(f'KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="1038", ATTRS{{idProduct}}=="{pid}", ENV{{{tag}}}="1"')
         lines.append(f'ENV{{{tag}}}=="1", ATTRS{{bInterfaceNumber}}=="{product["interface"]:02x}", MODE="0660", GROUP="input", TAG+="uaccess"')
@@ -187,6 +190,16 @@ def describe_setting(name, s):
         values = f"{s['bands']} gains from {s['min']} to {s['max']} dB, comma separated" + (f", or a preset: {presets}" if presets else "")
     elif kind in ("gradient", "gradient2"):
         values = "one colour, or [ms:]COLOR@PERCENT,..., like 2000ms:red@0,blue@50,red@100"
+    elif kind == "per_key":
+        if s.get("value") == "color":
+            one = "a colour"
+        else:
+            names = list(s["values"])
+            one = f"{names[0]} to {names[-1]}" if len(names) > 8 else " or ".join(names)
+            one += f" {s['unit']}" if s.get("unit") else ""
+        values = f"{one} for every key, then KEY=VALUE for keys that differ, like {s.get('default') or 'red'},w=..."
+    elif kind == "zones":
+        values = f"one colour, or {s['zones']} colours comma separated, one per zone"
     else:
         values = "not supported yet"
     return f"  {name:22} {s.get('label', '')}: {values}"
@@ -200,6 +213,13 @@ def gear_command(args):
             print(json.dumps({"product": product, "family": family["name"], "settings": family["settings"]}))
         else:
             print(f"{product['name']} (1038:{pid}). Changing settings is experimental: it hasn't been tried on a real one here.")
+            if product.get("firmware_checked"):
+                print(f"Every command here is in its firmware {product['firmware_checked']}'s command table, read from SteelSeries GG's copy.")
+            else:
+                print("Its firmware couldn't be read, so these commands come from SteelSeries GG's device files alone.")
+            if product.get("interface_unconfirmed"):
+                print(f"Which USB interface it uses is a guess ({product['interface']}), so the udev rule leaves it out and changing "
+                      "settings needs sudo for now. steelmc-devices probe shows the real one: please report it.")
             print("\n".join(describe_setting(n, s) for n, s in family["settings"].items()))
             if family.get("save"):
                 print("  steelmc-devices save keeps them after it loses power.")

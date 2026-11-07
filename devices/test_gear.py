@@ -44,6 +44,11 @@ class Definitions(unittest.TestCase):
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "udev", "70-steelmc-devices.rules")) as f:
             self.assertEqual(f.read(), sd.udev_rules(), "regenerate it: steelmc-devices udev-rules > udev/70-steelmc-devices.rules")
 
+    def test_a_guessed_interface_gets_no_udev_rule(self):
+        rules = sd.udev_rules()
+        self.assertIn('ATTRS{idProduct}=="1642"', rules)
+        self.assertNotIn('ATTRS{idProduct}=="1648"', rules)  # Apex Pro Mini 2024: its interface is a guess
+
     def test_every_product_is_in_the_catalog(self):
         catalog = sd.load_catalog()
         missing = [pid for pid in FAMILIES if pid not in catalog]
@@ -102,6 +107,69 @@ class Encoding(unittest.TestCase):
             gear.frame(s2, "10ms:red@0,blue@50,green@100")
 
 
+class Keyboards(unittest.TestCase):
+    def test_actuation_is_per_key_with_overrides(self):
+        s = family("1642")["settings"]["actuation"]
+        data = gear.frame(s, "1.8")
+        keys = s["keys"]
+        self.assertEqual(data[:4], [0x38, 0x61, len(keys), 0x00])
+        self.assertEqual(data[4:7], [keys[0], *s["values"]["1.8"]])
+        self.assertEqual(len(data), s["packet_length"])
+        w = gear.KEYS["w"]
+        mixed = gear.frame(s, "1.8,w=0.5")
+        at = 4 + 3 * keys.index(w)
+        self.assertEqual(mixed[at:at + 3], [w, *s["values"]["0.5"]])
+        self.assertEqual(gear.frame(s, "1.80"), data)  # 1.8 and 1.80 are the same depth
+        for bad in ("9.9", "1.8,1.5", "1.8,f1=0.5", "1.8,nokey=0.5"):
+            with self.assertRaises(gear.Refused):
+                gear.frame(s, bad)
+
+    def test_rapid_trigger_differs_by_line(self):
+        wired = family("1642")["settings"]["rapid_trigger"]
+        self.assertEqual(gear.frame(wired, "on")[3:5], [wired["keys"][0], 2])
+        wireless = family("1646")["settings"]["rapid_trigger"]
+        self.assertEqual(gear.frame(wireless, "on")[:3], [0x36, len(wireless["keys"]), wireless["keys"][0]])
+        dongle = family("1644")["settings"]["rapid_trigger"]
+        self.assertEqual(gear.frame(dongle, "on")[0], 0x36 | 0x40)
+
+    def test_zone_and_key_colours(self):
+        s = family("161a")["settings"]["color"]
+        self.assertEqual(gear.frame(s, "red")[:8], [0x0B, 0x00, 0xFF, 0, 0, 0xFF, 0, 0])
+        with self.assertRaises(gear.Refused):
+            gear.frame(s, "red,blue,green")
+        zones5 = family("1206")["settings"]["color"]
+        self.assertEqual(gear.frame(zones5, "00ff00")[2:6], [0, 0xFF, 0, 0x08])  # each zone carries its brightness
+        legacy = family("1612")["settings"]["color"]
+        data = gear.frame(legacy, "ff8000")
+        self.assertEqual(data[:6], [0x3A, len(legacy["keys"]), legacy["keys"][0], 0xFF, 0x80, 0x00])
+
+    def test_one_value_to_several_commands(self):
+        s = family("1206")["settings"]["brightness"]
+        self.assertEqual([f[:3] for f in gear.frames(s, "5")], [[0x05, z, 5] for z in range(1, 6)])
+
+    def test_every_product_says_whether_its_firmware_was_read(self):
+        kb = gear.load_families(os.path.join(gear.FAMILIES))
+        self.assertEqual(kb["1642"][1]["firmware_checked"], "1.19.7")
+        self.assertNotIn("firmware_checked", kb["1206"][1])
+        self.assertEqual(kb["1642"][1]["usage_page"], 0xFFC0)
+
+    def test_top_usage(self):
+        self.assertEqual(gear.top_usage(bytes.fromhex("06c0ff0901a101")), (0xFFC0, 1))
+        self.assertEqual(gear.top_usage(bytes.fromhex("05010906a101")), (1, 6))
+        self.assertIsNone(gear.top_usage(bytes.fromhex("a101")))
+
+    def test_the_node_is_found_by_usage_page(self):
+        with tempfile.TemporaryDirectory() as root:
+            for name, descriptor in (("hidraw3", "05010906a101"), ("hidraw4", "06c0ff0901a101")):
+                os.makedirs(os.path.join(root, name, "device"))
+                with open(os.path.join(root, name, "device", "uevent"), "w") as f:
+                    f.write("HID_ID=0003:00001038:00001642\n")
+                with open(os.path.join(root, name, "device", "report_descriptor"), "wb") as f:
+                    f.write(bytes.fromhex(descriptor))
+            self.assertEqual(gear.find_node("1642", 1, 0xFFC0, 1, hidraw=root), "/dev/hidraw4")
+            self.assertIsNone(gear.find_node("1642", 1, 0xFF00, 1, hidraw=root))
+
+
 class Talking(unittest.TestCase):
     def setUp(self):
         self.ours, self.device = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -147,10 +215,32 @@ class Talking(unittest.TestCase):
         self.assertEqual(g.battery(), {"percent": 70, "charging": True})
 
     def test_save_is_padded_where_needed(self):
-        fam = next(f for f, _ in FAMILIES.values() if f.get("save", {}).get("packet_length"))
+        fam = next(f for f, _ in FAMILIES.values() if f.get("save", {}).get("packet_length") and not f["save"].get("slot"))
         pid = next(p for p, (f, _) in FAMILIES.items() if f is fam)
         self.open(pid).save()
         self.assertEqual(len(self.sent[-1]), 1 + fam["save"]["packet_length"])
+
+    def test_save_goes_to_the_active_config(self):
+        g = self.open("1612")  # Apex 7: E2 says which config is active, 09 saves over it
+        real = self.write
+
+        def write(fd, data):
+            if data[1] == 0xE2:
+                self.device.send(bytes([3]).ljust(64, b"\0"))
+            return real(fd, data)
+        g.write = write
+        g.save()
+        self.assertEqual(self.sent[-1][:3], bytes([0, 0x09, 3]))
+        self.assertEqual(len(self.sent[-1]), 65)
+
+    def test_a_setting_with_several_commands_sends_each(self):
+        g = self.open("1206")
+        g.set("brightness", "8")
+        self.assertEqual([bytes(x[:3]) for x in self.sent], [bytes([0, 0x05, z]) for z in range(1, 6)])
+
+    def test_wireless_keyboard_battery(self):
+        g = self.open("1646")
+        self.assertEqual(g.battery(), {"percent": 70, "charging": True})
 
     def test_nothing_unlisted_is_sent(self):
         g = self.open("1824")
