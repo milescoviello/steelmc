@@ -144,15 +144,22 @@ def probe_report(device):
     return "\n".join(lines)
 
 
+NO_TYPING = ("speakers", "microphone", "mousepad", "accessory")  # kinds with no interface that can carry keystrokes
+
+
 def udev_rules():
     """One rule per covered product, for the one interface its definition talks to. A product whose interface is only a
-    guess gets none: a wrong guess could open the interface its keystrokes travel on."""
+    guess gets none, since a wrong guess could open the interface its keystrokes travel on, unless it's a kind of device
+    that can't type at all: then every one of its HID interfaces is opened, and the program picks the right one itself."""
     lines = ["# steelmc-devices: let the logged-in user reach the interface each device's definition uses, and only that one.",
              "# Made from families/ by: steelmc-devices udev-rules. ATTRS must match on one parent each, hence two steps."]
     for pid, (family, product) in sorted(families().items()):
-        if product.get("interface_unconfirmed"):
-            continue
         tag = f"STEELMC_{pid.upper()}"
+        if product.get("interface_unconfirmed"):
+            if family.get("kind") in NO_TYPING:
+                lines.append(f'KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="1038", ATTRS{{idProduct}}=="{pid}", '
+                             'MODE="0660", GROUP="input", TAG+="uaccess"')
+            continue
         lines.append(f'KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="1038", ATTRS{{idProduct}}=="{pid}", ENV{{{tag}}}="1"')
         lines.append(f'ENV{{{tag}}}=="1", ATTRS{{bInterfaceNumber}}=="{product["interface"]:02x}", MODE="0660", GROUP="input", TAG+="uaccess"')
     return "\n".join(lines) + "\n"
@@ -218,8 +225,12 @@ def gear_command(args):
             else:
                 print("These commands haven't been matched against its own firmware: it couldn't be read, or not every command turned up.")
             if product.get("interface_unconfirmed"):
-                print(f"Which USB interface it uses is a guess ({product['interface']}), so the udev rule leaves it out and changing "
-                      "settings needs sudo for now. steelmc-devices probe shows the real one: please report it.")
+                if family.get("kind") in NO_TYPING:
+                    print("Which USB interface it uses is a guess, so it's found by its HID usage instead. steelmc-devices probe "
+                          "shows the real one: please report it.")
+                else:
+                    print(f"Which USB interface it uses is a guess ({product['interface']}), so the udev rule leaves it out and "
+                          "changing settings needs sudo for now. steelmc-devices probe shows the real one: please report it.")
             print("\n".join(describe_setting(n, s) for n, s in family["settings"].items()))
             if family.get("save"):
                 print("  steelmc-devices save keeps them after it loses power.")

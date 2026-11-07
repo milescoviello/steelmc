@@ -49,6 +49,9 @@ class Definitions(unittest.TestCase):
         rules = sd.udev_rules()
         self.assertIn('ATTRS{idProduct}=="1642"', rules)
         self.assertNotIn('ATTRS{idProduct}=="1648"', rules)  # Apex Pro Mini 2024: its interface is a guess
+        speaker = [line for line in rules.splitlines() if '"1a05"' in line]  # Arena 9: a guess too, but it can't type
+        self.assertEqual(len(speaker), 1)
+        self.assertNotIn("bInterfaceNumber", speaker[0])
 
     def test_every_product_is_in_the_catalog(self):
         catalog = sd.load_catalog()
