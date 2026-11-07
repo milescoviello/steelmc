@@ -483,7 +483,7 @@ class Finding(unittest.TestCase):
             self.fake_sysfs(root, "hidraw1", "00001038:00001640", aerox.DESCRIPTOR)  # keyboard
             self.fake_sysfs(root, "hidraw2", "00001038:00001858", b"\x05\x01\x09\x02")  # mouse motion
             sysfs = self.fake_sysfs(root, "hidraw8", "00001038:00001858", aerox.DESCRIPTOR)
-            self.assertEqual(aerox.find_device(sysfs), ("/dev/hidraw8", "dongle", "0124"))
+            self.assertEqual(aerox.find_device(sysfs), ("/dev/hidraw8", "dongle", "0124", "00001858"))
 
     def test_plugged_in_directly(self):
         with tempfile.TemporaryDirectory() as root:
@@ -498,6 +498,56 @@ class Finding(unittest.TestCase):
     def test_other_firmware_is_refused(self):
         with self.assertRaisesRegex(aerox.AeroxError, "isn't 1.2.4"):
             aerox.Aerox("/dev/fake", "dongle", "0125", fd=-1)
+
+    def test_wow_edition_is_found_as_itself(self):
+        with tempfile.TemporaryDirectory() as root:
+            sysfs = self.fake_sysfs(root, "hidraw4", "00001038:00001874", aerox.DESCRIPTOR, bcd="0152")
+            node, kind, bcd, product = aerox.find_device(sysfs)
+            self.assertEqual((kind, bcd, product), ("dongle", "0152", "00001874"))
+            mouse = aerox.Aerox(node, kind, bcd, fd=-1, product=product)
+            self.assertEqual((mouse.name, mouse.firmware), ("Aerox 9 Wireless WOW Edition", "1.5.2"))
+        with self.assertRaisesRegex(aerox.AeroxError, "isn't 1.5.2"):
+            aerox.Aerox("/dev/fake", "dongle", "0124", fd=-1, product="00001874")
+
+
+class WowEdition(unittest.TestCase):
+    """Only the commands whose handlers came out the same in its firmware are ever sent to it."""
+
+    def setUp(self):
+        self.mouse = aerox.Aerox("/dev/fake", "dongle", "0152", fd=-1, product="00001874")
+        self.sent = []
+        patcher = mock.patch("aerox.os.write", lambda fd, data: self.sent.append(data) or len(data))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_unchecked_commands_never_leave(self):
+        for cmd in set(aerox.READS) | set(aerox.WRITES):
+            if cmd in aerox.WOW_CHECKED:
+                continue
+            with self.assertRaisesRegex(aerox.NotChecked, "WOW Edition"):
+                self.mouse.request(cmd)
+        self.assertEqual(self.sent, [])
+
+    def test_only_reads_were_checked(self):
+        self.assertTrue(aerox.WOW_CHECKED <= set(aerox.READS))
+
+    def test_status_says_what_it_cant_read(self):
+        values = {"string": lambda cmd, which=0: "1.5.2" if cmd == 0xD0 else "1.5.2", "link_up": lambda: True,
+                  "dpi": lambda: {"count": 1, "current": 0, "levels": [9], "dpi": [800]},
+                  "lighting": lambda: {"brightness": 15, "idle_brightness": 1, "smart": True, "idle_timeout_ms": 30000},
+                  "reactive": lambda: {"enabled": False, "random": False, "color": "ffffff"},
+                  "low_power": lambda: False}
+        for name, fn in values.items():
+            setattr(self.mouse, name, fn)
+        status = aerox.collect_status(self.mouse)
+        self.assertEqual(status["model"], "Aerox 9 Wireless WOW Edition")
+        self.assertIsNone(status["battery"])
+        self.assertIsNone(status["polling"])
+        self.assertEqual(status["dpi"]["dpi"], [800])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            aerox.print_status(status)
+        self.assertIn("battery   not checked on this model yet", out.getvalue())
 
 
 class Locking(unittest.TestCase):

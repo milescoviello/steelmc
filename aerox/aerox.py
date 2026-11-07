@@ -39,6 +39,16 @@ VENDOR = "00001038"
 DONGLE, WIRED = "00001858", "0000185A"
 FIRMWARE_BCD = "0124"  # bcdDevice of firmware 1.2.4
 FIRMWARE = "1.2.4"
+# The WOW Edition runs newer firmware. Only these commands' handlers came out the same as 1.2.4's, so only these are sent to it.
+# Everything that changes the mouse stays off until someone tries it on a real one.
+WOW_CHECKED = frozenset({0x90, 0xBC, 0xD0, 0xE3, 0xE6, 0xE8, 0xED})
+# Product ID -> (name, connection, bcdDevice, firmware version, the commands checked on it, or None for all of them)
+MODELS = {
+    DONGLE: ("Aerox 9 Wireless", "dongle", FIRMWARE_BCD, FIRMWARE, None),
+    WIRED: ("Aerox 9 Wireless", "wired", FIRMWARE_BCD, FIRMWARE, None),
+    "00001874": ("Aerox 9 Wireless WOW Edition", "dongle", "0152", "1.5.2", WOW_CHECKED),
+    "00001876": ("Aerox 9 Wireless WOW Edition", "wired", "0152", "1.5.2", WOW_CHECKED),
+}
 SYSFS = "/sys/class/hidraw"
 
 # The vendor interface's report descriptor, from the firmware and checked on real hardware.
@@ -162,6 +172,10 @@ class Refused(AeroxError):
     """A command that isn't on the allowlist. Never reaches the device."""
 
 
+class NotChecked(Refused):
+    """A command this model's firmware hasn't been checked for. Never reaches the device."""
+
+
 class MouseUnreachable(AeroxError):
     """The dongle is here but can't reach the mouse."""
 
@@ -198,7 +212,7 @@ def reply_matches(cmd, reply):
 
 
 def find_device(sysfs=SYSFS):
-    """Return (node, kind, bcd) for the vendor interface of a connected Aerox 9."""
+    """Return (node, kind, bcd, product) for the vendor interface of a connected Aerox 9."""
     for hidraw in sorted(glob.glob(f"{sysfs}/hidraw*")):
         try:
             with open(f"{hidraw}/device/uevent") as f:
@@ -209,18 +223,16 @@ def find_device(sysfs=SYSFS):
             continue
         if f":{VENDOR}:" not in uevent or descriptor != DESCRIPTOR:
             continue
-        if f":{DONGLE}" in uevent:
-            kind = "dongle"
-        elif f":{WIRED}" in uevent:
-            kind = "wired"
-        else:
+        product = next((p for p in MODELS if f":{p}" in uevent), None)
+        if product is None:
             continue
+        kind = MODELS[product][1]
         path = os.path.realpath(f"{hidraw}/device")
         while path != "/" and not os.path.exists(f"{path}/bcdDevice"):
             path = os.path.dirname(path)
         with open(f"{path}/bcdDevice") as f:
             bcd = f.read().strip()
-        return "/dev/" + os.path.basename(hidraw), kind, bcd
+        return "/dev/" + os.path.basename(hidraw), kind, bcd, product
     raise AeroxError("No Aerox 9 Wireless found. Is the dongle plugged in?")
 
 
@@ -368,12 +380,13 @@ class Aerox:
     """One open connection. Sends one command at a time and waits for its reply, because
     the dongle silently drops anything sent while a forwarded command is pending."""
 
-    def __init__(self, node, kind, bcd, fd=None):
+    def __init__(self, node, kind, bcd, fd=None, product=None):
         self.node, self.kind, self.bcd = node, kind, bcd
-        if bcd != FIRMWARE_BCD:
+        self.name, _, model_bcd, self.firmware, self.checked = MODELS[product or (DONGLE if kind == "dongle" else WIRED)]
+        if bcd != model_bcd:
             raise AeroxError(
-                f"Firmware {bcd} isn't 1.2.4 (bcd {FIRMWARE_BCD}), the only version this tool's "
-                "commands were read from. Stopping rather than guess."
+                f"Firmware {bcd} isn't {self.firmware} (bcd {model_bcd}), the only version this tool's "
+                f"commands were read from on the {self.name}. Stopping rather than guess."
             )
         if fd is not None:
             self.fd = fd
@@ -396,7 +409,14 @@ class Aerox:
 
     @classmethod
     def open(cls):
-        return cls(*find_device())
+        node, kind, bcd, product = find_device()
+        return cls(node, kind, bcd, product=product)
+
+    def check_model(self, cmd):
+        """Some models only have some commands checked against their firmware. The rest are never sent to them."""
+        if self.checked is not None and cmd not in self.checked:
+            raise NotChecked(f"Not on the {self.name} yet: command {cmd:#04x} hasn't been checked against its firmware, "
+                             "so it isn't sent. Reading works for firmware, DPI and lighting.")
 
     def close(self):
         os.close(self.fd)
@@ -408,6 +428,7 @@ class Aerox:
         self.close()
 
     def request(self, cmd, *args, timeout=REPLY_TIMEOUT):
+        self.check_model(cmd)
         frame = build_frame(cmd, args)  # refuses before anything touches the device
         while select.select([self.fd], [], [], 0)[0]:
             os.read(self.fd, 64)  # whatever is queued isn't an answer to this
@@ -460,8 +481,8 @@ class Aerox:
 
     def check_mouse_firmware(self):
         version = self.string(0xD0)
-        if version != FIRMWARE:
-            raise AeroxError(f"Mouse firmware {version} isn't {FIRMWARE}, the only version this tool's commands were read from.")
+        if version != self.firmware:
+            raise AeroxError(f"Mouse firmware {version} isn't {self.firmware}, the only version this tool's commands were read from.")
         return version
 
     def ready(self):
@@ -685,39 +706,34 @@ def format_low_power(on):
 
 
 def collect_status(mouse):
-    status = {"node": mouse.node, "connection": mouse.kind}
+    status = {"node": mouse.node, "connection": mouse.kind, "model": mouse.name}
     if mouse.kind == "dongle":
         status["dongle_firmware"] = mouse.string(0x90)
     if not mouse.link_up():
         status["link"] = False
         return status
-    status.update(
-        link=True,
-        mouse_firmware=mouse.check_mouse_firmware(),
-        battery=mouse.battery(),
-        polling=mouse.polling(),
-        dpi=mouse.dpi(),
-        sleep_ms=mouse.sleep_ms(),
-        low_power=mouse.low_power(),
-        lighting=mouse.lighting(),
-        reactive=mouse.reactive(),
-    )
+    status.update(link=True, mouse_firmware=mouse.check_mouse_firmware())
+    for key, read in (("battery", mouse.battery), ("polling", mouse.polling), ("dpi", mouse.dpi), ("sleep_ms", mouse.sleep_ms),
+                      ("low_power", mouse.low_power), ("lighting", mouse.lighting), ("reactive", mouse.reactive)):
+        try:
+            status[key] = read()
+        except NotChecked:
+            status[key] = None  # this model's firmware hasn't been checked for it
     return status
 
 
 def print_status(s):
-    print(f"Aerox 9 Wireless, {'through the dongle' if s['connection'] == 'dongle' else 'plugged in'} ({s['node']})")
+    print(f"{s.get('model', 'Aerox 9 Wireless')}, {'through the dongle' if s['connection'] == 'dongle' else 'plugged in'} ({s['node']})")
     if "dongle_firmware" in s:
         print(f"  dongle    {s['dongle_firmware']}")
     if not s["link"]:
         print("  mouse     not connected: it's off, asleep or out of range. Move it and retry.")
         return
     print(f"  mouse     {s['mouse_firmware']}")
-    print(f"  battery   {format_battery(s['battery'])}")
-    print(f"  polling   {format_polling(s['polling'])}")
-    print(f"  dpi       {format_dpi(s['dpi'])}")
-    print(f"  sleep     {format_timer(s['sleep_ms'])}")
-    print(f"  low power {format_low_power(s['low_power'])}")
+    unchecked = "not checked on this model yet"
+    for label, key, fmt in (("battery", "battery", format_battery), ("polling", "polling", format_polling), ("dpi", "dpi", format_dpi),
+                            ("sleep", "sleep_ms", format_timer), ("low power", "low_power", format_low_power)):
+        print(f"  {label:9} {unchecked if s.get(key) is None else fmt(s[key])}")
     print(f"  lighting  {format_lighting(s['lighting'])}")
     print(f"  reactive  {format_reactive(s['reactive'])}")
 

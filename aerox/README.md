@@ -43,6 +43,7 @@ The protocol comes from reading the firmware's command handlers, because the com
 
 - It can only send the exact commands in `ALLOWED`, and every argument is checked first. Anything else is refused before reaching the device.
 - It stops on any firmware but 1.2.4, on both the dongle and the mouse.
+- **Aerox 9 Wireless WOW Edition:** read-only for now. Its firmware is 1.5.2, and of the commands this tool uses, only the handlers for the firmware version, the radio link, DPI and lighting came out the same as 1.2.4's, so only those are sent to it. Battery, polling, sleep, buttons and every change stay off until someone checks them on a real one.
 - Every setting is read back after it's written.
 - Only `aerox save` writes to flash. It asks first, and won't run on a nearly flat battery.
 

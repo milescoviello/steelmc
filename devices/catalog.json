@@ -2182,7 +2182,14 @@
    "kind": "mouse",
    "line": "aerox",
    "name": "Aerox 9 Wireless WOW Edition",
-   "part": "dongle"
+   "part": "dongle",
+   "support": {
+    "level": "read-only",
+    "note": "firmware 1.5.2: firmware, DPI and lighting can be read",
+    "tools": [
+     "aerox"
+    ]
+   }
   },
   "1875": {
    "kind": "mouse",
@@ -2194,7 +2201,14 @@
    "kind": "mouse",
    "line": "aerox",
    "name": "Aerox 9 Wireless WOW Edition",
-   "part": "device"
+   "part": "device",
+   "support": {
+    "level": "read-only",
+    "note": "firmware 1.5.2: firmware, DPI and lighting can be read",
+    "tools": [
+     "aerox"
+    ]
+   }
   },
   "1877": {
    "kind": "mouse",
