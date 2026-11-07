@@ -1,4 +1,4 @@
 # apex-analog: let the logged-in user read the keyboard's sensors, hold back mapped keys, and create virtual input devices.
-KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="1640", MODE="0660", GROUP="input", TAG+="uaccess"
-KERNEL=="event*", SUBSYSTEM=="input", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="1640", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="1640|1610|1614", MODE="0660", GROUP="input", TAG+="uaccess"
+KERNEL=="event*", SUBSYSTEM=="input", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="1640|1610|1614", TAG+="uaccess"
 KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", TAG+="uaccess"

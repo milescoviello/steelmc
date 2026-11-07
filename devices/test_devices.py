@@ -52,7 +52,7 @@ class Catalog(unittest.TestCase):
         full = {pid for pid, e in catalog.items() if e.get("support", {}).get("level") == "full"}
         self.assertEqual(full, {"1640", "1858", "185a", "12c2"})
         read_only = {pid for pid, e in catalog.items() if e.get("support", {}).get("level") == "read-only"}
-        self.assertEqual(read_only, {"1874", "1876"})
+        self.assertEqual(read_only, {"1874", "1876", "1610", "1614"})
         self.assertEqual(catalog["1641"]["part"], "bootloader")
 
 

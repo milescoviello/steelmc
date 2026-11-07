@@ -63,6 +63,10 @@ __version__ = "0.1.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"
+# Product ID -> (name, whether this tool may change its settings). The Apex Pro and Apex Pro TKL run the same 4.16.8 firmware code as
+# the Gen 3 for every command here, with the same keys on the same sensors, but nobody has tried them yet, so they're read-only.
+MODELS = {"1640": ("Apex Pro Gen 3", True), "1610": ("Apex Pro", False), "1614": ("Apex Pro TKL", False)}
+BOOTLOADERS = {"1641", "1611", "1615"}
 FIRMWARE = "0416"  # bcdDevice of firmware 4.16.8, the only version these commands were read from
 
 # Every command this program can send. Each handler was read in firmware 4.16.8 and only copies memory into the reply:
@@ -475,10 +479,11 @@ def _usb_product_present(product):
 
 
 def _find_control_node():
-    """The keyboard's vendor interface, and the firmware of the USB device it belongs to."""
+    """The keyboard's vendor interface, the firmware of the USB device it belongs to, and which model it is."""
     for hidraw in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
-        uevent = _read(f"{hidraw}/device/uevent") or ""
-        if f"0000{VENDOR}:0000{PRODUCT}".upper() not in uevent.upper():
+        uevent = (_read(f"{hidraw}/device/uevent") or "").upper()
+        product = next((p for p in MODELS if f"0000{VENDOR}:0000{p}".upper() in uevent), None)
+        if product is None:
             continue
         try:
             with open(f"{hidraw}/device/report_descriptor", "rb") as f:
@@ -489,8 +494,8 @@ def _find_control_node():
         path = os.path.realpath(f"{hidraw}/device")
         while path != "/" and not os.path.exists(f"{path}/bcdDevice"):
             path = os.path.dirname(path)
-        return "/dev/" + os.path.basename(hidraw), _read(f"{path}/bcdDevice")
-    return None, None
+        return "/dev/" + os.path.basename(hidraw), _read(f"{path}/bcdDevice"), product
+    return None, None, None
 
 
 class Keyboard:
@@ -524,13 +529,15 @@ class Keyboard:
                     client.close()
                     raise
                 self.client, self.node, self.firmware = client, info["node"], info["firmware"]
+                self._set_model(info.get("product", PRODUCT))
                 self._load_calibration()
                 return
-        node, firmware = _find_control_node()
+        node, firmware, product = _find_control_node()
         if not node:
-            if _usb_product_present(BOOTLOADER_PRODUCT):
+            if any(_usb_product_present(p) for p in BOOTLOADERS):
                 raise NotFound("The keyboard is in its emergency bootloader (flashing red). Repair it with SteelSeries GG on Windows or macOS.")
-            raise NotFound(f"No Apex Pro Gen 3 ({VENDOR}:{PRODUCT}) found. Is it plugged in?")
+            raise NotFound(f"No Apex Pro found ({VENDOR}:{PRODUCT} or another model this works with). Is it plugged in?")
+        self._set_model(product)
         if firmware != FIRMWARE:
             raise ApexError(f"Refusing to run: this keyboard's firmware is {firmware}, and the commands here were only checked on "
                             f"{FIRMWARE} (4.16.8). On other firmware they could do something else.")
@@ -547,6 +554,10 @@ class Keyboard:
             self.fd = None
             raise AccessDenied("Another program is using the keyboard directly. Replies carry no ID, so only one can.") from None
         self._load_calibration()
+
+    def _set_model(self, product):
+        self.product = product
+        self.model, self.writable = MODELS.get(product, (f"keyboard {product}", False))
 
     def _load_calibration(self):
         self._calibration = {}
@@ -823,6 +834,9 @@ class Keyboard:
         if not payload or (payload[0] not in LIGHT_COMMANDS and payload[0] not in SETTING_COMMANDS and payload[0] != SAVE_COMMAND
                            and payload[0] not in BIND_COMMANDS):
             raise ValueError(f"refused to send {payload[:1]!r}: not a known write command")
+        if not getattr(self, "writable", True):
+            raise ApexError(f"Changing settings isn't on the {self.model} yet. Its firmware runs the same code as the Apex Pro Gen 3's for "
+                            f"this, but nobody has tried it on a real one. Reading key depth and everything built on it works.")
         check = BIND_CHECKS.get(payload[0]) or SETTING_CHECKS.get(payload[0])
         if check:
             check(payload)
@@ -1162,7 +1176,7 @@ def _physical_key_nodes():
     """The keyboard's own input devices that type letters."""
     nodes = []
     for event in sorted(glob.glob("/sys/class/input/event*")):
-        if _read(f"{event}/device/id/vendor") == VENDOR and _read(f"{event}/device/id/product") == PRODUCT:
+        if _read(f"{event}/device/id/vendor") == VENDOR and _read(f"{event}/device/id/product") in MODELS:
             nodes.append("/dev/input/" + os.path.basename(event))
     return nodes
 
@@ -3128,7 +3142,7 @@ class Daemon:
         if op == OP_OPEN:
             with self.lock:
                 kb = self.keyboard()
-                return json.dumps({"node": kb.node, "firmware": kb.firmware}).encode()
+                return json.dumps({"node": kb.node, "firmware": kb.firmware, "product": getattr(kb, "product", PRODUCT)}).encode()
         if op == OP_JOB:
             request = json.loads(data)
             return json.dumps(self.start_job(request["slot"], request["label"], request["argv"], request.get("cwd"))).encode()
@@ -4296,7 +4310,7 @@ def cmd_info(args):
             settings[name]["deep"] = min(LEVEL_TENTHS, key=lambda t: abs(t / 10 - value["release"])) / 10 if value else None
         depths = kb.read()
         report = {
-            "keyboard": f"{VENDOR}:{PRODUCT}", "firmware": kb.firmware, "node": kb.node,
+            "keyboard": f"{VENDOR}:{kb.product}", "model": kb.model, "can_change_settings": kb.writable, "firmware": kb.firmware, "node": kb.node,
             "virtual_devices": os.access("/dev/uinput", os.W_OK),
             "can_stop_keys_typing": all(os.access(n, os.R_OK) for n in _physical_key_nodes()),
             "oled_actuation_icon": kb.actuation_icon(),
@@ -4305,7 +4319,9 @@ def cmd_info(args):
     if args.json:
         print(json.dumps(report))
         return
-    print(f"Apex Pro Gen 3 ({report['keyboard']}), firmware {report['firmware']}, {report['node']}, {len(report['keys'])} keys with sensors")
+    print(f"{report['model']} ({report['keyboard']}), firmware {report['firmware']}, {report['node']}, {len(report['keys'])} keys with sensors")
+    if not report["can_change_settings"]:
+        print("Read-only on this model for now: key depth and everything built on it works, changing its settings doesn't yet.")
     print(f"Virtual controller, mouse, keystrokes: {'ok' if report['virtual_devices'] else 'no access, run ./install.sh'}")
     print(f"Stopping mapped keys from typing:      {'ok' if report['can_stop_keys_typing'] else 'no access, run ./install.sh'}")
     print(f"OLED ACTUATION ICON setting:           {'on' if report['oled_actuation_icon'] else 'off'}")

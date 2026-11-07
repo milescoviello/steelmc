@@ -393,12 +393,24 @@ class Firmware(unittest.TestCase):
         self.addCleanup(setattr, a, "_find_control_node", original)
 
     def test_refuses_any_other_firmware(self):
-        a._find_control_node = lambda: ("/dev/null", "0417")
+        a._find_control_node = lambda: ("/dev/null", "0417", "1640")
         with self.assertRaisesRegex(a.ApexError, "Refusing"):
             a.Keyboard(direct=True)
 
+    def test_apex_pro_and_tkl_are_read_only(self):
+        for product, name in (("1610", "Apex Pro"), ("1614", "Apex Pro TKL")):
+            kb = a.Keyboard.__new__(a.Keyboard)
+            kb.fd, kb.client = None, None
+            kb._set_model(product)
+            self.assertEqual(kb.model, name)
+            for payload in ([0x31, 1, 0x1A, 23, 21], [0x3B], [a.SAVE_COMMAND, 1], [0x63, 0, 1, 0x39, 0x51, 0x29, 0, 0, 0]):
+                with self.assertRaisesRegex(a.ApexError, "isn't on the " + name):
+                    kb._write(payload)
+        kb._set_model("1640")
+        self.assertTrue(kb.writable)
+
     def test_missing_keyboard_is_explained(self):
-        a._find_control_node = lambda: (None, None)
+        a._find_control_node = lambda: (None, None, None)
         with self.assertRaisesRegex(a.NotFound, "plugged in|bootloader"):
             a.Keyboard(direct=True)
 

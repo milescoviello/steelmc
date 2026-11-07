@@ -1221,7 +1221,14 @@
    "kind": "keyboard",
    "line": "apex",
    "name": "Apex Pro",
-   "part": "device"
+   "part": "device",
+   "support": {
+    "level": "read-only",
+    "note": "firmware 4.16.8: key depth and everything built on it; changing settings isn't on yet",
+    "tools": [
+     "apex-analog"
+    ]
+   }
   },
   "1611": {
    "kind": "keyboard",
@@ -1245,7 +1252,14 @@
    "kind": "keyboard",
    "line": "apex",
    "name": "Apex Pro TKL",
-   "part": "device"
+   "part": "device",
+   "support": {
+    "level": "read-only",
+    "note": "firmware 4.16.8: key depth and everything built on it; changing settings isn't on yet",
+    "tools": [
+     "apex-analog"
+    ]
+   }
   },
   "1615": {
    "kind": "keyboard",

@@ -13,6 +13,10 @@ apex-analog
 
 Press a key slowly and watch its bar. Ctrl-C quits. There is nothing to configure and nothing else to install: it's one Python file with no dependencies.
 
+## Other keyboards
+
+The original Apex Pro (`1038:1610`) and Apex Pro TKL (`1038:1614`) run firmware 4.16.8 too. Compared command by command, their firmware runs the same code as the Apex Pro Gen 3's for everything this tool sends, with the same keys on the same sensors. So key depth and everything built on it works on them: bars, controllers, `map`, MIDI, typing, shortcuts and streaming. Changing their settings (actuation, rapid tap, bindings, lighting, `save`) stays off until someone tries it on a real one. If you have one, `apex-analog info` says what it found.
+
 ## Requirements
 
 Linux, Python 3.8 or newer, and nothing else to install: the only dependency is the standard library. It needs an Apex Pro Gen 3 (`1038:1640`) on firmware 4.16.8, and refuses to run on any other firmware. `./install.sh` sets up access with a udev rule, so you don't need root to use it.

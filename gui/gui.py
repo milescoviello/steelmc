@@ -1763,7 +1763,7 @@ class KeyboardPage(QWidget):
         self.content.setEnabled(True)
         self.save_button.setEnabled(True)
         info = data["info"]
-        self.connection.setText("Apex Pro Gen 3")
+        self.connection.setText(info.get("model", "Apex Pro Gen 3"))
         self.firmware.setText(f"firmware {info['firmware']}, {len(info['keys'])} keys with sensors")
         self.settings = info["keys"]
         self.shortcuts = data.get("shortcuts", {})

@@ -19,13 +19,13 @@ ok=1
 found=0
 [ -w /dev/uinput ] || ok=0
 for h in /sys/class/hidraw/hidraw*; do
-    if grep -qi '00001038:00001640' "$h/device/uevent" 2>/dev/null; then
+    if grep -qiE '00001038:0000(1640|1610|1614)' "$h/device/uevent" 2>/dev/null; then
         found=1
         { [ -r "/dev/${h##*/}" ] && [ -w "/dev/${h##*/}" ]; } || ok=0
     fi
 done
 for e in /sys/class/input/event*; do
-    if [ "$(cat "$e/device/id/vendor" 2>/dev/null)" = 1038 ] && [ "$(cat "$e/device/id/product" 2>/dev/null)" = 1640 ]; then
+    if [ "$(cat "$e/device/id/vendor" 2>/dev/null)" = 1038 ] && case "$(cat "$e/device/id/product" 2>/dev/null)" in 1640|1610|1614) true;; *) false;; esac; then
         [ -r "/dev/input/${e##*/}" ] || ok=0
     fi
 done
