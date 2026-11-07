@@ -2,9 +2,7 @@
 
 Configure SteelSeries gear on Linux with no vendor software. Not affiliated with SteelSeries.
 
-![The mouse page](docs/real-mouse.png)
-
-![Keys filling live as they're pressed](docs/keyboard-live.png)
+![The keyboard page: a key bound on the SteelSeries layer, with the keyboard's screen mirrored, with sample data](docs/bindings.png)
 
 | Folder | What it is | Device |
 |---|---|---|
@@ -39,6 +37,8 @@ Run `steelmc`, or find SteelMC in your application menu.
 
 **Mouse:** rebind any button, set DPI stages, polling rate and sleep time, and change lighting. Changes apply as you make them and last until the mouse powers off. **Save to mouse** keeps them, and **Undo changes** goes back to how things were when the page loaded.
 
+![The mouse page](docs/real-mouse.png)
+
 **Headset:** shows whether the headset is connected, its battery, ChatMix and mic. Set sidetone, mic gain, surround, when it turns itself off, and the EQ, as a preset or ten bands. Save to transmitter keeps them.
 
 ![The headset page, with sample data](docs/headset.png)
@@ -56,11 +56,11 @@ Run `steelmc`, or find SteelMC in your application menu.
 - Shortcuts fire when you hold the SteelSeries key and press another key. The keys the keyboard keeps for itself light up red while you hold it, and can't be used.
 - **Controller…** opens a window that turns keys into a game controller: any stick direction, trigger or button, an axis of their own (up to 64), or two keys sharing one axis. Holding the SteelSeries key and a toggle key you pick turns it off and on, and that key glows to show which.
 
-![Bindings while the SteelSeries key is held, with sample data](docs/bindings.png)
-
 ![The Controller window, with sample data](docs/controller.png)
 
 ![The keyboard page, with sample data](docs/keyboard.png)
+
+![Keys filling live as they're pressed](docs/keyboard-live.png)
 
 ![Dragging a box across the keys](docs/real-drag-select.png)
 
