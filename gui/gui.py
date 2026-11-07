@@ -18,6 +18,24 @@ import sys
 import tempfile
 import threading
 
+try:
+    import PySide6  # noqa: F401
+except ImportError:  # install.sh may have put PySide6 in a private venv, where the distro doesn't package it
+    _venv = os.path.expanduser("~/.local/share/steelmc/venv")
+    # A venv's python links to the system's, so check which prefix we're running in, not where python resolves to.
+    if os.path.exists(os.path.join(_venv, "bin", "python")) and os.path.realpath(sys.prefix) != os.path.realpath(_venv):
+        os.execv(os.path.join(_venv, "bin", "python"), [os.path.join(_venv, "bin", "python"), os.path.realpath(__file__), *sys.argv[1:]])
+    _how = ("SteelMC needs PySide6. Install it with your package manager (pyside6, python3-pyside6 or "
+            "python3-pyside6.qtwidgets). Where your distro doesn't package it (Ubuntu 24.04, for one), get it from PyPI "
+            "just for SteelMC:\n  python3 -m venv --system-site-packages ~/.local/share/steelmc/venv && "
+            "~/.local/share/steelmc/venv/bin/pip install PySide6\n(On Ubuntu, sudo apt install python3-venv first.)")
+    if not sys.stderr.isatty():  # opened from the menu, where nobody sees stderr
+        try:
+            subprocess.run(["notify-send", "SteelMC needs PySide6", "Run steelmc in a terminal to see how to get it."],
+                           timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    sys.exit(_how)
 from PySide6.QtCore import QEvent, QObject, QPoint, QProcess, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPalette, QPen, QPolygonF
@@ -31,10 +49,12 @@ from PySide6.QtWidgets import (
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "aerox"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "arctis"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "devices"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "update"))
 import aerox  # noqa: E402
 import arctis  # noqa: E402
 import gear  # noqa: E402
 import steelmc_devices  # noqa: E402
+import steelmc_update  # noqa: E402
 
 CHASSIS = "#26282b"
 WELL = "#1b1d1f"
@@ -117,6 +137,10 @@ QCheckBox::indicator:checked:disabled, QRadioButton::indicator:checked:disabled 
 QCheckBox:disabled, QRadioButton:disabled {{ color: #71767c; }}
 QCheckBox:focus, QRadioButton:focus {{ color: {ACCENT}; }}
 QToolTip {{ background: {WELL}; color: {TEXT}; border: 1px solid {LIGHT}; }}
+QFrame#updatebar {{ background: {EDGE}; border-bottom: 1px solid {ACCENT}; }}
+QFrame#updatebar QPushButton {{ padding: 2px 10px; min-height: 15px; }}
+QPushButton#flat {{ background: transparent; border: 0; color: {MUTED}; }}
+QPushButton#flat:hover {{ color: {TEXT}; }}
 """
 
 # Physical order on the side grid, from GG's button numbering: three across, four down.
@@ -3247,8 +3271,63 @@ class NoHeadset:
         return self.read()
 
 
+class UpdateBar(QFrame):
+    """A slim line above the tabs when a newer release is out. Quiet: it looks at most once a day, says nothing when
+    offline or up to date, and Not now hides it until the next version."""
+
+    def __init__(self, check=steelmc_update.check_for_app, dismiss=steelmc_update.dismiss, parent=None):
+        super().__init__(parent)
+        self.setObjectName("updatebar")
+        self.check, self.dismiss_version = check, dismiss
+        self.version = None
+        self.process = None
+        self.text = QLabel("")
+        self.update_button = QPushButton("Update")
+        self.update_button.clicked.connect(self.start_update)
+        self.later = QPushButton("Not now")
+        self.later.setObjectName("flat")
+        self.later.clicked.connect(self.not_now)
+        layout = row(self.text, None, self.update_button, self.later)
+        layout.setContentsMargins(12, 4, 8, 4)
+        self.setLayout(layout)
+        self.hide()
+
+    def look(self, runner):
+        runner.submit(self.check, self.offer, lambda e: None)
+
+    def offer(self, version):
+        if version:
+            self.version = version
+            self.text.setText(f"SteelMC {version} is out.")
+            self.update_button.setEnabled(True)
+            self.show()
+
+    def not_now(self):
+        if self.version:
+            self.dismiss_version(self.version)
+        self.hide()
+
+    def start_update(self):
+        """steelmc-update fetches and checks the new package; the package manager asks for your password."""
+        self.update_button.setEnabled(False)
+        self.text.setText(f"Updating to {self.version}...")
+        self.process = QProcess(self)
+        self.process.finished.connect(self.finished)
+        program = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "update", "steelmc_update.py")
+        self.process.start(sys.executable, [program, "--yes", "--graphical"])
+
+    def finished(self, code, *_):
+        if code == 0:
+            self.text.setText(f"Updated to {self.version}. Reopen SteelMC to use it.")
+            self.update_button.hide()
+            self.later.setText("OK")
+        else:
+            self.text.setText("The update didn't finish. steelmc-update in a terminal shows why.")
+            self.update_button.setEnabled(True)
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None, headset=None, devices=None):
+    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None, headset=None, devices=None, updates=None):
         super().__init__()
         self.setWindowTitle("SteelMC")
         runners = runners or (Runner(), Runner(), Runner(), Runner())
@@ -3266,7 +3345,15 @@ class MainWindow(QMainWindow):
         self.devices_page = DevicesPage(devices or (GearDevices() if real else NoDevices()), runners[3] if len(runners) > 3 else runners[0], confirm)
         tabs.addTab(self.headset_page, "Headset")
         tabs.addTab(self.devices_page, "Other devices")
-        self.setCentralWidget(tabs)
+        self.update_bar = UpdateBar(**(updates or ({} if real else {"check": lambda: None})))
+        self.update_runner = runners[0]
+        central = QWidget()
+        stack = QVBoxLayout(central)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(0)
+        stack.addWidget(self.update_bar)
+        stack.addWidget(tabs, 1)
+        self.setCentralWidget(central)
         self.tabs = tabs
         self.setMinimumSize(QSize(1100, 800))
 
@@ -3275,6 +3362,7 @@ class MainWindow(QMainWindow):
         self.keyboard_page.refresh()
         self.headset_page.refresh()
         self.devices_page.refresh()
+        self.update_bar.look(self.update_runner)
 
     def closeEvent(self, event):
         self.keyboard_page.stop_stream()

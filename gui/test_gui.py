@@ -716,6 +716,30 @@ class DragSelect(unittest.TestCase):
         self.plate.end_drag()
 
 
+class UpdateBarTest(unittest.TestCase):
+    def test_quiet_until_theres_an_update_and_not_now_hides_it(self):
+        dismissed = []
+        bar = gui.UpdateBar(check=lambda: "9.9.9", dismiss=dismissed.append)
+        self.assertTrue(bar.isHidden())
+        bar.look(Inline())
+        self.assertFalse(bar.isHidden())
+        self.assertIn("9.9.9 is out", bar.text.text())
+        bar.later.click()
+        self.assertTrue(bar.isHidden())
+        self.assertEqual(dismissed, ["9.9.9"])
+
+    def test_nothing_new_shows_nothing(self):
+        bar = gui.UpdateBar(check=lambda: None, dismiss=lambda v: None)
+        bar.look(Inline())
+        self.assertTrue(bar.isHidden())
+
+    def test_a_window_made_for_tests_never_looks_online(self):
+        window = gui.MainWindow(FakeMouse(), FakeKeyboard(), (Inline(), Inline(), Inline(), Inline()), yes)
+        self.addCleanup(window.close)
+        window.load()
+        self.assertTrue(window.update_bar.isHidden())
+
+
 class BindingsMode(unittest.TestCase):
     def setUp(self):
         self.device = FakeKeyboard()
