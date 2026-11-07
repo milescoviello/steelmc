@@ -1,0 +1,874 @@
+{
+ "families": [
+  {
+   "changes": "experimental",
+   "family": "alias",
+   "kind": "microphone",
+   "name": "Alias",
+   "products": {
+    "1b04": {
+     "name": "Alias",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1,
+     "firmware_checked": "0.22.82"
+    }
+   },
+   "save": {
+    "command": [
+     9
+    ],
+    "packet_length": 64
+   },
+   "settings": {
+    "sidetone": {
+     "type": "number",
+     "label": "Sidetone (0 to 10)",
+     "command": [
+      51
+     ],
+     "input": [
+      0,
+      10,
+      1
+     ],
+     "output": [
+      0,
+      10,
+      1
+     ],
+     "packet_length": 64
+    },
+    "mic_mute": {
+     "type": "choice",
+     "label": "Mute the microphone",
+     "command": [
+      35
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "mute_light_brightness": {
+     "type": "number",
+     "label": "Mute light brightness (1 to 10)",
+     "command": [
+      171
+     ],
+     "input": [
+      1,
+      10,
+      1
+     ],
+     "output": [
+      1,
+      10,
+      1
+     ],
+     "packet_length": 64
+    },
+    "ambient_lighting": {
+     "type": "choice",
+     "label": "Ambient lighting",
+     "command": [
+      173
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "monitoring": {
+     "type": "choice",
+     "label": "Hear yourself live (monitoring)",
+     "command": [
+      39
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "gain_lights": {
+     "type": "choice",
+     "label": "Gain lights",
+     "command": [
+      175
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "alias_pro",
+   "kind": "microphone",
+   "name": "Alias Pro",
+   "products": {
+    "1b06": {
+     "name": "Alias Pro",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "save": {
+    "command": [
+     9
+    ],
+    "packet_length": 64
+   },
+   "settings": {
+    "sidetone": {
+     "type": "number",
+     "label": "Sidetone (0 to 10)",
+     "command": [
+      51
+     ],
+     "input": [
+      0,
+      10,
+      1
+     ],
+     "output": [
+      0,
+      10,
+      1
+     ],
+     "packet_length": 64
+    },
+    "mic_mute": {
+     "type": "choice",
+     "label": "Mute the microphone",
+     "command": [
+      35
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "ambient_lighting": {
+     "type": "choice",
+     "label": "Ambient lighting",
+     "command": [
+      173
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "gain_knob_brightness": {
+     "type": "number",
+     "label": "Gain knob light brightness (1 to 10)",
+     "command": [
+      171
+     ],
+     "input": [
+      1,
+      10,
+      1
+     ],
+     "output": [
+      1,
+      10,
+      1
+     ],
+     "packet_length": 64
+    },
+    "gain_knob_lighting": {
+     "type": "choice",
+     "label": "Gain knob lights",
+     "command": [
+      175
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "audio_output_mode": {
+     "type": "choice",
+     "label": "Audio output mode (0 or 1)",
+     "command": [
+      39
+     ],
+     "choices": {
+      "0": 0,
+      "1": 1
+     },
+     "packet_length": 64
+    },
+    "audio_path": {
+     "type": "choice",
+     "label": "Audio path (1 or 2)",
+     "command": [
+      49
+     ],
+     "choices": {
+      "1": 1,
+      "2": 2
+     },
+     "packet_length": 64
+    },
+    "button_2_source": {
+     "type": "choice",
+     "label": "What the second button controls (1 to 3)",
+     "command": [
+      41
+     ],
+     "choices": {
+      "1": 1,
+      "2": 2,
+      "3": 3
+     },
+     "packet_length": 64
+    },
+    "button_2_state": {
+     "type": "choice",
+     "label": "Second button on",
+     "command": [
+      45
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "knob_2_source": {
+     "type": "choice",
+     "label": "What the second knob controls (1 to 3)",
+     "command": [
+      43
+     ],
+     "choices": {
+      "1": 1,
+      "2": 2,
+      "3": 3
+     },
+     "packet_length": 64
+    },
+    "knob_2_value": {
+     "type": "number",
+     "label": "Second knob level (0 to 100)",
+     "command": [
+      47
+     ],
+     "input": [
+      0,
+      100,
+      1
+     ],
+     "output": [
+      0,
+      100,
+      1
+     ],
+     "packet_length": 64
+    },
+    "headphone_level": {
+     "type": "number",
+     "label": "Headphone output level (0 to 100)",
+     "command": [
+      53
+     ],
+     "input": [
+      0,
+      100,
+      1
+     ],
+     "output": [
+      0,
+      100,
+      1
+     ],
+     "packet_length": 64
+    },
+    "headphone_mute": {
+     "type": "choice",
+     "label": "Mute the headphone output",
+     "command": [
+      65
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "line_out_level": {
+     "type": "number",
+     "label": "Line output level (0 to 100)",
+     "command": [
+      57
+     ],
+     "input": [
+      0,
+      100,
+      1
+     ],
+     "output": [
+      0,
+      100,
+      1
+     ],
+     "packet_length": 64
+    },
+    "line_out_mute": {
+     "type": "choice",
+     "label": "Mute the line output",
+     "command": [
+      69
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "phantom_power": {
+     "type": "choice",
+     "label": "48 V phantom power",
+     "command": [
+      59
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 64
+    },
+    "mute_button_color": {
+     "type": "color",
+     "label": "Mute button colour",
+     "command": [
+      177,
+      1
+     ],
+     "packet_length": 64
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "sensei_wireless",
+   "kind": "mouse",
+   "name": "Sensei Wireless",
+   "products": {
+    "137c": {
+     "name": "Sensei Wireless",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "137e": {
+     "name": "Sensei Wireless (base)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "settings": {
+    "lift_off": {
+     "type": "choice",
+     "label": "Lift-off distance (0 lowest to 4)",
+     "command": [
+      11,
+      0
+     ],
+     "choices": {
+      "0": 0,
+      "1": 1,
+      "2": 2,
+      "3": 3,
+      "4": 4
+     },
+     "packet_length": 32
+    },
+    "sensor_rest": {
+     "type": "choice",
+     "label": "Let the sensor rest when idle",
+     "command": [
+      13,
+      0
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 32
+    },
+    "smart_illumination": {
+     "type": "choice",
+     "label": "Smart illumination",
+     "command": [
+      14,
+      0
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "packet_length": 32
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "rival_50_msi",
+   "kind": "mouse",
+   "name": "Rival 50 MSI Edition, Sims 4 mouse",
+   "products": {
+    "1709": {
+     "name": "Rival 50 MSI Edition",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1386": {
+     "name": "The Sims 4 mouse",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "save": {
+    "command": [
+     9,
+     0
+    ],
+    "packet_length": 32
+   },
+   "settings": {
+    "polling_rate": {
+     "type": "choice",
+     "label": "Polling rate (Hz)",
+     "command": [
+      4,
+      0
+     ],
+     "choices": {
+      "1000": 1,
+      "500": 2,
+      "250": 3,
+      "125": 4
+     },
+     "default": "1000",
+     "packet_length": 32
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "sensei_raw_optical",
+   "kind": "mouse",
+   "name": "Sensei [RAW] Optical",
+   "products": {
+    "1800": {
+     "name": "Sensei [RAW] Optical RGB",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1826": {
+     "name": "Sensei [RAW] Optical v2",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "settings": {
+    "polling_rate": {
+     "type": "choice",
+     "label": "Polling rate (Hz)",
+     "command": [
+      84,
+      0
+     ],
+     "choices": {
+      "1000": 1,
+      "500": 2,
+      "250": 3,
+      "125": 4
+     },
+     "default": "1000",
+     "packet_length": 64
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_1_wireless_cyberpunk",
+   "kind": "headset",
+   "name": "Arctis 1 Wireless Cyberpunk",
+   "packet": 31,
+   "products": {
+    "12d0": {
+     "name": "Arctis 1 Wireless Cyberpunk",
+     "interface": 0,
+     "interface_unconfirmed": true
+    },
+    "12d2": {
+     "name": "Arctis 1 Wireless for Xbox Cyberpunk",
+     "interface": 0,
+     "interface_unconfirmed": true
+    }
+   },
+   "raw": true,
+   "settings": {
+    "mic_volume": {
+     "type": "number",
+     "label": "Microphone volume (0 to 100)",
+     "command": [
+      6,
+      51,
+      0
+     ],
+     "input": [
+      0,
+      100,
+      1
+     ],
+     "output": [
+      0,
+      100,
+      1
+     ],
+     "then": [
+      [
+       6,
+       9
+      ]
+     ]
+    },
+    "sleep": {
+     "type": "number",
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "command": [
+      6,
+      83
+     ],
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "then": [
+      [
+       6,
+       9
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_pro_wired",
+   "kind": "headset",
+   "name": "Arctis Nova Pro",
+   "packet": 64,
+   "products": {
+    "12cb": {
+     "name": "Arctis Nova Pro",
+     "interface": 4,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "12cd": {
+     "name": "Arctis Nova Pro for Xbox",
+     "interface": 4,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "raw": true,
+   "save": {
+    "command": [
+     6,
+     9
+    ]
+   },
+   "settings": {
+    "sidetone": {
+     "command": [
+      6,
+      57
+     ],
+     "choices": {
+      "off": 0,
+      "low": 1,
+      "medium": 2,
+      "high": 3
+     },
+     "label": "Sidetone",
+     "type": "choice"
+    },
+    "mic_volume": {
+     "command": [
+      6,
+      55
+     ],
+     "label": "Microphone volume (1 to 10)",
+     "input": [
+      1,
+      10,
+      1
+     ],
+     "output": [
+      1,
+      10,
+      1
+     ],
+     "type": "number"
+    },
+    "screen_dim_timer": {
+     "command": [
+      6,
+      131
+     ],
+     "label": "Dim the base station's screen after this many minutes (0 for never)",
+     "input": [
+      0,
+      60,
+      1
+     ],
+     "output": [
+      0,
+      60,
+      1
+     ],
+     "type": "number"
+    },
+    "high_gain": {
+     "command": [
+      6,
+      39
+     ],
+     "label": "High gain headphone output",
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "type": "choice"
+    },
+    "line_out_mode": {
+     "command": [
+      6,
+      67
+     ],
+     "label": "Line out mode (1 or 2)",
+     "choices": {
+      "1": 1,
+      "2": 2
+     },
+     "type": "choice"
+    },
+    "eq_preset": {
+     "command": [
+      6,
+      46
+     ],
+     "label": "Equalizer preset (0 to 18, as the base station numbers them)",
+     "input": [
+      0,
+      18,
+      1
+     ],
+     "output": [
+      0,
+      18,
+      1
+     ],
+     "type": "number"
+    },
+    "equalizer": {
+     "command": [
+      6,
+      51
+     ],
+     "label": "Equalizer, your own (10 bands, -10 to 10 dB)",
+     "bands": 10,
+     "min": -10,
+     "max": 10,
+     "format": "float32",
+     "type": "eq"
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_4",
+   "kind": "headset",
+   "name": "Arctis Nova 4",
+   "packet": 65,
+   "products": {
+    "12f2": {
+     "name": "Arctis Nova 4",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "12f6": {
+     "name": "Arctis Nova 4X",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "raw": true,
+   "save": {
+    "command": [
+     0,
+     9
+    ]
+   },
+   "settings": {
+    "sidetone": {
+     "command": [
+      0,
+      57
+     ],
+     "choices": {
+      "off": 0,
+      "low": 1,
+      "medium": 2,
+      "high": 3
+     },
+     "label": "Sidetone",
+     "type": "choice"
+    },
+    "mic_volume": {
+     "command": [
+      0,
+      55
+     ],
+     "label": "Microphone volume (0 to 7)",
+     "input": [
+      0,
+      7,
+      1
+     ],
+     "output": [
+      0,
+      7,
+      1
+     ],
+     "type": "number"
+    },
+    "sleep": {
+     "command": [
+      0,
+      163
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "type": "number"
+    },
+    "muted_mic_light": {
+     "command": [
+      0,
+      174
+     ],
+     "label": "Muted-microphone light (0 off to 3)",
+     "input": [
+      0,
+      3,
+      1
+     ],
+     "output": [
+      0,
+      3,
+      1
+     ],
+     "suffix": [
+      1,
+      20
+     ],
+     "type": "number"
+    },
+    "volume_limiter": {
+     "command": [
+      0,
+      58
+     ],
+     "label": "Volume limiter",
+     "choices": {
+      "on": 1,
+      "off": 0
+     },
+     "type": "choice"
+    },
+    "equalizer": {
+     "command": [
+      0,
+      51
+     ],
+     "label": "Equalizer (10 bands, -12 to 12 dB)",
+     "bands": 10,
+     "min": -12,
+     "max": 12,
+     "format": "float32",
+     "type": "eq"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      0,
+      176
+     ],
+     "length": 64,
+     "fields": {
+      "battery": {
+       "byte": 2,
+       "map": [
+        0,
+        4
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

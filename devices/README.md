@@ -51,6 +51,10 @@ steelmc-devices set 1612 color ff8000               # an Apex 7, every key orang
 
 For 22 of these, every command was checked against the keyboard's own firmware, as SteelSeries GG ships it, before it went in: `settings` says which firmware. The rest have firmware that can't be read (or none in GG), so their commands come from GG's device files alone, and `settings` says that too. The same check marks 18 of the mice and headsets above. For a few, which USB interface they use is a guess from their siblings, so the udev rule leaves them out (a wrong guess could open the interface keystrokes travel on) and they need sudo until someone reports `steelmc-devices probe` from a real one.
 
+## Mousepads, microphones, and a few more
+
+`families/mousepads.json` covers the QcK Prism Cloth pads in every size and edition (the colour of each edge, and brightness; all 9 with firmware in GG checked against it) and the hard QcK Prism. `families/extras.json` covers the Alias microphone (checked against its firmware) and Alias Pro (sidetone, mute, lights, output levels, 48 V phantom power and more), the Arctis Nova Pro with its base station and the Nova 4 and 4X (sidetone, microphone, timers, equalizer presets and your own bands), the Cyberpunk Arctis 1 Wireless, and the Sensei Wireless, Sensei [RAW] Optical, Rival 50 MSI Edition and Sims 4 mice. Which USB interface these use is a guess, so they need sudo until someone confirms it with `steelmc-devices probe`.
+
 The Apex Pro boards, the Aerox 9 Wireless and the Arctis 9 have tools of their own, which go further, and keep them.
 
 ## Devices that aren't supported yet

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import socket
+import struct
 import tempfile
 import unittest
 from unittest import mock
@@ -170,6 +171,30 @@ class Keyboards(unittest.TestCase):
             self.assertIsNone(gear.find_node("1642", 1, 0xFF00, 1, hidraw=root))
 
 
+class MoreDevices(unittest.TestCase):
+    def test_cloth_pad_zones_carry_their_own_records(self):
+        s = family("150d")["settings"]["color"]
+        data = gear.frame(s, "ff0000,0000ff")
+        self.assertEqual(data[:4], [0x0E, 0x00, 0x02, 0x00])
+        self.assertEqual(data[4:16], [0xFF, 0, 0, 0xFF, 0x32, 0xC8, 0, 0, 0, 1, 0, 0])
+        self.assertEqual(data[16:28], [0, 0, 0xFF, 0xFF, 0x32, 0xC8, 0, 0, 1, 1, 0, 1])
+        self.assertEqual(len(data), 524)
+        self.assertNotIn("save", family("150d"))  # its firmware has no save command
+
+    def test_float_equalizer(self):
+        s = family("12f2")["settings"]["equalizer"]
+        data = gear.frame(s, "1,0,0,0,0,0,0,0,0,-12")
+        self.assertEqual(data[:2], [0x00, 0x33])
+        self.assertEqual(bytes(data[2:6]), struct.pack("<f", 1.0))
+        self.assertEqual(bytes(data[38:42]), struct.pack("<f", -12.0))
+        with self.assertRaises(gear.Refused):
+            gear.frame(s, "13,0,0,0,0,0,0,0,0,0")
+
+    def test_microphones(self):
+        self.assertEqual(gear.frame(family("1b04")["settings"]["sidetone"], "5")[:2], [0x33, 5])
+        self.assertEqual(FAMILIES["1b04"][1]["firmware_checked"], "0.22.82")
+
+
 class Talking(unittest.TestCase):
     def setUp(self):
         self.ours, self.device = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -241,6 +266,15 @@ class Talking(unittest.TestCase):
     def test_wireless_keyboard_battery(self):
         g = self.open("1646")
         self.assertEqual(g.battery(), {"percent": 70, "charging": True})
+
+    def test_a_follow_up_can_be_another_report_type(self):
+        g = self.open("150d")
+        feature = []
+        with mock.patch("gear.fcntl.ioctl", lambda fd, request, data: feature.append(bytes(data))):
+            g.set("color", "red")
+        self.assertEqual(feature[0][:3], bytes([0, 0x0E, 0x00]))
+        self.assertEqual(self.sent[-1][:2], bytes([0, 0x0D]))  # then an output report
+        self.assertEqual(len(self.sent[-1]), 65)
 
     def test_nothing_unlisted_is_sent(self):
         g = self.open("1824")

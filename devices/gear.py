@@ -9,6 +9,7 @@ import json
 import os
 import re
 import select
+import struct
 import time
 
 FAMILIES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "families")
@@ -224,8 +225,9 @@ def encode_zones(s, value):
     if len(parts) != s["zones"]:
         raise Refused(f"Give one colour, or {s['zones']} colours (one per zone).")
     out = []
-    for p in parts:
-        out += parse_color(p) + list(s.get("zone_suffix", []))
+    for i, p in enumerate(parts):
+        suffixes = s.get("zone_suffixes")  # bytes after each zone's colour, when they differ by zone
+        out += parse_color(p) + list(suffixes[i] if suffixes else s.get("zone_suffix", []))
     return out
 
 
@@ -348,6 +350,8 @@ def encode_eq(s, value):
         raise Refused(f"Give {s['bands']} gains, one per band, from {s['min']} to {s['max']} dB.")
     if any(not s["min"] <= g <= s["max"] for g in gains):
         raise Refused(f"Each gain goes from {s['min']} to {s['max']} dB.")
+    if s.get("format") == "float32":  # some take each gain as a little-endian 32-bit float, in dB
+        return [b for g in gains for b in struct.pack("<f", float(g))]
     return [int(s["base"] + g * s["per_db"]) & 0xFF for g in gains]
 
 
@@ -525,15 +529,26 @@ class Gear:
         spec = self.settings[name]
         reports = frames(spec, value)
         for extra in spec.get("before", []):
-            self.send(spec, extra)
+            self._extra(spec, extra)
         for data in reports:
             self.send(spec, data)
             if spec.get("readback_length"):
                 self.reply(spec["readback_length"])
         for extra in spec.get("then", []):
-            self.send(spec, extra)
+            self._extra(spec, extra)
         remember(self.pid, name, value)
         return reports[0]
+
+    def _extra(self, spec, extra):
+        """A fixed report sent before or after a setting: a list of bytes sent the setting's way, or {command, report,
+        packet_length} for one that goes another way, like an output report after a feature report."""
+        if isinstance(extra, dict):
+            data = list(extra["command"])
+            if extra.get("packet_length"):
+                data += [0] * (extra["packet_length"] - len(data))
+            self.send(extra, data)
+        else:
+            self.send(spec, extra)
 
     def status(self):
         """What the device reports about itself: battery, charging, whether a wireless one is connected, ChatMix."""
