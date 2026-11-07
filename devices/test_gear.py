@@ -193,6 +193,10 @@ class MoreDevices(unittest.TestCase):
         with self.assertRaises(gear.Refused):
             gear.frame(s, "13,0,0,0,0,0,0,0,0,0")
 
+    def test_a_colour_split_over_three_registers(self):
+        s = family("1210")["settings"]["color"]
+        self.assertEqual([f[3:6] for f in gear.frames(s, "ff8000")], [[0x11, 0x89, 0xFF], [0x11, 0x8A, 0x80], [0x11, 0x8B, 0x00]])
+
     def test_microphones(self):
         self.assertEqual(gear.frame(family("1b04")["settings"]["sidetone"], "5")[:2], [0x33, 5])
         self.assertEqual(FAMILIES["1b04"][1]["firmware_checked"], "0.22.82")
@@ -278,6 +282,12 @@ class Talking(unittest.TestCase):
         self.assertEqual(feature[0][:3], bytes([0, 0x0E, 0x00]))
         self.assertEqual(self.sent[-1][:2], bytes([0, 0x0D]))  # then an output report
         self.assertEqual(len(self.sent[-1]), 65)
+
+    def test_a_save_can_take_several_reports(self):
+        g = self.open("1228")  # Siberia 150: select the light chip, say "save the colour", then write it
+        g.save()
+        self.assertEqual([x[2] for x in self.sent], [0x95, 0x80, 0x83, 0x93])
+        self.assertTrue(all(len(x) == 16 for x in self.sent))
 
     def test_nothing_unlisted_is_sent(self):
         g = self.open("1824")

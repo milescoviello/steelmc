@@ -3122,7 +3122,7 @@ class DevicesPage(QWidget):
             spin.setSingleStep(max(1, s["input"][2] if len(s["input"]) > 2 else 1))
             spin.setValue(int(last) if last is not None else int(s.get("default", s["input"][0]) or s["input"][0]))
             return spin
-        if kind in ("color", "reactive_color"):
+        if kind in ("color", "reactive_color", "color_split"):
             edit = QLineEdit(str(last or s.get("default", "") or ""))
             edit.setPlaceholderText("RRGGBB or a name" + (", or off" if kind == "reactive_color" else ""))
             return edit

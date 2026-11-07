@@ -184,7 +184,7 @@ def describe_setting(name, s):
         values = f"{s['input'][0]} to {s['input'][1]}"
     elif kind == "dpi_stages":
         values = f"up to {s['max_stages']} DPI, {s['input'][0]} to {s['input'][1]}, like 400,800,1600"
-    elif kind == "color":
+    elif kind in ("color", "color_split"):
         values = "a colour: RRGGBB or a name"
     elif kind == "reactive_color":
         values = "a colour, or off"

@@ -366,6 +366,14 @@ def frames(setting, value=None):
     """Every report a setting sends for a value, after the report ID. Most send one; some send the same value to several
     commands (also), like one brightness per zone. Raises Refused before anything is sent."""
     kind = setting["type"]
+    if kind == "color_split":  # one colour, each channel to a command of its own: red, then green, then blue
+        out = []
+        for command, channel in zip(setting["commands"], parse_color(value)):
+            data = list(command) + [channel] + list(setting.get("suffix", []))
+            if setting.get("packet_length"):
+                data += [0] * (setting["packet_length"] - len(data))
+            out.append(data)
+        return out
     if kind not in ENCODERS:
         raise Refused(f"Setting this kind of value ({kind}) isn't supported yet.")
     body = ENCODERS[kind](setting, value) + list(setting.get("suffix", []))
@@ -581,6 +589,8 @@ class Gear:
         spec = self.family.get("save")
         if not spec:
             raise GearError(f"The {self.name} keeps its settings without saving, or saving isn't known for it.")
+        for extra in spec.get("before", []):
+            self._extra(spec, extra)
         data = list(spec["command"])
         slot = spec.get("slot")
         if slot:  # save over the config that's active now, which the device reports
@@ -594,6 +604,8 @@ class Gear:
         self.send(spec, data)
         if spec.get("readback_length"):
             self.reply(spec["readback_length"])
+        for extra in spec.get("then", []):
+            self._extra(spec, extra)
 
 
 # ---- remembered values -----------------------------------------------------------------------------------------------
