@@ -33,7 +33,7 @@ import select
 import sys
 import time
 
-__version__ = "0.2.0"
+__version__ = "1.0.0"
 
 VENDOR = "00001038"
 DONGLE, WIRED = "00001858", "0000185A"

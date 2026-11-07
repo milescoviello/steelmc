@@ -24,7 +24,7 @@ import struct
 import sys
 import time
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 VENDOR, PRODUCT = "00001038", "000012C2"
 FIRMWARE_BCD = "0101"  # bcdDevice of transmitter firmware 1.1, the only version these commands were read from

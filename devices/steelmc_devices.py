@@ -22,7 +22,7 @@ import urllib.parse
 
 import gear
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 VENDOR = "1038"
 USB = "/sys/bus/usb/devices"

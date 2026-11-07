@@ -15,6 +15,8 @@ Configure SteelSeries gear on Linux with no vendor software. Not affiliated with
 
 ## Install
 
+**A package:** each [release](https://github.com/milescoviello/steelmc/releases) has one for Debian and Ubuntu (`sudo apt install ./steelmc_*_all.deb`), Fedora and openSUSE (`sudo dnf install ./steelmc-*.noarch.rpm`) and Arch (`sudo pacman -U steelmc-*-any.pkg.tar.zst`). On Ubuntu 24.04, which has no PySide6 package, the app says how to get it from PyPI.
+
 **Any distro, for you:**
 
 ```
