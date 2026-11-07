@@ -1,0 +1,29 @@
+name: Something's wrong
+description: steelmc, the app or a tool doesn't do what it should
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead. Paste any error.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      placeholder: |
+        1. Open the Keyboard tab
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: Version and distro
+      description: The first line of `steelmc-devices report`, or `steelmc-devices --version` and your distro
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Which SteelSeries device, if it's about one

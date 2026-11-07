@@ -36,9 +36,9 @@ except ImportError:  # install.sh may have put PySide6 in a private venv, where 
         except (OSError, subprocess.SubprocessError):
             pass
     sys.exit(_how)
-from PySide6.QtCore import QEvent, QObject, QPoint, QProcess, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QProcess, QRect, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPalette, QPen, QPolygonF
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QImage, QPainter, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QRubberBand, QSizePolicy, QSlider,
@@ -3014,6 +3014,10 @@ class GearDevices:
     def remembered(self, pid):
         return gear.remembered(pid)
 
+    def report_url(self, device):
+        text = steelmc_devices.report(device, gear.remembered(device["id"].split(":")[1]))
+        return steelmc_devices.report_url(device, text)
+
 
 OWN_TABS = {"mouse": "Mouse", "keyboard": "Keyboard", "headset": "Headset"}
 SETTING_HINTS = {"dpi_stages": "400,800,1600", "buttons": "button4=f13,button5=disable", "gradient": "2000ms:red@0,blue@50,red@100",
@@ -3024,10 +3028,10 @@ SETTING_HINTS = {"dpi_stages": "400,800,1600", "buttons": "button4=f13,button5=d
 class DevicesPage(QWidget):
     """Every other SteelSeries device plugged in, with the settings its definition offers. Changes there are experimental."""
 
-    def __init__(self, devices, runner, confirm=ask, parent=None):
+    def __init__(self, devices, runner, confirm=ask, parent=None, open_url=lambda url: QDesktopServices.openUrl(QUrl(url))):
         super().__init__(parent)
         self.setObjectName("page")
-        self.devices, self.runner, self.confirm = devices, runner, confirm
+        self.devices, self.runner, self.confirm, self.open_url = devices, runner, confirm, open_url
         self.found, self.covered, self.current = [], {}, None
         self.inputs = {}
         root = QVBoxLayout(self)
@@ -3116,9 +3120,13 @@ class DevicesPage(QWidget):
         layout.addWidget(title)
         if pid not in self.covered:
             note = self.support_note(d, pid)
-            text = (f"{note}." if note.startswith(("On the", "Its settings")) else
-                    "This one isn't supported yet. steelmc-devices probe in a terminal prints what's needed to add it.")
-            layout.addWidget(muted(text))
+            if note.startswith(("On the", "Its settings")):
+                layout.addWidget(muted(f"{note}."))
+            else:
+                text = muted("This one isn't supported yet. Ask for it: the report says what's needed to add it.")
+                text.setWordWrap(True)
+                layout.addWidget(text)
+                layout.addLayout(row(self.report_button(d, "Ask for it"), None))
             layout.addStretch(1)
             return
         family, product = self.covered[pid]
@@ -3151,12 +3159,31 @@ class DevicesPage(QWidget):
             grid.addWidget(apply, i, 2)
             self.inputs[name] = widget
         layout.addLayout(grid)
+        layout.addStretch(1)
+        report = self.report_button(d, "Report how it went")
         if family.get("save"):
             save = QPushButton("Save to device")
             save.setObjectName("primary")
             save.clicked.connect(lambda: self.save(pid))
-            layout.addLayout(row(None, save))
-        layout.addStretch(1)
+            layout.addLayout(row(report, None, save))
+        else:
+            layout.addLayout(row(report, None))
+
+    def report_button(self, d, text):
+        button = QPushButton(text)
+        button.setToolTip("Opens a GitHub issue in your browser with what Linux knows about this device filled in. "
+                          "Nothing is sent until you press Submit there.")
+        button.clicked.connect(lambda: self.send_report(d))
+        return button
+
+    def send_report(self, d):
+        self.runner.submit(lambda: self.devices.report_url(d), self.opened_report, lambda e: self.status.say(str(e), "bad"))
+
+    def opened_report(self, url):
+        if self.open_url(url):
+            self.status.say("The report is open in your browser. Nothing is sent until you press Submit there.")
+        else:
+            self.status.say("Couldn't open a browser: steelmc-devices report in a terminal prints the link.", "bad")
 
     def input_for(self, s, last):
         kind = s["type"]

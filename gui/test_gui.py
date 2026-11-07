@@ -984,12 +984,37 @@ class FakeGearDevices:
     def save(self, pid):
         self.calls.append(("save", pid))
 
+    def report_url(self, device):
+        self.calls.append(("report", device["id"]))
+        return f"https://example/issue?device={device['id']}"
+
 
 class DevicesPageTest(unittest.TestCase):
     def setUp(self):
         self.devices = FakeGearDevices()
-        self.page = gui.DevicesPage(self.devices, Inline(), yes)
+        self.opened = []
+        self.page = gui.DevicesPage(self.devices, Inline(), yes, open_url=lambda url: self.opened.append(url) or True)
         self.page.refresh()
+
+    def button(self, text):
+        return next(b for b in self.page.detail.findChildren(QPushButton) if b.text() == text and b.isVisibleTo(self.page))
+
+    def test_report_how_it_went_opens_a_filled_in_issue(self):
+        self.page.show_device(self.devices.found[0])
+        self.button("Report how it went").click()
+        self.assertEqual(self.opened, ["https://example/issue?device=1038:1824"])
+        self.assertIn("Nothing is sent", self.page.status.text())
+
+    def test_an_unsupported_one_can_be_asked_for(self):
+        self.page.show_device(self.devices.found[2])
+        self.button("Ask for it").click()
+        self.assertEqual(self.devices.calls, [("report", "1038:9999")])
+
+    def test_no_browser_says_where_the_link_is(self):
+        self.page.open_url = lambda url: False
+        self.page.show_device(self.devices.found[0])
+        self.button("Report how it went").click()
+        self.assertIn("steelmc-devices report", self.page.status.text())
 
     def test_lists_what_is_plugged_in(self):
         self.assertEqual(self.page.support_note(self.devices.found[0], "1824"), "Settings here, experimental")

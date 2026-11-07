@@ -5,6 +5,7 @@ import io
 import json
 import os
 import tempfile
+import urllib.parse
 import unittest
 
 import steelmc_devices as sd
@@ -94,6 +95,34 @@ class Scanning(unittest.TestCase):
         report = sd.probe_report(sd.scan(self.usb)[0])
         self.assertIn("interface 00", report)
         self.assertIn(ARCTIS.hex(), report)
+
+    def test_a_report_says_what_it_is_and_links_to_a_filled_in_issue(self):
+        self.sys.device("3-8.2", "1038", "12c2", "0101", "SteelSeries Arctis 9", hid=[ARCTIS, MEDIA])
+        release = os.path.join(self.tmp.name, "os-release")
+        with open(release, "w") as f:
+            f.write('NAME="Debian"\nPRETTY_NAME="Debian GNU/Linux 13 (trixie)"\n')
+        device = sd.scan(self.usb)[0]
+        text = sd.report(device, {"sidetone": "2"}, release)
+        first = text.splitlines()[0]
+        self.assertTrue(first.startswith(f"steelmc {sd.__version__}, Debian GNU/Linux 13 (trixie), kernel "))
+        self.assertIn("interface 00", text)
+        self.assertIn("Last set here: sidetone 2", text)
+        self.assertNotIn(os.path.expanduser("~"), text)
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(sd.report_url(device, text)).query)
+        self.assertEqual(query["template"], ["device.yml"])
+        self.assertEqual(query["device"], ["SteelSeries Arctis 9 (1038:12c2)"])
+        self.assertEqual(query["report"], [text])
+
+    def test_a_long_report_leaves_the_descriptors_out_of_the_link(self):
+        self.sys.device("3-8.2", "1038", "12c2", "0101", "SteelSeries Arctis 9", hid=[ARCTIS * 60, MEDIA * 60])
+        device = sd.scan(self.usb)[0]
+        text = sd.report(device)
+        url = sd.report_url(device, text)
+        self.assertLessEqual(len(url), sd.URL_LIMIT)
+        report = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["report"][0]
+        self.assertNotIn(ARCTIS.hex(), report)
+        self.assertIn("interface 00", report)
+        self.assertIn("didn't fit", report)
 
     def test_it_never_opens_a_device(self):
         self.sys.device("3-8.2", "1038", "12c2", "0101", hid=[ARCTIS])

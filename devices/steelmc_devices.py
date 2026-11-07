@@ -3,6 +3,7 @@
 
     steelmc-devices                      list them
     steelmc-devices probe                everything Linux knows about them, to paste into a report for one that isn't supported yet
+    steelmc-devices report [ID]          the same, ready to send: a link to a GitHub issue with it filled in
     steelmc-devices settings ID          what can be set on a device, like steelmc-devices settings 1824
     steelmc-devices show ID              its battery and firmware where it reports them, and what was last set here
     steelmc-devices set ID SETTING VALUE change one: steelmc-devices set 1824 polling_rate 1000
@@ -17,6 +18,7 @@ import glob
 import json
 import os
 import sys
+import urllib.parse
 
 import gear
 
@@ -145,6 +147,39 @@ def probe_report(device):
                          + ("; vendor-defined" if hid["vendor_defined"] else ""))
             lines.append(f"      descriptor {hid['descriptor']}")
     return "\n".join(lines)
+
+
+ISSUES = "https://github.com/milescoviello/steelmc/issues/new"
+URL_LIMIT = 7500  # GitHub turns away much longer links
+
+
+def system_line(os_release="/etc/os-release"):
+    """steelmc's version, the distro and the kernel: what a report needs to know about this computer, and nothing else."""
+    pretty = ""
+    for line in (_read(os_release) or "").splitlines():
+        if line.startswith("PRETTY_NAME="):
+            pretty = line.split("=", 1)[1].strip().strip('"')
+    return f"steelmc {__version__}, {pretty or 'Linux'}, kernel {os.uname().release}"
+
+
+def report(device, last=None, os_release="/etc/os-release"):
+    """A device report for an issue: this computer in one line, what Linux sees of the device, and what was set here."""
+    lines = [system_line(os_release), "", probe_report(device)]
+    if last:
+        lines += ["", "Last set here: " + ", ".join(f"{k} {v}" for k, v in last.items())]
+    return "\n".join(lines)
+
+
+def report_url(device, text):
+    """A link that opens a new GitHub issue with the report filled in. Nothing is sent until it's submitted there."""
+    name = device["product"] or device["name"] or "SteelSeries device"
+    fields = {"template": "device.yml", "title": f"{name} ({device['id']})", "device": f"{name} ({device['id']})", "report": text}
+    url = f"{ISSUES}?{urllib.parse.urlencode(fields)}"
+    if len(url) > URL_LIMIT:  # the report descriptors are the long part
+        short = [line for line in text.splitlines() if not line.lstrip().startswith("descriptor ")]
+        fields["report"] = "\n".join(short) + "\n(The descriptors didn't fit in the link: steelmc-devices report prints them.)"
+        url = f"{ISSUES}?{urllib.parse.urlencode(fields)}"
+    return url
 
 
 NO_TYPING = ("speakers", "microphone", "mousepad", "accessory", "lighting")  # kinds with no interface that can carry keystrokes
@@ -285,6 +320,8 @@ def main(argv=None):
     sub.add_parser("list", help="list them (the default)")
     pr = sub.add_parser("probe", help="everything Linux knows about them, for a report")
     pr.add_argument("id", nargs="?", help="only this one, like 1038:1652 or 1652")
+    rp = sub.add_parser("report", help="a report on one, with a link that opens a GitHub issue with it filled in")
+    rp.add_argument("id", nargs="?", help="like 1038:1652 or 1652; leave it out for every one plugged in")
     for name, text in (("settings", "what can be set on a device"), ("show", "battery, firmware and what was last set"),
                        ("save", "keep the current settings after it loses power")):
         sp = sub.add_parser(name, help=text)
@@ -305,10 +342,19 @@ def main(argv=None):
             print(f"steelmc-devices: {e}", file=sys.stderr)
             return 1
     found = scan()
+    if args.command in ("probe", "report") and args.id:
+        want = args.id.lower().split(":")[-1]
+        found = [d for d in found if d["id"].endswith(":" + want)]
+    if args.command == "report":
+        if not found:
+            print("No SteelSeries devices found." if not args.id else f"1038:{want} isn't plugged in.")
+            return 1
+        for i, d in enumerate(found):
+            text = report(d, gear.remembered(d["id"].split(":")[1]))
+            print(("\n" if i else "") + text + "\n\nTo send it, open this and press Submit on GitHub (nothing is sent before that):\n"
+                  + report_url(d, text))
+        return 0
     if args.command == "probe":
-        if args.id:
-            want = args.id.lower().split(":")[-1]
-            found = [d for d in found if d["id"].endswith(":" + want)]
         if args.json:
             print(json.dumps([{**{k: v for k, v in d.items() if k != "path"}, "interfaces": interfaces(d["path"])} for d in found], indent=1))
         else:
