@@ -5,6 +5,7 @@ Which SteelSeries devices are plugged in, and which tool here works with each.
 ```
 steelmc-devices          # list them
 steelmc-devices probe    # everything Linux knows about them
+steelmc-devices report   # the same, with a link that opens a GitHub issue with it filled in
 steelmc-devices --json
 ```
 
@@ -23,7 +24,7 @@ steelmc-devices show 1824                # battery and firmware where it reports
 steelmc-devices save 1824                # keep it after the mouse loses power, on mice that can
 ```
 
-Only the commands a definition lists are ever sent, and every value is checked first. Most of these mice can't report their settings back, so the last values set here are kept in `~/.config/steelmc/devices.json`. **Changing settings on these is experimental**: the definitions come from how these mice are known to work, but nobody has tried them on a real one here. Please report what worked.
+Only the commands a definition lists are ever sent, and every value is checked first. Most of these mice can't report their settings back, so the last values set here are kept in `~/.config/steelmc/devices.json`. **Changing settings on these is experimental**: the definitions come from how these mice are known to work, but nobody has tried them on a real one here. Please report what worked: `steelmc-devices report ID`, or Report how it went on the app's Other devices tab, opens an issue with the details filled in.
 
 ## Settings for many more headsets
 
@@ -67,4 +68,4 @@ A wireless headset shows up on USB as two devices when its headset is plugged in
 
 `catalog.json` lists over 500 SteelSeries product IDs, with each one's name, what kind of device it is, and which part of it the ID belongs to: the device itself, its wireless dongle, its bootloader, and so on. Only a few are supported so far, because a tool here only sends a device commands that have been checked against that device's own firmware, and changes only turn on once someone has tried them on the real thing.
 
-To help add one, run `steelmc-devices probe` with it plugged in and open an issue with the output. It lists the device's interfaces and HID report descriptors. That's no private information, and nothing is sent to the device to get it.
+To help add one, run `steelmc-devices report` with it plugged in (or press Ask for it on the app's Other devices tab). It prints the device's interfaces and HID report descriptors, your distro and kernel, and a link that opens a GitHub issue with all of it filled in. That's no private information, nothing is sent to the device to get it, and nothing is sent to GitHub until you press Submit there.
