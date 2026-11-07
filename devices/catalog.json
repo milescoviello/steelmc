@@ -1,0 +1,3107 @@
+{
+ "devices": {
+  "0472": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 150",
+   "part": "device"
+  },
+  "0475": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 160",
+   "part": "device"
+  },
+  "0615": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M650",
+   "part": "device"
+  },
+  "0616": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M750",
+   "part": "device"
+  },
+  "0617": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M750 TKL",
+   "part": "device"
+  },
+  "0619": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M750 TKL PUBG Edition",
+   "part": "device"
+  },
+  "1122": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI KLC",
+   "part": "device"
+  },
+  "1124": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "Mystic Light",
+   "part": "device"
+  },
+  "1125": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "Mystic Light",
+   "part": "bootloader"
+  },
+  "1126": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MPG27C",
+   "part": "device"
+  },
+  "1127": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MPG27C",
+   "part": "bootloader"
+  },
+  "1128": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MPG341CQ",
+   "part": "device"
+  },
+  "1129": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MPG341CQ",
+   "part": "bootloader"
+  },
+  "1130": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Lightbar",
+   "part": "device"
+  },
+  "1131": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Lightbar",
+   "part": "bootloader"
+  },
+  "1132": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "1133": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge66 Alc",
+   "part": "bootloader"
+  },
+  "1134": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "1135": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge76 Alc",
+   "part": "bootloader"
+  },
+  "1136": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MEG381CQR",
+   "part": "device"
+  },
+  "1138": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Dragon Shield",
+   "part": "device"
+  },
+  "1139": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Dragon Tiamat",
+   "part": "device"
+  },
+  "113a": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI KLC496",
+   "part": "device"
+  },
+  "113c": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "113d": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge66 Alc Chip Refresh",
+   "part": "bootloader"
+  },
+  "113e": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "113f": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge76 Alc Chip Refresh",
+   "part": "bootloader"
+  },
+  "1140": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MPG341CQ",
+   "part": "device"
+  },
+  "1141": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MPG341CQ",
+   "part": "bootloader"
+  },
+  "1142": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MEG381CQR",
+   "part": "device"
+  },
+  "1143": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI MEG381CQR",
+   "part": "bootloader"
+  },
+  "1144": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "1145": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "1146": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Mystic Light",
+   "part": "device"
+  },
+  "1147": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Gt77 Alc",
+   "part": "bootloader"
+  },
+  "1149": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "114a": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Aurora",
+   "part": "device"
+  },
+  "114b": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "114c": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge68 Alc",
+   "part": "bootloader"
+  },
+  "114d": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "114e": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge78 Alc",
+   "part": "bootloader"
+  },
+  "1150": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Gt77 Alc 072",
+   "part": "bootloader"
+  },
+  "1152": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge68 Alc 072",
+   "part": "bootloader"
+  },
+  "1154": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge78 Alc 072",
+   "part": "bootloader"
+  },
+  "1157": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "1159": {
+   "kind": "lighting",
+   "line": "other",
+   "name": "Light bar",
+   "part": "device"
+  },
+  "115a": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Steelseries Gaming Kb Ge78 Alc",
+   "part": "bootloader"
+  },
+  "115b": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "115c": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "bootloader"
+  },
+  "115e": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Steelseries Gaming Kb Ge78 Alc 496",
+   "part": "bootloader"
+  },
+  "115f": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "1160": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "bootloader"
+  },
+  "1161": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "1162": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "bootloader"
+  },
+  "1163": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "1164": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "bootloader"
+  },
+  "1165": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "1166": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "bootloader"
+  },
+  "1167": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI KLC071",
+   "part": "device"
+  },
+  "1169": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "device"
+  },
+  "116a": {
+   "kind": "lighting",
+   "line": "msi",
+   "name": "MSI Matrix",
+   "part": "bootloader"
+  },
+  "1200": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex [RAW]",
+   "part": "device"
+  },
+  "1201": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex [RAW]",
+   "part": "bootloader"
+  },
+  "1202": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex",
+   "part": "device"
+  },
+  "1203": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex",
+   "part": "bootloader"
+  },
+  "1204": {
+   "kind": "keyboard",
+   "line": "other",
+   "name": "Guild Wars 2",
+   "part": "device"
+  },
+  "1205": {
+   "kind": "keyboard",
+   "line": "other",
+   "name": "Guild Wars 2",
+   "part": "bootloader"
+  },
+  "1206": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 350",
+   "part": "device"
+  },
+  "1207": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 350",
+   "part": "bootloader"
+  },
+  "1208": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 300",
+   "part": "device"
+  },
+  "1209": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 300",
+   "part": "bootloader"
+  },
+  "120a": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "OMEN Keyboard",
+   "part": "device"
+  },
+  "120b": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "OMEN Keyboard",
+   "part": "bootloader"
+  },
+  "1210": {
+   "kind": "headset",
+   "line": "other",
+   "name": "Diablo III Headset",
+   "part": "device"
+  },
+  "1211": {
+   "kind": "headset",
+   "line": "siberia",
+   "name": "Siberia v2 Frost Blue",
+   "part": "device"
+  },
+  "1222": {
+   "kind": "headset",
+   "line": "other",
+   "name": "The Sims 4",
+   "part": "device"
+  },
+  "1224": {
+   "kind": "headset",
+   "line": "siberia",
+   "name": "Siberia [RAW] Prism",
+   "part": "device"
+  },
+  "1226": {
+   "kind": "headset",
+   "line": "siberia",
+   "name": "Siberia v3 Prism",
+   "part": "device"
+  },
+  "1228": {
+   "kind": "headset",
+   "line": "siberia",
+   "name": "Siberia 150",
+   "part": "device"
+  },
+  "1229": {
+   "kind": "headset",
+   "line": "siberia",
+   "name": "Siberia 350",
+   "part": "device"
+  },
+  "122a": {
+   "kind": "headset",
+   "line": "other",
+   "name": "Dell Performance USB Headset - AE2",
+   "part": "device"
+  },
+  "1240": {
+   "kind": "headset",
+   "line": "siberia",
+   "name": "Siberia 840",
+   "part": "device"
+  },
+  "1250": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 5",
+   "part": "device"
+  },
+  "1251": {
+   "kind": "headset",
+   "line": "other",
+   "name": "Dota\u00ae 2",
+   "part": "device"
+  },
+  "1252": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Pro",
+   "part": "device"
+  },
+  "1260": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7",
+   "part": "dongle"
+  },
+  "1261": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7",
+   "part": "device"
+  },
+  "1280": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "GameDAC",
+   "part": "device"
+  },
+  "1281": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "GameDAC",
+   "part": "bootloader"
+  },
+  "1290": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Pro Wireless",
+   "part": "device"
+  },
+  "1292": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Pro Wireless Headset",
+   "part": "device"
+  },
+  "12a8": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 5 PUBG Edition (2018)",
+   "part": "device"
+  },
+  "12aa": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 5 (2018)",
+   "part": "device"
+  },
+  "12ad": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7 (2018)",
+   "part": "base station"
+  },
+  "12ae": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7 (2018)",
+   "part": "headset"
+  },
+  "12b1": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 9X",
+   "part": "device"
+  },
+  "12b3": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless",
+   "part": "base station"
+  },
+  "12b4": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless",
+   "part": "headset"
+  },
+  "12b6": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless",
+   "part": "base station"
+  },
+  "12b7": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless",
+   "part": "headset"
+  },
+  "12c0": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 9",
+   "part": "headset"
+  },
+  "12c1": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 9",
+   "part": "bootloader"
+  },
+  "12c2": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 9",
+   "part": "base station",
+   "support": {
+    "level": "full",
+    "tools": [
+     "arctis"
+    ]
+   }
+  },
+  "12c3": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 9",
+   "part": "bootloader"
+  },
+  "12c4": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 9",
+   "part": "audio",
+   "support": {
+    "level": "part of a supported device",
+    "note": "the Arctis 9's audio chip; arctis talks to 12c2",
+    "tools": []
+   }
+  },
+  "12cb": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro",
+   "part": "device"
+  },
+  "12cd": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro",
+   "part": "device"
+  },
+  "12d0": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless Cyberpunk",
+   "part": "base station"
+  },
+  "12d1": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless Cyberpunk",
+   "part": "headset"
+  },
+  "12d2": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless Cyberpunk",
+   "part": "base station"
+  },
+  "12d3": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 1 Wireless Cyberpunk",
+   "part": "headset"
+  },
+  "12d5": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7P Wireless",
+   "part": "base station"
+  },
+  "12d6": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7P Wireless",
+   "part": "headset"
+  },
+  "12d7": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7X Wireless",
+   "part": "base station"
+  },
+  "12d8": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7X Wireless",
+   "part": "headset"
+  },
+  "12e0": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless",
+   "part": "device"
+  },
+  "12e2": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless",
+   "part": "device"
+  },
+  "12e5": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless",
+   "part": "device"
+  },
+  "12e8": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless",
+   "part": "device"
+  },
+  "12ec": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 3",
+   "part": "device"
+  },
+  "12ed": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 3",
+   "part": "bootloader"
+  },
+  "12f0": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 4",
+   "part": "device"
+  },
+  "12f2": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 4",
+   "part": "device"
+  },
+  "12f4": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 4X",
+   "part": "device"
+  },
+  "12f6": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 4X",
+   "part": "device"
+  },
+  "1356": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei",
+   "part": "device"
+  },
+  "1357": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei",
+   "part": "bootloader"
+  },
+  "1358": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei",
+   "part": "device"
+  },
+  "1359": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei",
+   "part": "bootloader"
+  },
+  "1361": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei",
+   "part": "device"
+  },
+  "1362": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Diablo III Mouse",
+   "part": "device"
+  },
+  "1363": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei",
+   "part": "bootloader"
+  },
+  "1368": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Diablo III Mouse",
+   "part": "bootloader"
+  },
+  "1369": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei [RAW]",
+   "part": "device"
+  },
+  "136a": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei [RAW]",
+   "part": "bootloader"
+  },
+  "136b": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "MLG Sensei",
+   "part": "device"
+  },
+  "136c": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "MLG Sensei",
+   "part": "bootloader"
+  },
+  "136d": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Guild Wars 2",
+   "part": "device"
+  },
+  "136e": {
+   "kind": "keyboard",
+   "line": "other",
+   "name": "Guild Wars 2",
+   "part": "bootloader"
+  },
+  "136f": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Black Ops II",
+   "part": "device"
+  },
+  "1370": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Black Ops II",
+   "part": "bootloader"
+  },
+  "137c": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Wireless",
+   "part": "device"
+  },
+  "137d": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Wireless",
+   "part": "bootloader"
+  },
+  "137e": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Wireless",
+   "part": "device"
+  },
+  "137f": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Wireless",
+   "part": "bootloader"
+  },
+  "1380": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "World of Tanks",
+   "part": "device"
+  },
+  "1381": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "World of Tanks",
+   "part": "bootloader"
+  },
+  "1384": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival Base",
+   "part": "device"
+  },
+  "1385": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival Bootloader Base",
+   "part": "bootloader"
+  },
+  "1386": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "The Sims 4",
+   "part": "device"
+  },
+  "1388": {
+   "kind": "mouse",
+   "line": "kinzu",
+   "name": "Kinzu V3 Mouse Base",
+   "part": "device"
+  },
+  "1389": {
+   "kind": "mouse",
+   "line": "kinzu",
+   "name": "Kinzu V3 Mouse Base",
+   "part": "bootloader"
+  },
+  "1390": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Heroes of the Storm",
+   "part": "device"
+  },
+  "1391": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Heroes of the Storm",
+   "part": "bootloader"
+  },
+  "1392": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Dota 2",
+   "part": "device"
+  },
+  "1393": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Dota 2",
+   "part": "bootloader"
+  },
+  "1394": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "CS:GO",
+   "part": "device"
+  },
+  "1395": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "CS:GO",
+   "part": "bootloader"
+  },
+  "1418": {
+   "kind": "controller",
+   "line": "stratus",
+   "name": "Stratus XL",
+   "part": "device"
+  },
+  "1419": {
+   "kind": "controller",
+   "line": "stratus",
+   "name": "Stratus XL",
+   "part": "bootloader"
+  },
+  "1422": {
+   "kind": "controller",
+   "line": "nimbus",
+   "name": "NIMBUS+",
+   "part": "device"
+  },
+  "1434": {
+   "kind": "controller",
+   "line": "stratus",
+   "name": "Stratus+",
+   "part": "device"
+  },
+  "1435": {
+   "kind": "controller",
+   "line": "stratus",
+   "name": "Stratus+",
+   "part": "bootloader"
+  },
+  "1500": {
+   "kind": "accessory",
+   "line": "other",
+   "name": "Sims 4 Plumbob",
+   "part": "device"
+  },
+  "1501": {
+   "kind": "accessory",
+   "line": "sentry",
+   "name": "Sentry",
+   "part": "device"
+  },
+  "1507": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism",
+   "part": "device"
+  },
+  "1508": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism",
+   "part": "bootloader"
+  },
+  "150a": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth M",
+   "part": "device"
+  },
+  "150b": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth M",
+   "part": "bootloader"
+  },
+  "150d": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL",
+   "part": "device"
+  },
+  "150e": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL",
+   "part": "bootloader"
+  },
+  "1512": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "Dota 2 QCK Prism Cloth",
+   "part": "device"
+  },
+  "1513": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "Dota 2 QCK Prism Cloth",
+   "part": "bootloader"
+  },
+  "1514": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth Neon Rider",
+   "part": "device"
+  },
+  "1515": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth Neon Rider",
+   "part": "bootloader"
+  },
+  "1516": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth 3XL",
+   "part": "device"
+  },
+  "1517": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth 3XL",
+   "part": "bootloader"
+  },
+  "1518": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth 4XL",
+   "part": "device"
+  },
+  "1519": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth 4XL",
+   "part": "bootloader"
+  },
+  "151a": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth 5XL",
+   "part": "device"
+  },
+  "151b": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth 5XL",
+   "part": "bootloader"
+  },
+  "151c": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL Neo Noir Edition",
+   "part": "device"
+  },
+  "151d": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL Neo Noir Edition",
+   "part": "bootloader"
+  },
+  "151e": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL Destiny Edition",
+   "part": "device"
+  },
+  "151f": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL Destiny Edition",
+   "part": "bootloader"
+  },
+  "1520": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL Destiny 2 Edition",
+   "part": "device"
+  },
+  "1521": {
+   "kind": "mousepad",
+   "line": "qck",
+   "name": "QCK Prism Cloth XL Destiny 2 Edition",
+   "part": "bootloader"
+  },
+  "1600": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M800",
+   "part": "device"
+  },
+  "1601": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M800",
+   "part": "bootloader"
+  },
+  "1603": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Dota 2 International 2015",
+   "part": "device"
+  },
+  "1604": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Dota 2",
+   "part": "bootloader"
+  },
+  "1605": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Dota 2",
+   "part": "device"
+  },
+  "1606": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Dota 2",
+   "part": "bootloader"
+  },
+  "1607": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M500",
+   "part": "device"
+  },
+  "1608": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M500",
+   "part": "bootloader"
+  },
+  "1609": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M500 Evil Geniuses",
+   "part": "device"
+  },
+  "160a": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M500 Evil Geniuses",
+   "part": "bootloader"
+  },
+  "160c": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M400",
+   "part": "device"
+  },
+  "160d": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex M400",
+   "part": "bootloader"
+  },
+  "160e": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 100",
+   "part": "device"
+  },
+  "160f": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 100",
+   "part": "bootloader"
+  },
+  "1610": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro",
+   "part": "device"
+  },
+  "1611": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro",
+   "part": "bootloader"
+  },
+  "1612": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 7",
+   "part": "device"
+  },
+  "1613": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 7",
+   "part": "bootloader"
+  },
+  "1614": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL",
+   "part": "device"
+  },
+  "1615": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL",
+   "part": "bootloader"
+  },
+  "1616": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 150",
+   "part": "device"
+  },
+  "1617": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 150",
+   "part": "bootloader"
+  },
+  "1618": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 7 TKL",
+   "part": "device"
+  },
+  "1619": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 7 TKL",
+   "part": "bootloader"
+  },
+  "161a": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 3",
+   "part": "device"
+  },
+  "161b": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 3",
+   "part": "bootloader"
+  },
+  "161c": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 5",
+   "part": "device"
+  },
+  "161d": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 5",
+   "part": "bootloader"
+  },
+  "161e": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini",
+   "part": "device"
+  },
+  "161f": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini",
+   "part": "bootloader"
+  },
+  "1620": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 9 Mini",
+   "part": "device"
+  },
+  "1621": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 9 Mini",
+   "part": "bootloader"
+  },
+  "1622": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 3 TKL",
+   "part": "device"
+  },
+  "1623": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 3 TKL",
+   "part": "bootloader"
+  },
+  "1624": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini Wireless",
+   "part": "dongle"
+  },
+  "1625": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini Wireless",
+   "part": "bootloader"
+  },
+  "1626": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini Wireless",
+   "part": "device"
+  },
+  "1627": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini Wireless",
+   "part": "bootloader"
+  },
+  "1628": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL (2022)",
+   "part": "device"
+  },
+  "1629": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL (2022)",
+   "part": "bootloader"
+  },
+  "1630": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless",
+   "part": "dongle"
+  },
+  "1631": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless",
+   "part": "bootloader"
+  },
+  "1632": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless",
+   "part": "device"
+  },
+  "1633": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless",
+   "part": "bootloader"
+  },
+  "1634": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 9 TKL",
+   "part": "device"
+  },
+  "1635": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 9 TKL",
+   "part": "bootloader"
+  },
+  "1640": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro (2024)",
+   "part": "device",
+   "support": {
+    "level": "full",
+    "tools": [
+     "apex-analog",
+     "apex-oled"
+    ]
+   }
+  },
+  "1641": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro (2024)",
+   "part": "bootloader"
+  },
+  "1642": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL (2024)",
+   "part": "device"
+  },
+  "1643": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL (2024)",
+   "part": "bootloader"
+  },
+  "1644": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless (2024)",
+   "part": "dongle"
+  },
+  "1645": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless (2024)",
+   "part": "bootloader"
+  },
+  "1646": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless (2024)",
+   "part": "device"
+  },
+  "1647": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro TKL Wireless (2024)",
+   "part": "bootloader"
+  },
+  "1648": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini (2024)",
+   "part": "device"
+  },
+  "1649": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex Pro Mini (2024)",
+   "part": "bootloader"
+  },
+  "1650": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 5 (2024)",
+   "part": "device"
+  },
+  "1651": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 5 (2024)",
+   "part": "bootloader"
+  },
+  "1652": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 7 (2024)",
+   "part": "device"
+  },
+  "1653": {
+   "kind": "keyboard",
+   "line": "apex",
+   "name": "Apex 7 (2024)",
+   "part": "bootloader"
+  },
+  "1700": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 700",
+   "part": "device"
+  },
+  "1701": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 700",
+   "part": "bootloader"
+  },
+  "1702": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 100",
+   "part": "device"
+  },
+  "1703": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 100",
+   "part": "bootloader"
+  },
+  "1704": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 95",
+   "part": "device"
+  },
+  "1706": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 95",
+   "part": "device"
+  },
+  "1707": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 95 MSI Edition",
+   "part": "device"
+  },
+  "1708": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 100",
+   "part": "device"
+  },
+  "1709": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 50 MSI Edition",
+   "part": "device"
+  },
+  "170a": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 100",
+   "part": "device"
+  },
+  "170b": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Dota 2",
+   "part": "device"
+  },
+  "170c": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Dota 2",
+   "part": "device"
+  },
+  "170e": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 500",
+   "part": "device"
+  },
+  "170f": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 500",
+   "part": "bootloader"
+  },
+  "1710": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 300",
+   "part": "device"
+  },
+  "1711": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 300",
+   "part": "bootloader"
+  },
+  "1712": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Fallout\u00ae 4",
+   "part": "device"
+  },
+  "1713": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Fallout\u00ae 4",
+   "part": "bootloader"
+  },
+  "1714": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Predator Gaming Mouse",
+   "part": "device"
+  },
+  "1715": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Predator Gaming Mouse",
+   "part": "bootloader"
+  },
+  "1716": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "CS:GO",
+   "part": "device"
+  },
+  "1717": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "CS:GO",
+   "part": "bootloader"
+  },
+  "1718": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "OMEN Mouse",
+   "part": "device"
+  },
+  "1719": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "OMEN Mouse",
+   "part": "bootloader"
+  },
+  "171a": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "CS:GO",
+   "part": "device"
+  },
+  "171b": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "CS:GO",
+   "part": "bootloader"
+  },
+  "171c": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 300 Evil Geniuses",
+   "part": "device"
+  },
+  "171d": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 300 Evil Geniuses",
+   "part": "bootloader"
+  },
+  "171e": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 310 CS:GO Howl Edition",
+   "part": "device"
+  },
+  "171f": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 310 CS:GO Howl Edition",
+   "part": "bootloader"
+  },
+  "1720": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 310",
+   "part": "device"
+  },
+  "1721": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 310",
+   "part": "bootloader"
+  },
+  "1722": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei 310",
+   "part": "device"
+  },
+  "1723": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei 310",
+   "part": "bootloader"
+  },
+  "1724": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 600",
+   "part": "device"
+  },
+  "1725": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 600",
+   "part": "bootloader"
+  },
+  "1726": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 650 Wireless",
+   "part": "dongle"
+  },
+  "1727": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 650 Wireless",
+   "part": "bootloader"
+  },
+  "1729": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 110",
+   "part": "device"
+  },
+  "172a": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 110",
+   "part": "bootloader"
+  },
+  "172b": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 650 Wireless",
+   "part": "device"
+  },
+  "172c": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 650 Wireless",
+   "part": "bootloader"
+  },
+  "172e": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Dota 2 Rival 600",
+   "part": "device"
+  },
+  "172f": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Dota 2 Rival 600",
+   "part": "bootloader"
+  },
+  "1730": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 710",
+   "part": "device"
+  },
+  "1731": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 710",
+   "part": "bootloader"
+  },
+  "1736": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 310 PUBG Edition",
+   "part": "device"
+  },
+  "1737": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 310 PUBG Edition",
+   "part": "bootloader"
+  },
+  "1800": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei [RAW] Optical RGB",
+   "part": "device"
+  },
+  "1801": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei [RAW] Optical RGB",
+   "part": "bootloader"
+  },
+  "1810": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 300S",
+   "part": "device"
+  },
+  "1811": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 300S",
+   "part": "bootloader"
+  },
+  "1814": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 105",
+   "part": "device"
+  },
+  "1815": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 105",
+   "part": "bootloader"
+  },
+  "1816": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 106",
+   "part": "device"
+  },
+  "1817": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 106",
+   "part": "bootloader"
+  },
+  "1824": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3",
+   "part": "device"
+  },
+  "1825": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3",
+   "part": "bootloader"
+  },
+  "1826": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei [RAW] Optical v2",
+   "part": "device"
+  },
+  "1827": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei [RAW] Optical v2",
+   "part": "bootloader"
+  },
+  "182a": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime 6 Siege Black Ice Edition",
+   "part": "device"
+  },
+  "182b": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime 6 Siege Black Ice Edition",
+   "part": "bootloader"
+  },
+  "182c": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime+",
+   "part": "device"
+  },
+  "182d": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime+",
+   "part": "bootloader"
+  },
+  "182e": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime",
+   "part": "device"
+  },
+  "182f": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime",
+   "part": "bootloader"
+  },
+  "1830": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3 Wireless",
+   "part": "device"
+  },
+  "1831": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3 Wireless",
+   "part": "bootloader"
+  },
+  "1832": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Ten",
+   "part": "device"
+  },
+  "1833": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Ten",
+   "part": "bootloader"
+  },
+  "1834": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Ten Neon Rider",
+   "part": "device"
+  },
+  "1835": {
+   "kind": "mouse",
+   "line": "sensei",
+   "name": "Sensei Ten Neon Rider",
+   "part": "bootloader"
+  },
+  "1836": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3",
+   "part": "device"
+  },
+  "1837": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3",
+   "part": "bootloader"
+  },
+  "1838": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless",
+   "part": "dongle"
+  },
+  "1839": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless",
+   "part": "bootloader"
+  },
+  "183a": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless",
+   "part": "device"
+  },
+  "183b": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless",
+   "part": "bootloader"
+  },
+  "183c": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 5",
+   "part": "device"
+  },
+  "183d": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 5",
+   "part": "bootloader"
+  },
+  "183e": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 5 Destiny Edition",
+   "part": "device"
+  },
+  "183f": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 5 Destiny Edition",
+   "part": "bootloader"
+  },
+  "1840": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Wireless",
+   "part": "dongle"
+  },
+  "1841": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Wireless",
+   "part": "bootloader"
+  },
+  "1842": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Wireless",
+   "part": "device"
+  },
+  "1843": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Wireless",
+   "part": "bootloader"
+  },
+  "1848": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Mini Wireless",
+   "part": "dongle"
+  },
+  "1849": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Mini Wireless",
+   "part": "bootloader"
+  },
+  "184a": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Mini Wireless",
+   "part": "device"
+  },
+  "184b": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Mini Wireless",
+   "part": "bootloader"
+  },
+  "184c": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3 Nvidia Reflex",
+   "part": "device"
+  },
+  "184d": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Mini",
+   "part": "device"
+  },
+  "184e": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime Mini",
+   "part": "bootloader"
+  },
+  "1850": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5",
+   "part": "device"
+  },
+  "1851": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5",
+   "part": "bootloader"
+  },
+  "1852": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5 Wireless",
+   "part": "dongle"
+  },
+  "1853": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5 Wireless",
+   "part": "bootloader"
+  },
+  "1854": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5 Wireless",
+   "part": "device"
+  },
+  "1855": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5 Wireless",
+   "part": "bootloader"
+  },
+  "1856": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime CS:GO Neo Noir Edition",
+   "part": "device"
+  },
+  "1857": {
+   "kind": "mouse",
+   "line": "prime",
+   "name": "Prime CS:GO Neo Noir Edition",
+   "part": "bootloader"
+  },
+  "1858": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless",
+   "part": "dongle",
+   "support": {
+    "level": "full",
+    "tools": [
+     "aerox"
+    ]
+   }
+  },
+  "1859": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless",
+   "part": "bootloader"
+  },
+  "185a": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless",
+   "part": "device",
+   "support": {
+    "level": "full",
+    "tools": [
+     "aerox"
+    ]
+   }
+  },
+  "185b": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless",
+   "part": "bootloader"
+  },
+  "185e": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5 Wireless Destiny 2 Edition",
+   "part": "device"
+  },
+  "1862": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5: Diablo IV Edition",
+   "part": "device"
+  },
+  "1870": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3 Gen 2",
+   "part": "device"
+  },
+  "1871": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3 Gen 2",
+   "part": "bootloader"
+  },
+  "1872": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3 Wireless Gen 2",
+   "part": "device"
+  },
+  "1873": {
+   "kind": "mouse",
+   "line": "rival",
+   "name": "Rival 3 Wireless Gen 2",
+   "part": "bootloader"
+  },
+  "1874": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless WOW Edition",
+   "part": "dongle"
+  },
+  "1875": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless WOW Edition",
+   "part": "bootloader"
+  },
+  "1876": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless WOW Edition",
+   "part": "device"
+  },
+  "1877": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 9 Wireless WOW Edition",
+   "part": "bootloader"
+  },
+  "1878": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "CS2 Dragon Lore Edition",
+   "part": "dongle"
+  },
+  "1879": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "CS2 Dragon Lore Edition",
+   "part": "bootloader"
+  },
+  "187a": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "CS2 Dragon Lore Edition",
+   "part": "device"
+  },
+  "187b": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "CS2 Dragon Lore Edition",
+   "part": "bootloader"
+  },
+  "1890": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless Gen 2",
+   "part": "dongle"
+  },
+  "1891": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless Gen 2",
+   "part": "bootloader"
+  },
+  "1892": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless Gen 2",
+   "part": "device"
+  },
+  "1893": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 3 Wireless Gen 2",
+   "part": "bootloader"
+  },
+  "1a00": {
+   "kind": "speakers",
+   "line": "arena",
+   "name": "Arena 7",
+   "part": "device"
+  },
+  "1a01": {
+   "kind": "speakers",
+   "line": "arena",
+   "name": "Arena 7",
+   "part": "bootloader"
+  },
+  "1a05": {
+   "kind": "speakers",
+   "line": "arena",
+   "name": "Arena 9",
+   "part": "device"
+  },
+  "1a06": {
+   "kind": "speakers",
+   "line": "arena",
+   "name": "Arena 9",
+   "part": "bootloader"
+  },
+  "1b04": {
+   "kind": "microphone",
+   "line": "alias",
+   "name": "Alias",
+   "part": "device"
+  },
+  "1b05": {
+   "kind": "microphone",
+   "line": "alias",
+   "name": "Alias",
+   "part": "bootloader"
+  },
+  "1b06": {
+   "kind": "microphone",
+   "line": "alias",
+   "name": "Alias Pro",
+   "part": "device"
+  },
+  "1b08": {
+   "kind": "microphone",
+   "line": "alias",
+   "name": "Alias Pro",
+   "part": "bootloader"
+  },
+  "2000": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI GT80",
+   "part": "device"
+  },
+  "2001": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "2002": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "2003": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI GT72",
+   "part": "device"
+  },
+  "2004": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "2005": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "2006": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2007": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "SteelSeries Gaming Keyboard",
+   "part": "device"
+  },
+  "2008": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "200a": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "200c": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI GS40",
+   "part": "device"
+  },
+  "200d": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "200e": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "200f": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI GT73",
+   "part": "device"
+  },
+  "2010": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "2011": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI GT83",
+   "part": "device"
+  },
+  "2012": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI GS43",
+   "part": "device"
+  },
+  "2014": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2016": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2018": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "201a": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "201c": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "201d": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "201e": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "201f": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "2020": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2022": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2024": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2026": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2028": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "2029": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI 3 Zone RGB Keyboard",
+   "part": "device"
+  },
+  "202a": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "SteelSeries Gaming Keyboard",
+   "part": "device"
+  },
+  "202b": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "202d": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "202e": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "202f": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2030": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2031": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2034": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2035": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "bootloader"
+  },
+  "2036": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2037": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2038": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2039": {
+   "kind": "other",
+   "line": "msi",
+   "name": "Msi Ge76 Klc",
+   "part": "bootloader"
+  },
+  "203a": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "203b": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "203c": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "203d": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "203f": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "SteelSeries Gaming Keyboard",
+   "part": "device"
+  },
+  "2040": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "SteelSeries Gaming Keyboard",
+   "part": "bootloader"
+  },
+  "2041": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2042": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2043": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2044": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2045": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2046": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2048": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "204a": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "204c": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "204e": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2050": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2052": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2054": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2055": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2056": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "SteelSeries Gaming Keyboard",
+   "part": "device"
+  },
+  "2058": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "205a": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "205b": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "205c": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "205d": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "205e": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "205f": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2062": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "2063": {
+   "kind": "keyboard",
+   "line": "msi",
+   "name": "MSI Per Key RGB Keyboard",
+   "part": "device"
+  },
+  "20ff": {
+   "kind": "other",
+   "line": "msi",
+   "name": "MSI Z270 Gaming Pro Carbon",
+   "part": "device"
+  },
+  "2200": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7",
+   "part": "device"
+  },
+  "2202": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7",
+   "part": "device"
+  },
+  "2204": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X",
+   "part": "device"
+  },
+  "2206": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X",
+   "part": "device"
+  },
+  "2208": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7P",
+   "part": "device"
+  },
+  "220a": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7P",
+   "part": "device"
+  },
+  "220c": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7+",
+   "part": "headset"
+  },
+  "220d": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7+",
+   "part": "bootloader"
+  },
+  "220e": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7+",
+   "part": "base station"
+  },
+  "220f": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7+",
+   "part": "bootloader"
+  },
+  "2210": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7P+",
+   "part": "headset"
+  },
+  "2211": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7P+",
+   "part": "bootloader"
+  },
+  "2212": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7P+",
+   "part": "base station"
+  },
+  "2213": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7P+",
+   "part": "bootloader"
+  },
+  "2214": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7X+",
+   "part": "headset"
+  },
+  "2215": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7X+",
+   "part": "bootloader"
+  },
+  "2216": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7X+",
+   "part": "base station"
+  },
+  "2217": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7X+",
+   "part": "bootloader"
+  },
+  "2230": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 5",
+   "part": "device"
+  },
+  "2232": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 5",
+   "part": "device"
+  },
+  "2234": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7+ Destiny 2 Edition",
+   "part": "device"
+  },
+  "2236": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis 7+ Destiny 2 Edition",
+   "part": "device"
+  },
+  "2238": {
+   "kind": "headset",
+   "line": "other",
+   "name": "Nova 7: Diablo IV Edition",
+   "part": "device"
+  },
+  "223a": {
+   "kind": "headset",
+   "line": "other",
+   "name": "Nova 7: Diablo IV Edition",
+   "part": "device"
+  },
+  "2240": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless",
+   "part": "device"
+  },
+  "2242": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless",
+   "part": "device"
+  },
+  "2244": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Elite",
+   "part": "device"
+  },
+  "2249": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Elite",
+   "part": "device"
+  },
+  "2251": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 5X",
+   "part": "device"
+  },
+  "2253": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 5X",
+   "part": "device"
+  },
+  "2256": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X White",
+   "part": "device"
+  },
+  "2258": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X White",
+   "part": "device"
+  },
+  "225d": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless White",
+   "part": "device"
+  },
+  "2260": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Wireless White",
+   "part": "device"
+  },
+  "2262": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 5X White",
+   "part": "device"
+  },
+  "2264": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 5X White",
+   "part": "device"
+  },
+  "2267": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 3 Wireless",
+   "part": "device"
+  },
+  "2269": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 3 Wireless",
+   "part": "device"
+  },
+  "226b": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 3X Wireless",
+   "part": "device"
+  },
+  "226d": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 3X Wireless",
+   "part": "device"
+  },
+  "2278": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7 WOW Edition",
+   "part": "device"
+  },
+  "227a": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7 WOW Edition",
+   "part": "device"
+  },
+  "227c": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7 Gen 2",
+   "part": "device"
+  },
+  "227e": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7 Gen 2",
+   "part": "device"
+  },
+  "2288": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7P Gen 2",
+   "part": "device"
+  },
+  "2290": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Omni",
+   "part": "device"
+  },
+  "2296": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova Pro Omni",
+   "part": "device"
+  },
+  "2298": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7P Gen 2",
+   "part": "device"
+  },
+  "229c": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X Gen 2",
+   "part": "device"
+  },
+  "229e": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X Gen 2",
+   "part": "device"
+  },
+  "230a": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds",
+   "part": "dongle"
+  },
+  "230b": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds",
+   "part": "bootloader"
+  },
+  "230c": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds",
+   "part": "device"
+  },
+  "230d": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds",
+   "part": "bootloader"
+  },
+  "2317": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds X",
+   "part": "dongle"
+  },
+  "2318": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds X",
+   "part": "bootloader"
+  },
+  "231a": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds X",
+   "part": "device"
+  },
+  "231b": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis GameBuds X",
+   "part": "bootloader"
+  },
+  "b007": {
+   "kind": "mouse",
+   "line": "other",
+   "name": "Generic Bootloader",
+   "part": "bootloader"
+  }
+ },
+ "vendor": "1038"
+}

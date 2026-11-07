@@ -69,6 +69,18 @@ jobs:
           python-version: "3.14"
       - run: python test_arctis.py
 
+  devices:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: devices
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python test_devices.py
+
   apex-oled:
     runs-on: ubuntu-latest
     defaults:
