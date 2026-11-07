@@ -61,7 +61,8 @@
       4
      ],
      "interface": 3,
-     "name": "Arctis Nova 7X"
+     "name": "Arctis Nova 7X",
+     "firmware_checked": "2.31"
     },
     "22a5": {
      "interface": 3,

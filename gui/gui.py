@@ -3075,7 +3075,7 @@ class DevicesPage(QWidget):
         checked = product.get("firmware_checked")
         warning = muted("Changing settings here is experimental: nobody has tried them on a real one yet. "
                         + (f"Every command is in this model's firmware {checked}." if checked else
-                           "Its firmware couldn't be read, so they come from SteelSeries GG's device files alone."))
+                           "Its commands haven't been matched against its own firmware yet."))
         warning.setWordWrap(True)
         layout.addWidget(warning)
         self.readout = muted("")

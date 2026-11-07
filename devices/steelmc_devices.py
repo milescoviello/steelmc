@@ -216,7 +216,7 @@ def gear_command(args):
             if product.get("firmware_checked"):
                 print(f"Every command here is in its firmware {product['firmware_checked']}'s command table, read from SteelSeries GG's copy.")
             else:
-                print("Its firmware couldn't be read, so these commands come from SteelSeries GG's device files alone.")
+                print("These commands haven't been matched against its own firmware: it couldn't be read, or not every command turned up.")
             if product.get("interface_unconfirmed"):
                 print(f"Which USB interface it uses is a guess ({product['interface']}), so the udev rule leaves it out and changing "
                       "settings needs sudo for now. steelmc-devices probe shows the real one: please report it.")

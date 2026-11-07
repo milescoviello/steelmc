@@ -49,7 +49,7 @@ steelmc-devices set 1642 rapid_trigger on
 steelmc-devices set 1612 color ff8000               # an Apex 7, every key orange
 ```
 
-For 22 of these, every command was checked against the keyboard's own firmware, as SteelSeries GG ships it, before it went in: `settings` says which firmware. The rest have firmware that can't be read (or none in GG), so their commands come from GG's device files alone, and `settings` says that too. For a few, which USB interface they use is a guess from their siblings, so the udev rule leaves them out (a wrong guess could open the interface keystrokes travel on) and they need sudo until someone reports `steelmc-devices probe` from a real one.
+For 22 of these, every command was checked against the keyboard's own firmware, as SteelSeries GG ships it, before it went in: `settings` says which firmware. The rest have firmware that can't be read (or none in GG), so their commands come from GG's device files alone, and `settings` says that too. The same check marks 18 of the mice and headsets above. For a few, which USB interface they use is a guess from their siblings, so the udev rule leaves them out (a wrong guess could open the interface keystrokes travel on) and they need sudo until someone reports `steelmc-devices probe` from a real one.
 
 The Apex Pro boards, the Aerox 9 Wireless and the Arctis 9 have tools of their own, which go further, and keep them.
 

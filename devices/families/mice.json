@@ -8,7 +8,8 @@
    "products": {
     "1836": {
      "interface": 3,
-     "name": "Aerox 3"
+     "name": "Aerox 3",
+     "firmware_checked": "1.0.22+1922679c"
     }
    },
    "save": {
@@ -1208,7 +1209,8 @@
    "products": {
     "1850": {
      "interface": 3,
-     "name": "Aerox 5"
+     "name": "Aerox 5",
+     "firmware_checked": "1.0.1"
     }
    },
    "save": {
@@ -3506,15 +3508,18 @@
    "products": {
     "182a": {
      "interface": 0,
-     "name": "Prime Rainbow 6 Siege Black Ice Edition"
+     "name": "Prime Rainbow 6 Siege Black Ice Edition",
+     "firmware_checked": "1.0.15+4244c08"
     },
     "182e": {
      "interface": 0,
-     "name": "Prime"
+     "name": "Prime",
+     "firmware_checked": "1.0.15+4244c08"
     },
     "1856": {
      "interface": 0,
-     "name": "Prime CS:GO Neo Noir Edition"
+     "name": "Prime CS:GO Neo Noir Edition",
+     "firmware_checked": "1.0.15+4244c08"
     }
    },
    "save": {
@@ -3670,7 +3675,8 @@
    "products": {
     "184d": {
      "interface": 3,
-     "name": "Prime Mini"
+     "name": "Prime Mini",
+     "firmware_checked": "1.0.11"
     }
    },
    "save": {
@@ -3812,7 +3818,8 @@
    "products": {
     "182c": {
      "interface": 0,
-     "name": "Prime+"
+     "name": "Prime+",
+     "firmware_checked": "1.0.16+c4f2004"
     }
    },
    "save": {
@@ -5462,23 +5469,28 @@
     },
     "1710": {
      "interface": 0,
-     "name": "Rival 300"
+     "name": "Rival 300",
+     "firmware_checked": "0.104.0.0"
     },
     "1712": {
      "interface": 0,
-     "name": "Rival 300 Fallout 4 Edition"
+     "name": "Rival 300 Fallout 4 Edition",
+     "firmware_checked": "0.104.0.0"
     },
     "1714": {
      "interface": 0,
-     "name": "Rival 300 Acer Predator Edition"
+     "name": "Rival 300 Acer Predator Edition",
+     "firmware_checked": "0.104.0.0"
     },
     "1716": {
      "interface": 0,
-     "name": "Rival 300 CS:GO Fade Edition (stm32)"
+     "name": "Rival 300 CS:GO Fade Edition (stm32)",
+     "firmware_checked": "0.104.0.0"
     },
     "1718": {
      "interface": 0,
-     "name": "Rival 300 HP OMEN Edition"
+     "name": "Rival 300 HP OMEN Edition",
+     "firmware_checked": "0.104.0.0"
     },
     "171a": {
      "interface": 0,
@@ -6135,7 +6147,8 @@
    "products": {
     "1870": {
      "interface": 3,
-     "name": "Rival 3 Gen 2"
+     "name": "Rival 3 Gen 2",
+     "firmware_checked": "1.1.6+e57ff6a1"
     }
    },
    "save": {
@@ -6375,7 +6388,8 @@
    "products": {
     "1830": {
      "interface": 3,
-     "name": "Rival 3 Wireless (2.4\u00a0GHz mode)"
+     "name": "Rival 3 Wireless (2.4\u00a0GHz mode)",
+     "firmware_checked": "1.04.0.0"
     }
    },
    "save": {
@@ -6673,7 +6687,8 @@
    "products": {
     "1872": {
      "interface": 3,
-     "name": "Rival 3 Wireless Gen 2 (2.4\u00a0GHz mode)"
+     "name": "Rival 3 Wireless Gen 2 (2.4\u00a0GHz mode)",
+     "firmware_checked": "1.5.0.0"
     }
    },
    "save": {
@@ -6767,11 +6782,13 @@
    "products": {
     "183c": {
      "interface": 0,
-     "name": "Rival 5"
+     "name": "Rival 5",
+     "firmware_checked": "1.0.16+344d4866"
     },
     "183e": {
      "interface": 0,
-     "name": "Rival 5 Destiny Edition"
+     "name": "Rival 5 Destiny Edition",
+     "firmware_checked": "1.0.16+344d4866"
     }
    },
    "save": {
