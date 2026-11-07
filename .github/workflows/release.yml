@@ -1,0 +1,68 @@
+name: release
+
+# Push a tag like v1.2.3 to build the .deb, .rpm and Arch packages and publish them as a GitHub release, with the
+# changelog's notes for that version and a SHA256SUMS that steelmc-update checks every download against.
+# Run it by hand (Actions, release, Run workflow) to build the packages without publishing anything.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: version
+        id: version
+        run: |
+          code=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' devices/steelmc_devices.py)
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$code" ]; then
+            echo "The tag says ${GITHUB_REF_NAME#v} but the code says $code. Bump __version__ everywhere first."; exit 1
+          fi
+          echo "version=$code" >> "$GITHUB_OUTPUT"
+      - name: tests
+        run: |
+          for dir in update aerox arctis devices; do (cd "$dir" && python3 -m unittest -q); done
+      - name: install tree
+        run: make DESTDIR="$PWD/build/root" PREFIX=/usr install
+      - name: nfpm
+        run: |
+          curl -sSL -o nfpm.tar.gz https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_Linux_x86_64.tar.gz
+          tar -xzf nfpm.tar.gz nfpm
+      - name: packages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          for packager in deb rpm archlinux; do ./nfpm package -f packaging/nfpm.yaml -p "$packager" -t dist/; done
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -l dist
+      - name: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v v="## $VERSION" '$0 == v {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md 2>/dev/null || true
+          [ -s notes.md ] || echo "steelmc $VERSION" > notes.md
+          cat >> notes.md <<'NOTES'
+
+          **Install:** download the package for your distro below and open it, or:
+          - Debian, Ubuntu, Mint, Pop!_OS: `sudo apt install ./steelmc_*_all.deb`
+          - Fedora: `sudo dnf install ./steelmc-*.noarch.rpm` (openSUSE: `sudo zypper install --allow-unsigned-rpm ./steelmc-*.noarch.rpm`)
+          - Arch: `sudo pacman -U steelmc-*-any.pkg.tar.zst`
+
+          **Update later:** `steelmc-update`, or the Update button the app shows when a new version is out.
+          NOTES
+          sed -i 's/^          //' notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dist/
+      - name: publish
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "steelmc ${{ steps.version.outputs.version }}" --notes-file notes.md

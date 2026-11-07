@@ -1,0 +1,44 @@
+# The release packages: .deb, .rpm and Arch, all from the same make install tree (build/root).
+# Built by .github/workflows/release.yml: VERSION=1.2.3 nfpm package -f packaging/nfpm.yaml -p deb|rpm|archlinux
+name: steelmc
+arch: all
+platform: linux
+version: ${VERSION}
+release: 1
+maintainer: milescoviello <miles@milescoviello.com>
+description: Configure SteelSeries mice, keyboards, headsets and more on Linux, with no vendor software.
+homepage: https://github.com/milescoviello/steelmc
+license: MIT
+# Only what's ours: the system's own folders (/usr, /usr/bin, rules.d...) stay owned by the system's packages.
+contents:
+  - src: build/root/usr/lib/steelmc/
+    dst: /usr/lib/steelmc/
+    type: tree
+  - src: build/root/usr/bin/*
+    dst: /usr/bin/
+  - src: build/root/usr/lib/udev/rules.d/*
+    dst: /usr/lib/udev/rules.d/
+  - src: build/root/usr/lib/modules-load.d/steelmc.conf
+    dst: /usr/lib/modules-load.d/steelmc.conf
+  - src: build/root/usr/share/applications/net.local.steelmc.desktop
+    dst: /usr/share/applications/net.local.steelmc.desktop
+  - src: build/root/usr/share/doc/steelmc/
+    dst: /usr/share/doc/steelmc/
+    type: tree
+  - src: build/root/usr/share/licenses/steelmc/
+    dst: /usr/share/licenses/steelmc/
+    type: tree
+scripts:
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
+overrides:
+  deb:
+    depends: [python3]
+    # Ubuntu 24.04 has no PySide6 package; there the app says how to get it from PyPI
+    recommends: [python3-pyside6.qtwidgets, python3-pil]
+  rpm:
+    depends: [python3]
+    recommends: [python3-pyside6, "(python3-pillow or python3-Pillow)"]
+  archlinux:
+    depends: [python, pyside6, python-pillow, bash]
