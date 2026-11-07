@@ -58,13 +58,12 @@ BUILTINS = {"Q": "builtin:10", "T": "builtin:8", "I": "builtin:7", "O": "builtin
 
 def sample_bindings():
     """What apex-analog bindings --json says, with Caps Lock as Esc and SteelSeries + J as play or pause."""
-    names = [name for name, *_ in gui.plate_layout()] + ["WHEEL_PRESS", "MEDIA_BUTTON", "TILT_LEFT", "TILT_RIGHT"]
+    names = [name for name, *_ in gui.plate_layout()] + ["WHEEL_PRESS", "MEDIA_BUTTON"]
 
     def entry(action, raw, default=True):
         return {"action": action, "raw": raw, "default": default}
     base = {n: entry(n.lower(), f"base-{n}") for n in names}
     base.update(WHEEL_PRESS=entry("media:mute", "61e2000000"), MEDIA_BUTTON=entry("media:play-pause", "61cd000000"),
-                TILT_RIGHT=entry("media:next", "61b5000000"), TILT_LEFT=entry("media:previous", "61b6000000"),
                 CAPS=entry("esc", "5129000000", False))
     ss = {n: entry(BUILTINS.get(n, "none"), f"ss-{n}" if n in BUILTINS else "0000000000") for n in names}
     ss["J"] = entry("media:play-pause", "61cd000000", False)

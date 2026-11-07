@@ -147,7 +147,7 @@ NO_SENSOR_HIDS = {"ESC": 0x29, **{f"F{i}": 0x39 + i for i in range(1, 13)}, "PRT
 # press. The numpad and the controls around the wheel have no sensor. The wheel itself is bound separately, with 64.
 NUMPAD_HIDS = {"KP_NUM": 0x53, "KP_DIV": 0x54, "KP_MUL": 0x55, "KP_SUB": 0x56, "KP_ADD": 0x57, "KP_ENTER": 0x58,
                **{f"KP{n}": 0x58 + n for n in range(1, 10)}, "KP0": 0x62, "KP_DOT": 0x63, "KP_COMMA": 0x85}
-WHEEL_KEY_HIDS = {"WHEEL_PRESS": 0xF1, "MEDIA_BUTTON": 0xF5, "TILT_RIGHT": 0xF6, "TILT_LEFT": 0xF7}
+WHEEL_KEY_HIDS = {"WHEEL_PRESS": 0xF1, "MEDIA_BUTTON": 0xF5}  # the firmware also lists F2-F4 and F6-F8, which this board has no control for
 BIND_HIDS = {**{name: hid for name, (_, hid, _) in BY_NAME.items()},
              **{name: hid for name, hid in NO_SENSOR_HIDS.items() if name != "MENU"}, **NUMPAD_HIDS, **WHEEL_KEY_HIDS}
 BIND_NAMES = {hid: name for name, hid in BIND_HIDS.items()}
@@ -4507,7 +4507,7 @@ def build_parser():
                                     "media:previous, media:stop, media:mute, media:volume-up, media:volume-down, mouse1 to mouse8, "
                                     "scroll-up, scroll-down, tilt-left, tilt-right, none, or default to put it back. "
                                     "It lasts until you unplug the keyboard. apex-analog save keeps it.")
-    bd.add_argument("key", help="CAPS, F1, KP_ENTER, WHEEL_PRESS, MEDIA_BUTTON, TILT_LEFT, TILT_RIGHT, WHEEL_UP, WHEEL_DOWN, or any other key")
+    bd.add_argument("key", help="CAPS, F1, KP_ENTER, WHEEL_PRESS, MEDIA_BUTTON, WHEEL_UP, WHEEL_DOWN, or any other key")
     bd.add_argument("action", help="esc, ctrl+c, media:mute, mouse4, none, default...")
     bd.add_argument("--layer", choices=("base", "ss", "deep"), default="base",
                     help="base: normally (default), ss: while the SteelSeries key is held, deep: on a deeper press")
