@@ -45,7 +45,8 @@ class Packages(unittest.TestCase):
         assets = {"steelmc_9.9.9_all.deb": "pkg", "SHA256SUMS": "sums"}
         with tempfile.TemporaryDirectory() as folder:
             path = up.download("steelmc_9.9.9_all.deb", assets, folder, lambda url, accept=None: {"sums": sums, "pkg": good}[url])
-            self.assertEqual(open(path, "rb").read(), good)
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), good)
             with self.assertRaises(up.UpdateError):
                 up.download("steelmc_9.9.9_all.deb", assets, folder, lambda url, accept=None: {"sums": sums, "pkg": b"tampered"}[url])
             with self.assertRaises(up.UpdateError):
