@@ -1786,6 +1786,538 @@
      "readback_length": 64
     }
    }
+  },
+  {
+   "changes": "experimental",
+   "family": "msi_klm",
+   "kind": "keyboard",
+   "name": "MSI laptop keyboard (3 zones)",
+   "products": {
+    "2001": {
+     "name": "MSI GE62 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2002": {
+     "name": "MSI GE72 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "201c": {
+     "name": "MSI GF62 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "201e": {
+     "name": "MSI GF72 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "201d": {
+     "name": "MSI GP62 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2028": {
+     "name": "MSI GP63 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "201f": {
+     "name": "MSI GP72 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2029": {
+     "name": "MSI GP73 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2005": {
+     "name": "MSI GS60 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "200d": {
+     "name": "MSI GS63 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2004": {
+     "name": "MSI GS72 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2010": {
+     "name": "MSI GS73 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "200e": {
+     "name": "MSI GT62 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2003": {
+     "name": "MSI GT72 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "200f": {
+     "name": "MSI GT73 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "202a": {
+     "name": "SteelSeries Gaming Keyboard (MSI laptop)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "settings": {
+    "color": {
+     "type": "color",
+     "label": "Colour of the whole keyboard",
+     "command": [
+      10,
+      1,
+      2,
+      64,
+      1
+     ],
+     "also": [
+      [
+       10,
+       1,
+       2,
+       64,
+       2
+      ],
+      [
+       10,
+       1,
+       2,
+       64,
+       3
+      ]
+     ],
+     "packet_length": 64
+    },
+    "left_color": {
+     "type": "color",
+     "label": "Left zone colour",
+     "command": [
+      10,
+      1,
+      2,
+      64,
+      1
+     ],
+     "packet_length": 64
+    },
+    "middle_color": {
+     "type": "color",
+     "label": "Middle zone colour",
+     "command": [
+      10,
+      1,
+      2,
+      64,
+      2
+     ],
+     "packet_length": 64
+    },
+    "right_color": {
+     "type": "color",
+     "label": "Right zone colour",
+     "command": [
+      10,
+      1,
+      2,
+      64,
+      3
+     ],
+     "packet_length": 64
+    },
+    "default_lighting": {
+     "type": "action",
+     "label": "Back to the keyboard's own lighting",
+     "command": [
+      10,
+      1,
+      2,
+      65,
+      1
+     ],
+     "packet_length": 64
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "msi_klc",
+   "kind": "keyboard",
+   "name": "MSI laptop keyboard (per key)",
+   "products": {
+    "2006": {
+     "name": "MSI Per Key RGB Keyboard (2006)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2007": {
+     "name": "SteelSeries Gaming Keyboard (MSI laptop, 2007)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2008": {
+     "name": "MSI Per Key RGB Keyboard (2008)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "200a": {
+     "name": "MSI Per Key RGB Keyboard (200a)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2014": {
+     "name": "MSI Per Key RGB Keyboard (2014)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2016": {
+     "name": "MSI Per Key RGB Keyboard (2016)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2018": {
+     "name": "MSI Per Key RGB Keyboard (2018)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "201a": {
+     "name": "MSI Per Key RGB Keyboard (201a)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2020": {
+     "name": "MSI Per Key RGB Keyboard (2020)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2022": {
+     "name": "MSI Per Key RGB Keyboard (2022)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2024": {
+     "name": "MSI Per Key RGB Keyboard (2024)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2026": {
+     "name": "MSI Per Key RGB Keyboard (2026)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "202b": {
+     "name": "MSI Per Key RGB Keyboard (202b)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "202d": {
+     "name": "MSI Per Key RGB Keyboard (202d)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "202e": {
+     "name": "MSI Per Key RGB Keyboard (202e)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2031": {
+     "name": "MSI Per Key RGB Keyboard (2031)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2034": {
+     "name": "MSI Per Key RGB Keyboard (2034)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2036": {
+     "name": "MSI Per Key RGB Keyboard (2036)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2037": {
+     "name": "MSI Per Key RGB Keyboard (2037)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2038": {
+     "name": "MSI Per Key RGB Keyboard (2038)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "203a": {
+     "name": "MSI Per Key RGB Keyboard (203a)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "203b": {
+     "name": "MSI Per Key RGB Keyboard (203b)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "203c": {
+     "name": "MSI Per Key RGB Keyboard (203c)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "203d": {
+     "name": "MSI Per Key RGB Keyboard (203d)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2041": {
+     "name": "MSI Per Key RGB Keyboard (2041)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2042": {
+     "name": "MSI Per Key RGB Keyboard (2042)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2043": {
+     "name": "MSI Per Key RGB Keyboard (2043)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2044": {
+     "name": "MSI Per Key RGB Keyboard (2044)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2045": {
+     "name": "MSI Per Key RGB Keyboard (2045)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2046": {
+     "name": "MSI Per Key RGB Keyboard (2046)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2048": {
+     "name": "MSI Per Key RGB Keyboard (2048)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "204a": {
+     "name": "MSI Per Key RGB Keyboard (204a)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "204c": {
+     "name": "MSI Per Key RGB Keyboard (204c)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "204e": {
+     "name": "MSI Per Key RGB Keyboard (204e)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2050": {
+     "name": "MSI Per Key RGB Keyboard (2050)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2052": {
+     "name": "MSI Per Key RGB Keyboard (2052)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2055": {
+     "name": "MSI Per Key RGB Keyboard (2055)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2058": {
+     "name": "MSI Per Key RGB Keyboard (2058)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "205a": {
+     "name": "MSI Per Key RGB Keyboard (205a)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "205c": {
+     "name": "MSI Per Key RGB Keyboard (205c)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "205d": {
+     "name": "MSI Per Key RGB Keyboard (205d)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "205f": {
+     "name": "MSI Per Key RGB Keyboard (205f)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "save": {
+    "command": [
+     11,
+     0,
+     9,
+     0
+    ],
+    "packet_length": 64
+   },
+   "settings": {
+    "color": {
+     "type": "color",
+     "label": "Colour of the whole keyboard",
+     "command": [
+      11,
+      0,
+      80,
+      0
+     ],
+     "packet_length": 64
+    },
+    "lighting_reset": {
+     "type": "action",
+     "label": "Back to the keyboard's own lighting",
+     "command": [
+      11,
+      0,
+      64
+     ],
+     "packet_length": 64
+    }
+   }
   }
  ]
 }
