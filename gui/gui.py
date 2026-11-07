@@ -1634,8 +1634,13 @@ class KeyboardPage(QWidget):
         hint = muted("Bindings live on the keyboard itself, so they work with no software running. They last until you unplug it, "
                      "and Save to keyboard keeps them. For text, commands or macros, use Shortcuts.")
         hint.setWordWrap(True)
+        self.changed_title = QLabel("Your bindings")
+        self.changed_title.setObjectName("title")
+        self.changed_list = QVBoxLayout()
+        self.changed_list.setSpacing(4)
         panel = well(self.bind_title, self.bind_layer, self.bind_other, self.deep_row, self.bind_picker,
-                     row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, None))
+                     row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, None), self.changed_title)
+        panel.layout().addLayout(self.changed_list)
         self.deep_row.hide()
         panel.layout().addStretch(1)
         return panel
@@ -2057,6 +2062,47 @@ class KeyboardPage(QWidget):
             if not (action.startswith("builtin:") or action.startswith("raw:")):
                 self.bind_picker.set_action(action)
         self.bind_undo.setEnabled(bool(self.bindings_original and self.bindings and binding_changes(self.bindings_original, self.bindings)))
+        self.show_changed_bindings()
+
+    def changed_bindings(self, layer):
+        """[(key, entry)] on this layer that differ from what the keyboard does out of the box."""
+        if not self.bindings:
+            return []
+        entries = {**self.bindings["layers"].get(layer, {}), **self.bindings.get("wheel", {}).get(layer, {})}
+        return [(key, entry) for key, entry in entries.items() if not entry["default"]]
+
+    def show_changed_bindings(self):
+        """Each key changed on the picked layer, with a button that puts just that one back."""
+        if not hasattr(self, "changed_list"):
+            return
+        while self.changed_list.count():
+            item = self.changed_list.takeAt(0)
+            widgets = [item.widget()] if item.widget() else []
+            if item.layout():
+                while item.layout().count():
+                    widgets.append(item.layout().takeAt(0).widget())
+            for widget in widgets:
+                if widget:
+                    widget.hide()  # hidden first, so nothing lingers on screen before Qt deletes it
+                    widget.deleteLater()
+        layer = self.bind_layer_name()
+        changed = self.changed_bindings(layer)
+        when = BIND_LAYERS[self.bind_layer.currentIndex()][0]
+        self.changed_title.setText(f"Your bindings, {when[:1].lower()}{when[1:]}")
+        if not changed:
+            self.changed_list.addWidget(muted("None on this layer: every key does what it does out of the box."))
+            return
+        for key, entry in changed:
+            name = CONTROL_LABELS.get(key) or KEY_LABELS.get(key, key)
+            action = "one of the keyboard's own functions" if entry["action"].startswith("builtin:") else pretty_action(entry["action"])
+            action = action[4:] if action.startswith("Key ") else action
+            remove = QPushButton("Remove")
+            remove.setToolTip(f"Put {name} back to what it does out of the box on this layer")
+            remove.clicked.connect(lambda checked=False, k=key, n=name, l=layer: self.remove_binding(k, n, l))
+            self.changed_list.addLayout(row(muted(f"{name}: {action}"), None, remove))
+
+    def remove_binding(self, key, name, layer):
+        self.apply(lambda: self.device.bind([key], "default", layer), f"{name} is back to normal.")
 
     def layer_changed(self, *_):
         if self.mode == "bindings":

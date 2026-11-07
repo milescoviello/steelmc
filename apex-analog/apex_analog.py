@@ -86,6 +86,7 @@ ALLOWED = {
     0xE3: "what up to 10 keys do, on one layer",
     0xE4: "what the volume wheel does, on one layer",
     0xB3: "each key's press and release points, or with 2 first, where its deeper press starts",
+    0xCD: "which keys light up while the SteelSeries layer is on",
 }
 
 # The only commands that change anything, sent only for lights. Each handler was read on both chips: they store colours in the
@@ -118,6 +119,7 @@ BIND_COMMANDS = {
     0x63: "set what up to 10 keys do, on one layer",
     0x64: "set what the volume wheel does, on one layer",
     0x60: "choose which key turns on the SteelSeries layer while held",
+    0x4D: "choose which keys light up while the SteelSeries layer is on",
 }
 # The one command that writes flash: all current settings, over one of the five saved configs. Same code as the Save Config menu.
 SAVE_COMMAND = 0x09
@@ -316,7 +318,13 @@ def _check_layer_key(payload):
         raise ValueError("refused to send 60: it takes one key the keyboard can bind")
 
 
-BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel, 0x60: _check_layer_key}
+def _check_layer_lights(payload):
+    """4D <32 bytes>: one bit per HID usage, the same mask the keyboard's saved config holds. The handler needs all 32 bytes."""
+    if len(payload) != 33 or any(not 0 <= b <= 0xFF for b in payload[1:]):
+        raise ValueError("refused to send 4D: it takes exactly 32 bytes of key bits")
+
+
+BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel, 0x60: _check_layer_key, 0x4D: _check_layer_lights}
 
 
 def _check_deep_actuation(payload):
@@ -802,11 +810,30 @@ class Keyboard:
         return out
 
     def set_bindings(self, layer, changes):
-        """Rebind keys on one layer: {'CAPS': parse_binding('esc')}. Stays in the keyboard's memory until save_to_keyboard."""
+        """Rebind keys on one layer: {'CAPS': parse_binding('esc')}. Stays in the keyboard's memory until save_to_keyboard.
+        On the SteelSeries layer, a key that does something lights up while the layer is on, as the keyboard's own ones do."""
         items = [(BIND_HIDS[bind_key(name)], bytes(record)) for name, record in changes.items()]
         for start in range(0, len(items), 10):
             part = items[start:start + 10]
             self._write([0x63, layer, len(part)] + [byte for hid, record in part for byte in (hid, *record)])
+        if layer == 1:
+            lights = self.layer_lights()
+            for hid, record in items:
+                (lights.add if record[0] else lights.discard)(hid)
+            self.set_layer_lights(lights)
+
+    def layer_lights(self):
+        """HID usages of the keys that light up while the SteelSeries layer is on. Everything else goes dark then."""
+        reply = self._ask([0xCD], lambda r: len(r) >= 32)
+        return {hid for hid in range(256) if reply[hid // 8] >> (hid % 8) & 1}
+
+    def set_layer_lights(self, hids):
+        """Light exactly these keys while the SteelSeries layer is on. The keyboard keeps the mask in the config save writes,
+        so it lasts until unplugged unless saved. Takes effect straight away."""
+        mask = [0] * 32
+        for hid in hids:
+            mask[hid // 8] |= 1 << (hid % 8)
+        self._write([0x4D] + mask)
 
     def wheel(self, layer=0):
         """(up, down): what turning the volume wheel does, normally (0) or while the SteelSeries key is held (1)."""
@@ -3365,7 +3392,9 @@ your terminal back, and several can run at once. Add --watch to keep one in the 
     actuation KEYS MM    where keys fire, like: actuation WASD 1.2
     rapid KEYS on|off    the keyboard's own rapid tap
     bind KEY ACTION      what a key does, on the keyboard itself, like: bind CAPS esc. --layer ss or deep too
+    unbind KEY           put a key back to what it does out of the box
     bindings             what every key does
+    ss-lights [sync]     which keys glow while the SteelSeries key is held. sync lights every key bound there
     layer-key KEY        move the SteelSeries layer to another key, so the SteelSeries key itself can be bound
     preset save|use NAME keep setups on this computer
     save                 write the current settings to the keyboard's flash, so they survive a replug
@@ -3674,6 +3703,47 @@ def cmd_bindings(args):
             print(f"  {key:13}{entry['action']}" + ("" if entry["default"] else "   (changed)"))
     if report["layer_key"] != "SS":
         print(f"The SteelSeries layer is on while {report['layer_key']} is held.")
+    return 0
+
+
+def cmd_ss_lights(args):
+    """Which keys glow while the SteelSeries layer is on. sync lights exactly the keys bound on that layer, the way GG does."""
+    with Keyboard() as kb:
+        if args.action == "sync":
+            bound = kb.bindings(1)
+            want = {BIND_HIDS[name] for name, record in bound.items() if record[0]}
+            kb.set_layer_lights(want)
+            time.sleep(0.1)
+            if kb.layer_lights() != want:
+                raise ApexError("Sent, but it reads back differently.")
+            print(f"{len(want)} keys now light up while the SteelSeries layer is on: every key bound on it. "
+                  f"It lasts until you unplug the keyboard. apex-analog save keeps it.")
+            return 0
+        lit = kb.layer_lights()
+    names = [BIND_NAMES.get(hid, f"{hid:#04x}") for hid in sorted(lit)]
+    print("While the SteelSeries layer is on, these light up: " + (" ".join(names) if names else "none") + ".")
+    return 0
+
+
+def cmd_unbind(args):
+    """Put a key back to what it does out of the box: on one layer, or on every layer where it was changed."""
+    if args.layer:
+        args.action = "default"
+        return cmd_bind(args)
+    key = bind_key(args.key)
+    with Keyboard() as kb:
+        report = read_bindings(kb, tuple(LAYERS.values()))
+    changed = []
+    for name in report["layers"]:
+        entry = report["layers"][name].get(key) or report["wheel"].get(name, {}).get(key)
+        if entry and not entry["default"]:
+            changed.append(name)
+    if not changed:
+        print(f"{key} already does what it does out of the box on every layer.")
+        return 0
+    for name in changed:
+        args.layer, args.action = name, "default"
+        cmd_bind(args)
     return 0
 
 
@@ -4541,6 +4611,19 @@ def build_parser():
     bd.add_argument("--layer", choices=("base", "ss", "deep"), default="base",
                     help="base: normally (default), ss: while the SteelSeries key is held, deep: on a deeper press")
     bd.set_defaults(func=cmd_bind)
+
+    ub = commands.add_parser("unbind", help="put a key back to what it does out of the box, on one layer",
+                             description="Put a key back to what it does out of the box. On the SteelSeries layer that usually means "
+                                         "nothing, and the key stops lighting up while the layer is on.")
+    ub.add_argument("key", help="CAPS, F1, COMMA, WHEEL_UP...")
+    ub.add_argument("--layer", choices=("base", "ss", "deep"),
+                    help="only this layer: base (normally), ss (while the SteelSeries key is held) or deep (on a deeper press). "
+                         "Leave out to undo every layer where the key was changed")
+    ub.set_defaults(func=cmd_unbind)
+
+    sl = commands.add_parser("ss-lights", help="which keys light up while the SteelSeries layer is on")
+    sl.add_argument("action", nargs="?", choices=("sync",), help="sync: light exactly the keys bound on that layer")
+    sl.set_defaults(func=cmd_ss_lights)
 
     lk = commands.add_parser("layer-key", help="which key turns on the SteelSeries layer while held, so the SteelSeries key itself can be bound")
     lk.add_argument("key", nargs="?", help="any key, or SS to put it back. Leave out to see which it is")

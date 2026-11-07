@@ -671,6 +671,27 @@ class BindingsMode(unittest.TestCase):
         self.assertTrue(self.page.caps["ESC"].inert)
         self.assertFalse(self.page.caps["W"].inert)
 
+    def test_your_bindings_lists_changes_with_a_remove_each(self):
+        def texts():
+            out = []
+            for i in range(self.page.changed_list.count()):
+                item = self.page.changed_list.itemAt(i)
+                if item.widget():
+                    out.append(item.widget().text())
+                elif item.layout():
+                    out += [item.layout().itemAt(j).widget().text() for j in range(item.layout().count()) if item.layout().itemAt(j).widget()]
+            return out
+        self.assertIn("Remove", texts())
+        self.assertIn("Caps: Esc", texts())
+        self.layer("ss")
+        self.assertTrue(any(t.startswith("J") for t in texts()), texts())
+        self.assertFalse(any(t.startswith("Q") for t in texts()), texts())  # the keyboard's own SS+Q isn't a change
+        row = next(self.page.changed_list.itemAt(i).layout() for i in range(self.page.changed_list.count())
+                   if self.page.changed_list.itemAt(i).layout())
+        row.itemAt(row.count() - 1).widget().click()
+        self.assertEqual(self.device.calls[-1][0], "bind")
+        self.assertEqual(self.device.calls[-1][2:], ("default", "ss"))
+
     def test_bind_a_key(self):
         QTest.mouseClick(self.page.caps["CAPS"], Qt.LeftButton)
         self.assertEqual(self.page.bind_picker.action_text(), "esc")

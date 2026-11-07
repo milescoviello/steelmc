@@ -87,8 +87,8 @@ class Safety(unittest.TestCase):
                 kb._ask([command])
 
     def test_allowlist_has_not_grown_by_accident(self):
-        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4, 0xB3})
-        self.assertEqual(set(a.BIND_COMMANDS), {0x63, 0x64, 0x60})
+        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4, 0xB3, 0xCD})
+        self.assertEqual(set(a.BIND_COMMANDS), {0x63, 0x64, 0x60, 0x4D})
         self.assertEqual(set(a.BIND_CHECKS), set(a.BIND_COMMANDS))
 
     def test_only_known_write_commands_can_be_sent(self):
@@ -140,6 +140,10 @@ class SimulatedKeyboard:
         self.layer_key = 0xF0
         self.first = {hid: (50, 46) for hid in a.DEEP_HIDS}  # press and release points, n/255
         self.second = {hid: (255, 255) for hid in a.DEEP_HIDS}  # where a deeper press starts: the bottom, out of the box
+        self.lights = bytearray(32)  # keys lit while the SteelSeries layer is on, one bit per HID usage
+        for hid, record in self.tables[1].items():
+            if record[0]:
+                self.lights[hid // 8] |= 1 << (hid % 8)
         self.sent = []
 
     def close(self):
@@ -161,6 +165,8 @@ class SimulatedKeyboard:
     def ask(self, p):
         if p[0] == 0xE0:
             return bytes([self.layer_key]).ljust(64, b"\0")
+        if p[0] == 0xCD:
+            return bytes(self.lights).ljust(64, b"\0")
         if p[0] in (0xB1, 0xB2, 0xB3):
             deep = p[0] == 0xB3 and p[1] == 2
             count, first, stride = (p[2], 3, 3) if p[0] == 0xB3 else (p[1], 2, 3 if p[0] == 0xB1 else 2)
@@ -199,6 +205,9 @@ class SimulatedKeyboard:
             self.wheel[0 if p[1] == 0 else 1] = [bytes(p[2:7]), bytes(p[7:12])]
         elif p[0] == 0x60:
             self.layer_key = p[1]
+        elif p[0] == 0x4D:
+            assert len(p) == 33, p.hex()  # the firmware ignores a shorter one
+            self.lights = bytearray(p[1:33])
         elif p[0] == 0x33:
             assert p[1] == 2, p.hex()
             for i in range(p[2]):
@@ -220,6 +229,27 @@ def simulated(sim=None):
 
 
 class Bindings(unittest.TestCase):
+    def test_ss_layer_binds_light_up_and_unbinds_go_dark(self):
+        sim = SimulatedKeyboard()
+        kb = simulated(sim)
+        comma, dot = a.BIND_HIDS[a.bind_key(",")], a.BIND_HIDS[a.bind_key(".")]
+        self.assertNotIn(comma, kb.layer_lights())
+        kb.set_bindings(1, {",": a.parse_binding("media:previous"), ".": a.parse_binding("media:next")})
+        self.assertTrue({comma, dot} <= kb.layer_lights())
+        kb.set_bindings(1, {",": a.default_binding(1, comma)})
+        self.assertNotIn(comma, kb.layer_lights())
+        self.assertIn(dot, kb.layer_lights())
+        lit_before = kb.layer_lights()
+        kb.set_bindings(0, {"CAPS": a.parse_binding("esc")})  # the normal layer leaves the lights alone
+        self.assertEqual(kb.layer_lights(), lit_before)
+
+    def test_layer_light_writes_are_checked(self):
+        with self.assertRaises(ValueError):
+            a._check_layer_lights([0x4D] + [0] * 31)
+        a._check_layer_lights([0x4D] + [0] * 32)
+        self.assertIn(0x4D, a.BIND_COMMANDS)
+        self.assertIn(0xCD, a.ALLOWED)
+
     def test_actions_round_trip(self):
         for text in ("esc", "ctrl+c", "ctrl+shift+z", "alt+tab", "f13", "kp-enter", "numlock", "media:mute", "media:volume-up",
                      "mouse4", "scroll-up", "tilt-left", "none", "builtin:10", "builtin:2:1", "int3", "iso\\"):
