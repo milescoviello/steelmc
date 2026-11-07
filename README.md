@@ -31,6 +31,8 @@ It installs anything missing with your distro's own packages (Python, PySide6 fo
 
 The command-line tools need only Python 3.8 or newer. The app needs PySide6, and `apex-oled` needs Pillow.
 
+**Updating:** `steelmc-update` updates steelmc the way you installed it. In a clone, it pulls and runs `install.sh` again. With a package, it gets the newest release's package for your distro, checks it against the release's SHA256SUMS and installs it with your package manager. After `make install`, it gets the release's source and runs `make install` again. `steelmc-update --check` only says whether there's something new. When steelmc came from a package or `make install`, the app also shows a slim line at the top when a new release is out: Update runs `steelmc-update`, and Not now hides it until the next release. The app asks GitHub once a day at most, and `STEELMC_NO_UPDATE_CHECK=1` turns that off.
+
 ## The app
 
 Run `steelmc`, or find SteelMC in your application menu.
