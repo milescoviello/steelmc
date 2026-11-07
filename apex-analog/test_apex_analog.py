@@ -397,17 +397,24 @@ class Firmware(unittest.TestCase):
         with self.assertRaisesRegex(a.ApexError, "Refusing"):
             a.Keyboard(direct=True)
 
-    def test_apex_pro_and_tkl_are_read_only(self):
+    def test_apex_pro_and_tkl_changes_are_experimental(self):
         for product, name in (("1610", "Apex Pro"), ("1614", "Apex Pro TKL")):
             kb = a.Keyboard.__new__(a.Keyboard)
-            kb.fd, kb.client = None, None
+            kb.fd, kb.client = None, SimulatedKeyboard()
             kb._set_model(product)
-            self.assertEqual(kb.model, name)
-            for payload in ([0x31, 1, 0x1A, 23, 21], [0x3B], [a.SAVE_COMMAND, 1], [0x63, 0, 1, 0x39, 0x51, 0x29, 0, 0, 0]):
-                with self.assertRaisesRegex(a.ApexError, "isn't on the " + name):
-                    kb._write(payload)
+            self.assertEqual((kb.model, kb.changes, kb.writable), (name, a.EXPERIMENTAL, True))
+            a.Keyboard.warned = False
+            said = io.StringIO()
+            with contextlib.redirect_stderr(said):
+                kb._write([0x63, 0, 1, 0x39, 0x51, 0x29, 0, 0, 0])
+                kb._write([0x63, 0, 1, 0x39, 0x51, 0x39, 0, 0, 0])
+            self.assertEqual(said.getvalue().count("experimental"), 1)
+            self.assertIn(name, said.getvalue())
         kb._set_model("1640")
-        self.assertTrue(kb.writable)
+        self.assertEqual(kb.changes, a.TESTED)
+        kb._set_model("9999")
+        with self.assertRaisesRegex(a.ApexError, "isn't on the"):
+            kb._write([0x3B])
 
     def test_missing_keyboard_is_explained(self):
         a._find_control_node = lambda: (None, None, None)

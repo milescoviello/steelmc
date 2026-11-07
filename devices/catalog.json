@@ -1225,8 +1225,8 @@
    "part": "device",
    "protocol": "apex-4.16.8",
    "support": {
-    "level": "read-only",
-    "note": "firmware 4.16.8: key depth and everything built on it; changing settings isn't on yet",
+    "level": "experimental",
+    "note": "firmware 4.16.8: everything apex-analog does; changing settings hasn't been tried on a real one",
     "tools": [
      "apex-analog"
     ]
@@ -1259,8 +1259,8 @@
    "part": "device",
    "protocol": "apex-4.16.8",
    "support": {
-    "level": "read-only",
-    "note": "firmware 4.16.8: key depth and everything built on it; changing settings isn't on yet",
+    "level": "experimental",
+    "note": "firmware 4.16.8: everything apex-analog does; changing settings hasn't been tried on a real one",
     "tools": [
      "apex-analog"
     ]

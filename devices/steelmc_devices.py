@@ -18,7 +18,7 @@ __version__ = "0.1.0"
 VENDOR = "1038"
 USB = "/sys/bus/usb/devices"
 CATALOG = os.path.join(os.path.dirname(os.path.realpath(__file__)), "catalog.json")
-LEVELS = {"full": "supported", "read-only": "read-only for now", "part of a supported device": "part of a supported device", None: "not supported yet"}
+LEVELS = {"full": "supported", "experimental": "supported, changes experimental", "read-only": "read-only for now", "part of a supported device": "part of a supported device", None: "not supported yet"}
 
 
 def load_catalog(path=CATALOG):

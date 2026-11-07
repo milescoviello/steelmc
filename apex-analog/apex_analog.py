@@ -63,9 +63,13 @@ __version__ = "0.1.0"
 
 VENDOR, PRODUCT = "1038", "1640"
 BOOTLOADER_PRODUCT = "1641"
-# Product ID -> (name, whether this tool may change its settings). The Apex Pro and Apex Pro TKL run the same 4.16.8 firmware code as
-# the Gen 3 for every command here, with the same keys on the same sensors, but nobody has tried them yet, so they're read-only.
-MODELS = {"1640": ("Apex Pro Gen 3", True), "1610": ("Apex Pro", False), "1614": ("Apex Pro TKL", False)}
+# Product ID -> (name, how far changing its settings is proven). The Apex Pro and Apex Pro TKL run the same 4.16.8 firmware code as the
+# Gen 3 for every command here, with the same keys on the same sensors, but nobody has changed one yet, so that's experimental.
+TESTED, EXPERIMENTAL, READ_ONLY = "tested", "experimental", "read-only"
+MODELS = {"1640": ("Apex Pro Gen 3", TESTED), "1610": ("Apex Pro", EXPERIMENTAL), "1614": ("Apex Pro TKL", EXPERIMENTAL)}
+EXPERIMENTAL_NOTE = ("Changing settings on the {model} is experimental. Its firmware runs the same code as the Apex Pro Gen 3's for this, "
+                     "but nobody has tried it on a real one yet. A change that isn't saved goes away when you unplug the keyboard. "
+                     "Please report whether it worked.")
 BOOTLOADERS = {"1641", "1611", "1615"}
 FIRMWARE = "0416"  # bcdDevice of firmware 4.16.8, the only version these commands were read from
 
@@ -513,6 +517,7 @@ class Keyboard:
 
     client = None
     fd = None
+    warned = False  # whether this program has said that changes on this model are experimental
 
     def __init__(self, direct=False):
         """Goes through the daemon if one is running. direct=True talks to the keyboard itself, which is what the daemon does."""
@@ -557,7 +562,8 @@ class Keyboard:
 
     def _set_model(self, product):
         self.product = product
-        self.model, self.writable = MODELS.get(product, (f"keyboard {product}", False))
+        self.model, self.changes = MODELS.get(product, (f"keyboard {product}", READ_ONLY))
+        self.writable = self.changes != READ_ONLY
 
     def _load_calibration(self):
         self._calibration = {}
@@ -835,8 +841,10 @@ class Keyboard:
                            and payload[0] not in BIND_COMMANDS):
             raise ValueError(f"refused to send {payload[:1]!r}: not a known write command")
         if not getattr(self, "writable", True):
-            raise ApexError(f"Changing settings isn't on the {self.model} yet. Its firmware runs the same code as the Apex Pro Gen 3's for "
-                            f"this, but nobody has tried it on a real one. Reading key depth and everything built on it works.")
+            raise ApexError(f"Changing settings isn't on the {self.model} yet. Reading key depth and everything built on it works.")
+        if getattr(self, "changes", TESTED) == EXPERIMENTAL and self.client is not None and not Keyboard.warned:
+            Keyboard.warned = True  # once per program, from the side a person is watching
+            _say(EXPERIMENTAL_NOTE.format(model=self.model))
         check = BIND_CHECKS.get(payload[0]) or SETTING_CHECKS.get(payload[0])
         if check:
             check(payload)
@@ -3774,6 +3782,8 @@ def cmd_save(args):
             raise ApexError(f"The keyboard reports config slot {slot}, which isn't 1 to 5. Not writing anything.")
         print(f"This writes all the keyboard's current settings to its flash, replacing saved config {slot}.")
         print(f"It sends one command: 09 {slot:02X}. The keyboard's own Save Config menu runs the same code.")
+        if kb.changes == EXPERIMENTAL:
+            print(f"This hasn't been tried on a real {kb.model} yet. Its firmware's save runs the same code as the Apex Pro Gen 3's.")
         if not args.yes and input("Type yes to write: ").strip() != "yes":
             print("Nothing written.")
             return 1
@@ -4310,7 +4320,8 @@ def cmd_info(args):
             settings[name]["deep"] = min(LEVEL_TENTHS, key=lambda t: abs(t / 10 - value["release"])) / 10 if value else None
         depths = kb.read()
         report = {
-            "keyboard": f"{VENDOR}:{kb.product}", "model": kb.model, "can_change_settings": kb.writable, "firmware": kb.firmware, "node": kb.node,
+            "keyboard": f"{VENDOR}:{kb.product}", "model": kb.model, "can_change_settings": kb.writable, "changes": kb.changes,
+            "firmware": kb.firmware, "node": kb.node,
             "virtual_devices": os.access("/dev/uinput", os.W_OK),
             "can_stop_keys_typing": all(os.access(n, os.R_OK) for n in _physical_key_nodes()),
             "oled_actuation_icon": kb.actuation_icon(),
@@ -4320,7 +4331,9 @@ def cmd_info(args):
         print(json.dumps(report))
         return
     print(f"{report['model']} ({report['keyboard']}), firmware {report['firmware']}, {report['node']}, {len(report['keys'])} keys with sensors")
-    if not report["can_change_settings"]:
+    if report["changes"] == EXPERIMENTAL:
+        print(EXPERIMENTAL_NOTE.format(model=report["model"]))
+    elif not report["can_change_settings"]:
         print("Read-only on this model for now: key depth and everything built on it works, changing its settings doesn't yet.")
     print(f"Virtual controller, mouse, keystrokes: {'ok' if report['virtual_devices'] else 'no access, run ./install.sh'}")
     print(f"Stopping mapped keys from typing:      {'ok' if report['can_stop_keys_typing'] else 'no access, run ./install.sh'}")

@@ -319,6 +319,12 @@ class KeyboardPageTest(unittest.TestCase):
         self.assertNotIn("UP", self.page.selected_keys())
         self.assertEqual(len(self.page.selected_keys()), 61)
 
+    def test_experimental_model_says_so(self):
+        self.device.data = {**self.device.data, "info": {**self.device.data["info"], "model": "Apex Pro TKL", "changes": "experimental"}}
+        self.page.refresh()
+        self.assertEqual(self.page.connection.text(), "Apex Pro TKL")
+        self.assertIn("experimental", self.page.status.text())
+
     def test_every_sensor_key_is_on_the_plate(self):
         self.assertEqual(set(self.device.data["info"]["keys"]) - set(self.page.caps), set())
 

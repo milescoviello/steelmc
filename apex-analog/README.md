@@ -15,7 +15,9 @@ Press a key slowly and watch its bar. Ctrl-C quits. There is nothing to configur
 
 ## Other keyboards
 
-The original Apex Pro (`1038:1610`) and Apex Pro TKL (`1038:1614`) run firmware 4.16.8 too. Compared command by command, their firmware runs the same code as the Apex Pro Gen 3's for everything this tool sends, with the same keys on the same sensors. So key depth and everything built on it works on them: bars, controllers, `map`, MIDI, typing, shortcuts and streaming. Changing their settings (actuation, rapid tap, bindings, lighting, `save`) stays off until someone tries it on a real one. If you have one, `apex-analog info` says what it found.
+The original Apex Pro (`1038:1610`) and Apex Pro TKL (`1038:1614`) run firmware 4.16.8 too. Compared command by command, their firmware runs the same code as the Apex Pro Gen 3's for everything this tool sends, with the same keys on the same sensors. So everything works on them: key depth and all that's built on it, and changing actuation, rapid tap, bindings and lighting.
+
+Changing settings on them is **experimental**: nobody has tried it on a real one yet, and the first change each time says so. A change that isn't saved goes away when you unplug the keyboard. If you have one, please report what worked.
 
 ## Requirements
 

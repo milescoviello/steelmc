@@ -1784,7 +1784,10 @@ class KeyboardPage(QWidget):
         self.shortcut_list.setText("\n".join(f"{shortcut_label(k)}: {v}" for k, v in sorted(self.shortcuts.items())))
         self.loading = False
         self.selection_changed()
-        if not self.status.text():
+        if info.get("changes") == "experimental":
+            self.status.say(f"Changing settings on the {info.get('model', 'keyboard')} is experimental: nobody has tried it on a real one yet. "
+                            "Unplugging undoes anything not saved.", "warn")
+        elif not self.status.text():
             self.status.say("Changes apply right away. Save to keep them after a replug.")
 
     def set_cap_live(self, cap, live):
