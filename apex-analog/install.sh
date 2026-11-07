@@ -35,7 +35,7 @@ if [ "$ok" = 1 ]; then
     echo "Access is already fine, no system changes needed."
 else
     echo "Installing a udev rule so this works without sudo (asks for your password):"
-    sudo install -m 0644 "$repo/udev/70-apex-analog.rules" /etc/udev/rules.d/70-apex-analog.rules
+    sudo install -D -m 0644 "$repo/udev/70-apex-analog.rules" /etc/udev/rules.d/70-apex-analog.rules
     sudo modprobe uinput || true
     sudo udevadm control --reload-rules || true
     sudo udevadm trigger --action=change --subsystem-match=hidraw --subsystem-match=input --subsystem-match=misc || true

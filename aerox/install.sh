@@ -15,7 +15,7 @@ if cmp -s "$repo/udev/70-aerox.rules" "$rule"; then
     echo "The udev rule is already installed."
 else
     echo "Installing a udev rule so this works without sudo (asks for your password):"
-    sudo install -m 0644 "$repo/udev/70-aerox.rules" "$rule"
+    sudo install -D -m 0644 "$repo/udev/70-aerox.rules" "$rule"
     sudo udevadm control --reload-rules || true
     sudo udevadm trigger --subsystem-match=hidraw || true
     echo "Installed. If aerox still can't open the mouse, replug the dongle."

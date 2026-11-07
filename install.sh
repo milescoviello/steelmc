@@ -52,7 +52,8 @@ if [ -n "$missing" ]; then
     fi
     command -v python3 >/dev/null 2>&1 || { echo "Python 3 is needed for everything here."; exit 1; }
     if ! has_qt && [ ! -x "$venv/bin/python" ] && ask "Get PySide6 for the app from PyPI instead, into $venv?"; then
-        python3 -m venv --system-site-packages "$venv" && "$venv/bin/python" -m pip install --quiet PySide6 \
+        echo "Getting PySide6 from PyPI (a few hundred MB)..."
+        python3 -m venv --system-site-packages "$venv" && "$venv/bin/python" -m pip install --quiet PySide6 && echo "PySide6 is ready for the app" \
             || { rm -rf "$venv"; echo "That didn't work: python3-venv may be missing. The command-line tools still work."; }
     fi
 fi
@@ -66,7 +67,7 @@ bash "$repo/apex-oled/install.sh"
 
 # apex-analog's virtual controllers need uinput; this loads it at every boot, not just now.
 if [ ! -e /etc/modules-load.d/steelmc.conf ] && [ ! -e /usr/lib/modules-load.d/steelmc.conf ]; then
-    echo uinput | sudo tee /etc/modules-load.d/steelmc.conf >/dev/null && echo "uinput will load at boot"
+    { sudo mkdir -p /etc/modules-load.d && echo uinput | sudo tee /etc/modules-load.d/steelmc.conf >/dev/null && echo "uinput will load at boot"; } || true
 fi
 
 mkdir -p "$bin" "$apps"
