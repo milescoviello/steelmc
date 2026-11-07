@@ -206,7 +206,7 @@ SHORTCUT_KINDS = [("Press keys", "keys", "ctrl+c"), ("Type text", "text", "hello
 BIND_ACTION_KINDS = [kind for kind in ACTION_KINDS if kind[1] != "dpi"]
 BIND_LAYERS = [("Normally", "base"), ("While the SteelSeries key is held", "ss"), ("On a deeper press", "deep")]
 OTHER_CONTROLS = [("Wheel up", "WHEEL_UP"), ("Wheel down", "WHEEL_DOWN"), ("Wheel press", "WHEEL_PRESS"),
-                  ("Button under the wheel", "MEDIA_BUTTON"), ("Tilt left", "TILT_LEFT"), ("Tilt right", "TILT_RIGHT")]
+                  ("Button under the wheel", "MEDIA_BUTTON")]
 CONTROL_LABELS = {name: label for label, name in OTHER_CONTROLS}
 CAP_MEDIA = {"play-pause": "Play", "next": "Next", "previous": "Prev", "stop": "Stop", "mute": "Mute", "volume-up": "Vol+",
              "volume-down": "Vol-"}

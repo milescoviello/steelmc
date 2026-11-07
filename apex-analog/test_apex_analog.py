@@ -130,7 +130,7 @@ class Safety(unittest.TestCase):
 class SimulatedKeyboard:
     """Answers the binding commands the way firmware 4.16.8 does, quirks included, standing in for the daemon. Anything else fails."""
     # Keys the firmware's table can bind that apex-analog never names: they aren't on this board, or FB shares ENTER's entry.
-    UNNAMED = (0xF2, 0xF3, 0xF4, 0xF8, 0xFB)
+    UNNAMED = (0xF2, 0xF3, 0xF4, 0xF6, 0xF7, 0xF8, 0xFB)
 
     def __init__(self):
         hids = [*a.BIND_NAMES, *self.UNNAMED]
@@ -248,8 +248,8 @@ class Bindings(unittest.TestCase):
             self.assertEqual(a.OUTPUT_KEYS[usage], name)
 
     def test_names_cover_the_firmware_table_and_nothing_else(self):
-        self.assertEqual(len(a.BIND_HIDS), 116)
-        self.assertEqual(len(set(a.BIND_HIDS.values())), 116)
+        self.assertEqual(len(a.BIND_HIDS), 114)
+        self.assertEqual(len(set(a.BIND_HIDS.values())), 114)
         self.assertTrue(a.DEEP_HIDS <= set(a.BIND_NAMES))
         self.assertNotIn(0xF1, a.DEEP_HIDS)
         self.assertNotIn(0x65, a.BIND_NAMES)  # no Menu key in the firmware's table
@@ -286,7 +286,7 @@ class Bindings(unittest.TestCase):
         sim = SimulatedKeyboard()
         kb = simulated(sim)
         base = kb.bindings(0)
-        self.assertEqual(len(base), 116)
+        self.assertEqual(len(base), 114)
         self.assertEqual(base["CAPS"], bytes([0x51, 0x39, 0, 0, 0]))
         self.assertEqual(a.describe_binding(base["WHEEL_PRESS"]), "media:mute")
         self.assertEqual(a.describe_binding(kb.bindings(1)["Q"]), "builtin:10")
