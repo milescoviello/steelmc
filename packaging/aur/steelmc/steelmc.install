@@ -1,0 +1,17 @@
+post_install() {
+    udevadm control --reload-rules 2>/dev/null
+    udevadm trigger --subsystem-match=hidraw --subsystem-match=input --subsystem-match=misc 2>/dev/null
+    modprobe uinput 2>/dev/null
+    echo "steelmc: replug your SteelSeries devices if they don't open straight away."
+    echo "steelmc: run 'steelmc' for the app, or 'steelmc-devices' to see what's plugged in."
+    true
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    udevadm control --reload-rules 2>/dev/null
+    true
+}

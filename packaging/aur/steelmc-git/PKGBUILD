@@ -1,0 +1,36 @@
+# Maintainer: milescoviello <miles@milescoviello.com>
+pkgname=steelmc-git
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Configure SteelSeries mice, keyboards, headsets and more on Linux, with no vendor software"
+arch=('any')
+url="https://github.com/milescoviello/steelmc"
+license=('MIT')
+depends=('python' 'pyside6' 'python-pillow' 'bash')
+makedepends=('git')
+optdepends=('kdotool: switch setups by the focused window on KDE (apex-analog auto)'
+            'libpulse: the music lighting effect (parec)'
+            'wireplumber: volume shortcuts (wpctl)'
+            'brightnessctl: brightness shortcuts')
+provides=('steelmc')
+conflicts=('steelmc')
+install=steelmc.install
+source=("steelmc::git+https://github.com/milescoviello/steelmc.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd steelmc
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+check() {
+    cd steelmc
+    for dir in aerox arctis devices; do
+        (cd "$dir" && python -m unittest -q)
+    done
+}
+
+package() {
+    cd steelmc
+    make DESTDIR="$pkgdir" PREFIX=/usr LICDIR=/usr/share/licenses/$pkgname install
+}
