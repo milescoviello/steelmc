@@ -25,7 +25,7 @@ cd steelmc
 ./install.sh
 ```
 
-It installs anything missing with your distro's own packages (Python, PySide6 for the app, Pillow for the keyboard's screen) on Arch, Debian, Ubuntu, Fedora, openSUSE, Gentoo, Void and Alpine. It asks for your password once for the udev rules, so your devices open without sudo, and it puts SteelMC in your app menu. The commands point into the clone, so `git pull` updates them. `./install.sh --yes` doesn't ask anything. To install just some tools, run the `install.sh` in their folders.
+It installs anything missing with your distro's own packages (Python, PySide6 for the app, Pillow for the keyboard's screen) on Arch, Debian, Ubuntu, Fedora, openSUSE, Gentoo and Alpine. Where the distro has no PySide6 (Ubuntu 24.04, say), it offers to get it from PyPI just for the app. It asks for your password once for the udev rules, so your devices open without sudo, and it puts SteelMC in your app menu. The commands point into the clone, so `git pull` updates them. `./install.sh --yes` doesn't ask anything. To install just some tools, run the `install.sh` in their folders.
 
 **Any distro, system-wide:** `sudo make install` puts everything under `/usr/local`, and `sudo make uninstall` takes it out again. Packagers: `make DESTDIR="$pkgdir" PREFIX=/usr install`. `packaging/aur` has the Arch packages.
 
