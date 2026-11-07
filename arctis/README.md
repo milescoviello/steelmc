@@ -37,4 +37,7 @@ Never sent: the reset command, which can also wipe every setting and save that; 
 
 ## What's been tested
 
-The test suite (`python3 test_arctis.py`) needs no headset. Nothing has been sent to a real one yet.
+Arctis 9 Wireless, transmitter firmware 1.1, Gentoo Linux. The test suite (`python3 test_arctis.py`) needs no headset.
+
+- Every read works on a real transmitter: status, versions, sidetone, mic, surround, EQ and sleep.
+- Sidetone, mic gain, surround, EQ preset, EQ bands and sleep were each changed on a real transmitter, read back correctly, and put back. The headset was off at the time, so how they sound hasn't been checked yet, and nor has `save`.
