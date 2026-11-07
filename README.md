@@ -8,7 +8,7 @@ Configure SteelSeries gear on Linux with no vendor software. Not affiliated with
 
 | Folder | What it is | Device |
 |---|---|---|
-| [`devices`](devices/README.md) | `steelmc-devices`: which SteelSeries devices are plugged in, and which tool works with each | Any |
+| [`devices`](devices/README.md) | `steelmc-devices`: which SteelSeries devices are plugged in, and settings for 70 more mice: DPI, polling, lighting, buttons, battery | Any, and most Rival, Sensei, Prime, Kana, Kinzu and Aerox mice |
 | [`gui`](gui) | `steelmc`: one window for all of it | All of these |
 | [`aerox`](aerox/README.md) | `aerox`: battery, DPI, polling, sleep, button bindings, lighting | Aerox 9 Wireless mouse |
 | [`arctis`](arctis/README.md) | `arctis`: battery, ChatMix, sidetone, mic gain, EQ, surround and the sleep timer | Arctis 9 Wireless headset |
@@ -58,6 +58,7 @@ These tools come from reading each device's firmware, because commands aren't wh
 python3 aerox/test_aerox.py
 python3 arctis/test_arctis.py
 python3 devices/test_devices.py
+python3 devices/test_gear.py
 python3 gui/test_gui.py                # nothing on screen
 python3 apex-oled/apex-oled-test
 cd apex-analog && python3 -m unittest  # creates virtual input devices if it's allowed to

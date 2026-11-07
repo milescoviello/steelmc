@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """steelmc-devices: which SteelSeries devices are plugged in, and which tool here works with each.
 
-    steelmc-devices             list them
-    steelmc-devices probe       everything Linux knows about them, to paste into a report for a device that isn't supported yet
+    steelmc-devices                      list them
+    steelmc-devices probe                everything Linux knows about them, to paste into a report for one that isn't supported yet
+    steelmc-devices settings ID          what can be set on a device, like steelmc-devices settings 1824
+    steelmc-devices show ID              its battery and firmware where it reports them, and what was last set here
+    steelmc-devices set ID SETTING VALUE change one: steelmc-devices set 1824 polling_rate 1000
+    steelmc-devices save ID              keep the current settings after it loses power
     steelmc-devices ... --json
 
-This only reads what Linux already shows in /sys. It sends nothing to any device, so it's safe on anything.
+list and probe only read what Linux already shows in /sys. settings needs nothing plugged in. show, set and save talk to the device,
+using only the commands its definition in families/ lists, and changing settings on these is experimental.
 """
 import argparse
 import glob
@@ -13,11 +18,15 @@ import json
 import os
 import sys
 
+import gear
+
 __version__ = "0.1.0"
 
 VENDOR = "1038"
 USB = "/sys/bus/usb/devices"
 CATALOG = os.path.join(os.path.dirname(os.path.realpath(__file__)), "catalog.json")
+# Products a dedicated tool here handles. The general definitions never take over from them.
+DEDICATED = {"1640", "1610", "1614", "1858", "185a", "1874", "1876", "12c2", "12c4"}
 LEVELS = {"full": "supported", "experimental": "supported, changes experimental", "read-only": "read-only for now", "part of a supported device": "part of a supported device", None: "not supported yet"}
 
 
@@ -86,9 +95,14 @@ def interfaces(device_path):
     return out
 
 
-def scan(usb=USB, catalog=None):
+def families():
+    return {pid: v for pid, v in gear.load_families().items() if pid not in DEDICATED}
+
+
+def scan(usb=USB, catalog=None, covered=None):
     """Every SteelSeries USB device plugged in, with what the catalog knows about it."""
     catalog = load_catalog() if catalog is None else catalog
+    covered = families() if covered is None else covered
     found = []
     for path in sorted(glob.glob(f"{usb}/*")):
         if _read(f"{path}/idVendor") != VENDOR or ":" in os.path.basename(path):
@@ -96,6 +110,8 @@ def scan(usb=USB, catalog=None):
         pid = (_read(f"{path}/idProduct") or "").lower()
         known = catalog.get(pid)
         support = (known or {}).get("support", {})
+        if not support and pid in covered:
+            support = {"level": "experimental", "tools": ["steelmc-devices"]}
         found.append({
             "id": f"{VENDOR}:{pid}", "product": _read(f"{path}/product"), "firmware": _read(f"{path}/bcdDevice"),
             "port": os.path.basename(path), "known": known is not None,
@@ -128,6 +144,93 @@ def probe_report(device):
     return "\n".join(lines)
 
 
+def udev_rules():
+    """One rule per covered product, for the one interface its definition talks to."""
+    lines = ["# steelmc-devices: let the logged-in user reach the interface each device's definition uses, and only that one.",
+             "# Made from families/ by: steelmc-devices udev-rules. ATTRS must match on one parent each, hence two steps."]
+    for pid, (family, product) in sorted(families().items()):
+        tag = f"STEELMC_{pid.upper()}"
+        lines.append(f'KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="1038", ATTRS{{idProduct}}=="{pid}", ENV{{{tag}}}="1"')
+        lines.append(f'ENV{{{tag}}}=="1", ATTRS{{bInterfaceNumber}}=="{product["interface"]:02x}", MODE="0660", GROUP="input", TAG+="uaccess"')
+    return "\n".join(lines) + "\n"
+
+
+def _gear(pid):
+    pid = pid.lower().split(":")[-1]
+    covered = families()
+    if pid in DEDICATED:
+        tool = (load_catalog().get(pid, {}).get("support", {}).get("tools") or ["its own tool"])[0]
+        raise gear.GearError(f"1038:{pid} has a tool of its own here: use {tool}.")
+    if pid not in covered:
+        raise gear.GearError(f"1038:{pid} isn't covered yet. steelmc-devices probe shows what's needed to add it.")
+    return pid, covered
+
+
+def describe_setting(name, s):
+    kind = s["type"]
+    if kind == "choice":
+        values = ", ".join(s["choices"])
+    elif kind in ("number", "number_choice"):
+        values = f"{s['input'][0]} to {s['input'][1]}"
+    elif kind == "dpi_stages":
+        values = f"up to {s['max_stages']} DPI, {s['input'][0]} to {s['input'][1]}, like 400,800,1600"
+    elif kind == "color":
+        values = "a colour: RRGGBB or a name"
+    elif kind == "reactive_color":
+        values = "a colour, or off"
+    elif kind == "action":
+        values = "no value"
+    elif kind == "buttons":
+        values = "BUTTON=ACTION,..., or default. Buttons: " + ", ".join(s["buttons"])
+    elif kind in ("gradient", "gradient2"):
+        values = "one colour, or [ms:]COLOR@PERCENT,..., like 2000ms:red@0,blue@50,red@100"
+    else:
+        values = "not supported yet"
+    return f"  {name:22} {s.get('label', '')}: {values}"
+
+
+def gear_command(args):
+    pid, covered = _gear(args.id)
+    family, product = covered[pid]
+    if args.command == "settings":
+        if args.json:
+            print(json.dumps({"product": product, "family": family["name"], "settings": family["settings"]}))
+        else:
+            print(f"{product['name']} (1038:{pid}). Changing settings is experimental: it hasn't been tried on a real one here.")
+            print("\n".join(describe_setting(n, s) for n, s in family["settings"].items()))
+            if family.get("save"):
+                print("  steelmc-devices save keeps them after it loses power.")
+        return 0
+    with gear.Gear(pid, covered) as g:
+        if args.command == "show":
+            report = {"name": g.name, "id": f"1038:{pid}", "battery": g.battery(), "firmware": g.firmware(), "last_set": gear.remembered(pid)}
+            if args.json:
+                print(json.dumps(report))
+            else:
+                print(f"{g.name} (1038:{pid})")
+                if report["battery"]:
+                    b = report["battery"]
+                    print(f"  battery   {b['percent']}%" + (", charging" if b.get("charging") else ""))
+                if report["firmware"]:
+                    print(f"  firmware  {report['firmware']}")
+                for name, value in report["last_set"].items():
+                    print(f"  {name:22} {value}   (last set here)")
+            return 0
+        if args.command == "set":
+            sent = g.set(args.setting, args.value)
+            print(f"Sent {args.setting} = {args.value if args.value is not None else '(done)'} to the {g.name}. "
+                  "This is experimental: if it didn't take, please report it." + ("" if not g.family.get("save") else
+                  " It lasts until the device loses power. steelmc-devices save keeps it."))
+            if args.json:
+                print(json.dumps({"sent": bytes(sent).hex()}))
+            return 0
+        if args.command == "save":
+            g.save()
+            print(f"Saved the {g.name}'s current settings.")
+            return 0
+    return 1
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="steelmc-devices", description="Which SteelSeries devices are plugged in. Sends nothing to them.")
     p.add_argument("--version", action="version", version=__version__)
@@ -136,7 +239,25 @@ def main(argv=None):
     sub.add_parser("list", help="list them (the default)")
     pr = sub.add_parser("probe", help="everything Linux knows about them, for a report")
     pr.add_argument("id", nargs="?", help="only this one, like 1038:1652 or 1652")
+    for name, text in (("settings", "what can be set on a device"), ("show", "battery, firmware and what was last set"),
+                       ("save", "keep the current settings after it loses power")):
+        sp = sub.add_parser(name, help=text)
+        sp.add_argument("id", help="like 1824 or 1038:1824")
+    st = sub.add_parser("set", help="change one setting")
+    st.add_argument("id")
+    st.add_argument("setting")
+    st.add_argument("value", nargs="?")
+    sub.add_parser("udev-rules", help=argparse.SUPPRESS)
     args = p.parse_args(sys.argv[1:] if argv is None else argv)
+    if args.command == "udev-rules":
+        sys.stdout.write(udev_rules())
+        return 0
+    if args.command in ("settings", "show", "set", "save"):
+        try:
+            return gear_command(args)
+        except gear.GearError as e:
+            print(f"steelmc-devices: {e}", file=sys.stderr)
+            return 1
     found = scan()
     if args.command == "probe":
         if args.id:

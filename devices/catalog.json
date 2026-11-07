@@ -804,6 +804,12 @@
    "name": "Sensei",
    "part": "bootloader"
   },
+  "1366": {
+   "kind": "mouse",
+   "line": "kinzu",
+   "name": "Kinzu v2",
+   "part": "device"
+  },
   "1368": {
    "kind": "mouse",
    "line": "other",
@@ -857,6 +863,18 @@
    "line": "other",
    "name": "Black Ops II",
    "part": "bootloader"
+  },
+  "1378": {
+   "kind": "mouse",
+   "line": "kinzu",
+   "name": "Kinzu v2",
+   "part": "device"
+  },
+  "137a": {
+   "kind": "mouse",
+   "line": "kana",
+   "name": "Kana v2",
+   "part": "device"
   },
   "137c": {
    "kind": "mouse",
@@ -2184,6 +2202,12 @@
    "name": "Aerox 9 Wireless",
    "part": "bootloader"
   },
+  "185c": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5 Wireless Destiny 2 Edition",
+   "part": "dongle"
+  },
   "185e": {
    "kind": "mouse",
    "line": "aerox",
@@ -2191,6 +2215,12 @@
    "part": "device",
    "protocol": "aerox",
    "protocol_note": "same command design as the Aerox 9 Wireless; its firmware version and lighting reads match, battery, DPI and polling don't yet"
+  },
+  "1860": {
+   "kind": "mouse",
+   "line": "aerox",
+   "name": "Aerox 5 Wireless Diablo IV Edition",
+   "part": "dongle"
   },
   "1862": {
    "kind": "mouse",

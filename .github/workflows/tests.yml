@@ -80,6 +80,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: python test_devices.py
+      - run: python test_gear.py
 
   apex-oled:
     runs-on: ubuntu-latest
