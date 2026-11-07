@@ -16,7 +16,8 @@
   apex-analog health            check every switch for drift, noise and short range
   apex-analog typeprint         experiment: recognise you by how you press keys
   apex-analog actuation W 1.0   set where keys actuate, no GG needed
-  apex-analog rapid WASD on     turn the keyboard's rapid tap on or off per key
+  apex-analog rapid WASD on     rapid trigger per key: fire and let go on every change of direction
+  apex-analog rapid-tap on A/D  rapid tap: of two keys held together, the last one pressed wins
   apex-analog bind CAPS esc     change what a key does, on the keyboard itself, so it works anywhere
   apex-analog preset save NAME  keep setups on this computer, then preset use NAME
   apex-analog save              write the current settings to the keyboard's flash
@@ -32,7 +33,7 @@
 
 A small daemon owns the keyboard and every command goes through it, so long-running ones return your terminal straight away
 and any number can run at once. Only sends the read commands in ALLOWED, plus LIGHT_COMMANDS when you ask for lights, SETTING_COMMANDS when you set
-actuation or rapid tap, and BIND_COMMANDS when you rebind a key, and only to the firmware they were checked on. The one flash write, SAVE_COMMAND, runs only from
+actuation, rapid trigger or rapid tap, and BIND_COMMANDS when you rebind a key, and only to the firmware they were checked on. The one flash write, SAVE_COMMAND, runs only from
 `apex-analog save` after you confirm it. No dependencies.
 """
 import argparse
@@ -88,6 +89,9 @@ ALLOWED = {
     0xB3: "each key's press and release points, or with 2 first, where its deeper press starts",
     0xCD: "which keys light up while the SteelSeries layer is on",
     0xCE: "the colour those keys light up in",
+    0xB4: "each key's rapid trigger distance",
+    0x9A: "whether rapid tap is on",
+    0x9B: "rapid tap's pairs of keys",
 }
 
 # The only commands that change anything, sent only for lights. Each handler was read on both chips: they store colours in the
@@ -111,9 +115,20 @@ SETTING_COMMANDS = {
     0x31: "set the press and release points of up to 20 keys",
     0x32: "set the mode byte of up to 30 keys",
     0x33: "with 2 first, set where the deeper press of up to 20 keys starts",
+    0x34: "set the rapid trigger distance of up to 30 keys",
+    0x1A: "turn rapid tap on or off",
+    0x1B: "set rapid tap's pairs of keys",
 }
 DEEP_OFF = 255  # a second actuation point at the very bottom, which is how every key starts out
-RAPID_TAP_MODE = 2  # the value the keyboard's own RAPID TAP menu sets
+# Rapid trigger: with this mode byte a key fires once it moves down by its distance (34) from where it last turned, and lets go
+# once it moves back up by it, anywhere in the travel. The keyboard's own menu calls this RAPID TAP, which isn't what GG calls that.
+RAPID_TRIGGER_MODE = 2
+RAPID_DISTANCE_TENTHS = (1, 40)  # what 34 accepts: 0.1 to 4.0 mm. It ignores anything else.
+# Rapid tap, as GG names it: of two keys held together, which one counts. 1A turns it on, 1B sets up to 10 pairs.
+# SteelSeries + Q on the keyboard turns it on and off too.
+RAPID_TAP_PAIRS = 10
+RAPID_TAP_MODES = {"last": 0, "first": 1, "second": 2, "neither": 3}  # from the firmware's own table: last pressed wins, and so on
+RAPID_TAP_SAYS = {"last": "the last one pressed wins", "first": "{a} wins", "second": "{b} wins", "neither": "neither counts"}
 # Change what keys do, on the keyboard itself, only when you ask. Each handler stores in memory and reaches no flash save,
 # so a replug undoes them unless you save. Every message is checked against BIND_CHECKS before it's sent.
 BIND_COMMANDS = {
@@ -332,6 +347,43 @@ def _check_layer_light_color(payload):
         raise ValueError("refused to send 4E: it takes one colour, three bytes")
 
 
+def _check_rapid_distance(payload):
+    count = payload[1] if len(payload) > 1 else 0
+    if not 1 <= count <= 30 or len(payload) != 2 + 2 * count:
+        raise ValueError("refused to send 34: it takes 1 to 30 keys, 2 bytes each")
+    sensors = {hid for _, hid, _ in BY_NAME.values()}
+    for i in range(count):
+        hid, tenths = payload[2 + 2 * i], payload[3 + 2 * i]
+        if hid not in sensors:
+            raise ValueError(f"refused to send 34: {hid:#04x} has no sensor")
+        if not RAPID_DISTANCE_TENTHS[0] <= tenths <= RAPID_DISTANCE_TENTHS[1]:
+            raise ValueError("refused to send 34: the distance is 1 to 40 tenths of a mm")
+
+
+def _check_rapid_tap(payload):
+    if len(payload) != 2 or payload[1] not in (0, 1):
+        raise ValueError("refused to send 1A: it takes just 0 or 1")
+
+
+def _check_rapid_tap_pairs(payload):
+    """1B <n> then n records of <slot> <key A> <key B> <mode> 0 0. The firmware checks only the first slot and n, and writes each
+    record where its own slot byte says, so every slot is checked here: one past 9 would land outside the pairs."""
+    count = payload[1] if len(payload) > 1 else 0
+    if not 1 <= count <= RAPID_TAP_PAIRS or len(payload) != 6 * count:
+        raise ValueError("refused to send 1B: it takes 1 to 10 pairs, 6 bytes each")
+    sensors = {hid for _, hid, _ in BY_NAME.values()}
+    for i in range(count):
+        slot, a, b, mode = payload[2 + 6 * i:6 + 6 * i]
+        if slot != payload[2] + i or slot >= RAPID_TAP_PAIRS:
+            raise ValueError("refused to send 1B: the pairs must go in slots 0 to 9, in order")
+        if (a, b) != (0, 0) and (a not in sensors or b not in sensors or a == b):
+            raise ValueError("refused to send 1B: a pair is two different keys with sensors")
+        if mode not in RAPID_TAP_MODES.values():
+            raise ValueError("refused to send 1B: the mode is 0 to 3")
+        if i < count - 1 and any(payload[6 + 6 * i:8 + 6 * i]):
+            raise ValueError("refused to send 1B: the two bytes after each pair are 0")
+
+
 BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel, 0x60: _check_layer_key, 0x4D: _check_layer_lights, 0x4E: _check_layer_light_color}
 
 
@@ -351,7 +403,7 @@ def _check_deep_actuation(payload):
             raise ValueError("refused to send 33: release must be from 1 up to the press point")
 
 
-SETTING_CHECKS = {0x33: _check_deep_actuation}
+SETTING_CHECKS = {0x33: _check_deep_actuation, 0x34: _check_rapid_distance, 0x1A: _check_rapid_tap, 0x1B: _check_rapid_tap_pairs}
 
 
 def bind_key(key):
@@ -470,6 +522,24 @@ def led_hid(key):
     if name in NO_SENSOR_HIDS:
         return NO_SENSOR_HIDS[name]
     raise ValueError(f"{key!r} isn't a key with an LED. Known: " + " ".join(sorted(k for k in {*BY_NAME, *NO_SENSOR_HIDS} if not k.startswith("INT"))))
+
+
+def parse_rapid_pair(text):
+    """'A/D' or 'A/D:first' -> ('A', 'D', 'last' or the mode named)."""
+    keys, _, mode = text.partition(":")
+    a, slash, b = keys.partition("/")
+    if not slash or not a or not b:
+        raise ValueError(f"a rapid tap pair looks like A/D, or A/D:first, not {text!r}")
+    mode = mode.lower() or "last"
+    if mode not in RAPID_TAP_MODES:
+        raise ValueError(f"the rapid tap mode is one of {', '.join(RAPID_TAP_MODES)}, not {mode!r}")
+    return key_name(a), key_name(b), mode
+
+
+def describe_rapid_pair(pair):
+    a, b, mode = pair
+    return f"{a}/{b} ({RAPID_TAP_SAYS.get(mode, mode).format(a=a, b=b)})"
+
 
 
 def key_names(keys):
@@ -738,11 +808,62 @@ class Keyboard:
             self._write([0x31, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], press, release)])
 
     def set_mode(self, keys, mode):
-        """Set each key's mode byte. RAPID_TAP_MODE turns on the keyboard's own rapid tap, 0 turns it off."""
+        """Set each key's mode byte. RAPID_TRIGGER_MODE turns on rapid trigger, 0 turns it off."""
         names = key_names(keys)
         for start in range(0, len(names), 30):
             part = names[start:start + 30]
             self._write([0x32, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], mode)])
+
+    def rapid_distance(self, keys=None):
+        """How far each key moves, in mm, before rapid trigger presses it again or lets it go: {'W': 0.2}."""
+        names = key_names(keys) or self.keys
+        return {name: value[0] / 10 for name, value in self._per_key(0xB4, 2, 2, names)}
+
+    def set_rapid_distance(self, keys, mm):
+        """Set the rapid trigger distance, 0.1 to 4.0 mm in tenths. Returns the distance used."""
+        tenths = round(float(mm) * 10)
+        if not RAPID_DISTANCE_TENTHS[0] <= tenths <= RAPID_DISTANCE_TENTHS[1]:
+            raise ValueError(f"the rapid trigger distance must be from 0.1 to 4.0 mm, not {mm}")
+        names = key_names(keys)
+        for start in range(0, len(names), 30):
+            part = names[start:start + 30]
+            self._write([0x34, len(part)] + [byte for name in part for byte in (BY_NAME[name][1], tenths)])
+        return tenths / 10
+
+    def rapid_tap(self):
+        """{'on': True, 'pairs': [('A', 'D', 'last'), ...]}: whether rapid tap is on, and its pairs of keys."""
+        on = self._ask([0x9A], lambda r: len(r) >= 2 and r[0] in (0, 1) and not any(r[1:]))[0] == 1
+        reply = self._ask([0x9B, RAPID_TAP_PAIRS, 0],
+                          lambda r: len(r) >= 3 + 6 * RAPID_TAP_PAIRS and r[0] == 0x9B and r[2] == RAPID_TAP_PAIRS and r[3] == 0)
+        names = {hid: name for name, (_, hid, _) in BY_NAME.items()}
+        modes = {value: name for name, value in RAPID_TAP_MODES.items()}
+        pairs = []
+        for i in range(RAPID_TAP_PAIRS):
+            a, b, mode = reply[4 + 6 * i], reply[5 + 6 * i], reply[6 + 6 * i] & 0x7F
+            if a and b:
+                pairs.append((names.get(a, f"{a:#04x}"), names.get(b, f"{b:#04x}"), modes.get(mode, str(mode))))
+        return {"on": on, "pairs": pairs}
+
+    def set_rapid_tap(self, on=None, pairs=None):
+        """Turn rapid tap on or off, and/or replace its pairs: [('A', 'D', 'last'), ...], up to 10. Leave either out to keep it."""
+        if pairs is not None:
+            if len(pairs) > RAPID_TAP_PAIRS:
+                raise ValueError(f"rapid tap takes up to {RAPID_TAP_PAIRS} pairs")
+            payload = [0x1B, RAPID_TAP_PAIRS]
+            for slot in range(RAPID_TAP_PAIRS):
+                if slot < len(pairs):
+                    a, b, mode = pairs[slot]
+                    a, b = key_name(a), key_name(b)
+                    if a == b:
+                        raise ValueError(f"a rapid tap pair needs two different keys, not {a} twice")
+                    record = [slot, BY_NAME[a][1], BY_NAME[b][1], RAPID_TAP_MODES[mode]]
+                else:
+                    record = [slot, 0, 0, 0]  # an empty slot: the firmware skips a pair with no keys
+                payload += record + ([0, 0] if slot < RAPID_TAP_PAIRS - 1 else [])
+            self._write(payload)
+        if on is not None:
+            self._write([0x1A, 1 if on else 0])
+
 
     def deep_actuation(self, keys=None):
         """Where each key's deeper press starts: {'W': {'press': 3.0, 'release': 2.9, 'press_raw': 128, 'release_raw': 120}},
@@ -3504,7 +3625,8 @@ your terminal back, and several can run at once. Add --watch to keep one in the 
 
   Keyboard settings, no GG needed
     actuation KEYS MM    where keys fire, like: actuation WASD 1.2
-    rapid KEYS on|off    the keyboard's own rapid tap
+    rapid KEYS on|off    rapid trigger: fire and let go on every change of direction. --distance 0.2 sets how far
+    rapid-tap on|off     rapid tap: of two keys held together, the last one pressed wins. Pairs like A/D W/S
     bind KEY ACTION      what a key does, on the keyboard itself, like: bind CAPS esc. --layer ss or deep too
     unbind KEY           put a key back to what it does out of the box
     bindings             what every key does
@@ -3791,25 +3913,61 @@ def cmd_paint(args):
 
 
 def cmd_rapid(args):
+    """Rapid trigger, per key."""
     with Keyboard() as kb:
         if args.keys is not None:
-            if args.state is None:
-                raise ValueError("Say on or off too, like: apex-analog rapid WASD on")
+            if args.state is None and args.distance is None:
+                raise ValueError("Say on or off too, like: apex-analog rapid WASD on, or give --distance")
             names = list(kb.keys) if args.keys == "all" else key_names(args.keys)
             missing = [n for n in names if n not in kb.keys]
             if missing:
                 raise ValueError(f"No sensor fitted on this keyboard for: {' '.join(missing)}")
-            mode = RAPID_TAP_MODE if args.state == "on" else 0
-            kb.set_mode(names, mode)
+            if args.distance is not None:
+                kb.set_rapid_distance(names, args.distance)
+            if args.state is not None:
+                kb.set_mode(names, RAPID_TRIGGER_MODE if args.state == "on" else 0)
             time.sleep(0.1)
-            settings = kb.actuation(names)
-            wrong = [n for n in names if settings[n]["mode"] != mode]
+            settings, distances = kb.actuation(names), kb.rapid_distance(names)
+            wrong = [n for n in names if (args.state is not None and (settings[n]["mode"] == RAPID_TRIGGER_MODE) != (args.state == "on"))
+                     or (args.distance is not None and abs(distances[n] - round(args.distance, 1)) > 0.01)]
             if wrong:
                 raise ApexError(f"Sent, but these read back differently: {' '.join(wrong)}")
-            print(f"Rapid tap {args.state} for {len(names)} key{'s' if len(names) != 1 else ''}, and read it back.")
-        settings = kb.actuation()
-    on = [n for n, s in settings.items() if s["mode"] == RAPID_TAP_MODE]
-    print("Rapid tap on: " + (" ".join(on) if on else "no keys"))
+            done = (f"Rapid trigger {args.state}" if args.state else "Rapid trigger distance set") + \
+                (f" at {round(args.distance, 1)} mm" if args.distance is not None and args.state else "")
+            print(f"{done} for {len(names)} key{'s' if len(names) != 1 else ''}, and read it back.")
+        settings, distances = kb.actuation(), kb.rapid_distance()
+    if args.json:
+        print(json.dumps({n: {"on": s["mode"] == RAPID_TRIGGER_MODE, "distance": distances.get(n)} for n, s in settings.items()}))
+        return 0
+    on = [n for n, s in settings.items() if s["mode"] == RAPID_TRIGGER_MODE]
+    by_distance = {}
+    for n in on:
+        by_distance.setdefault(distances.get(n), []).append(n)
+    print("Rapid trigger on: " + ("; ".join(f"{' '.join(keys)} at {d} mm" for d, keys in sorted(by_distance.items())) if on else "no keys"))
+    return 0
+
+
+def cmd_rapid_tap(args):
+    """Rapid tap: of two keys held together, which one counts."""
+    with Keyboard() as kb:
+        if args.state is not None:
+            pairs = [parse_rapid_pair(p) for p in args.pairs] if args.pairs else None
+            if args.state == "on" and pairs is None and not kb.rapid_tap()["pairs"]:
+                pairs = [("A", "D", "last")]  # on with nothing to work on would do nothing
+            kb.set_rapid_tap(on=args.state == "on", pairs=pairs)
+            time.sleep(0.1)
+            state = kb.rapid_tap()
+            if state["on"] != (args.state == "on") or (pairs is not None and state["pairs"] != list(pairs)):
+                raise ApexError("Sent, but it read back differently. Try again.")
+            print(f"Rapid tap {args.state}, and read it back. SteelSeries + Q turns it on and off too; apex-analog save keeps it.")
+        elif args.pairs:
+            raise ValueError("Say on or off first, like: apex-analog rapid-tap on A/D W/S")
+        state = kb.rapid_tap()
+    if args.json:
+        print(json.dumps({"on": state["on"], "pairs": [{"a": a, "b": b, "mode": m} for a, b, m in state["pairs"]]}))
+        return 0
+    print(f"Rapid tap is {'on' if state['on'] else 'off'}. Pairs: " +
+          (", ".join(describe_rapid_pair(p) for p in state["pairs"]) if state["pairs"] else "none"))
     return 0
 
 
@@ -4554,12 +4712,19 @@ def cmd_info(args):
         for name, value in deep.items():
             settings[name]["deep"] = min(LEVEL_TENTHS, key=lambda t: abs(t / 10 - value["release"])) / 10 if value else None
         depths = kb.read()
+        try:  # a daemon still running older code refuses these reads: then they're just left out
+            for name, mm in kb.rapid_distance().items():
+                settings[name]["rapid_distance"] = mm
+            rapid_tap = kb.rapid_tap()
+        except ApexError:
+            rapid_tap = None
         report = {
             "keyboard": f"{VENDOR}:{kb.product}", "model": kb.model, "can_change_settings": kb.writable, "changes": kb.changes,
             "firmware": kb.firmware, "node": kb.node,
             "virtual_devices": os.access("/dev/uinput", os.W_OK),
             "can_stop_keys_typing": all(os.access(n, os.R_OK) for n in _physical_key_nodes()),
             "oled_actuation_icon": kb.actuation_icon(),
+            "rapid_tap": rapid_tap and {"on": rapid_tap["on"], "pairs": [{"a": a, "b": b, "mode": m} for a, b, m in rapid_tap["pairs"]]},
             "keys": {k: {"mm": round(depths[k], 2), **settings[k]} for k in kb.keys},
         }
     if args.json:
@@ -4573,10 +4738,14 @@ def cmd_info(args):
     print(f"Virtual controller, mouse, keystrokes: {'ok' if report['virtual_devices'] else 'no access, run ./install.sh'}")
     print(f"Stopping mapped keys from typing:      {'ok' if report['can_stop_keys_typing'] else 'no access, run ./install.sh'}")
     print(f"OLED ACTUATION ICON setting:           {'on' if report['oled_actuation_icon'] else 'off'}")
+    if rapid_tap is not None:
+        print(f"Rapid tap:                             {'on' if rapid_tap['on'] else 'off'}, "
+              + (", ".join(describe_rapid_pair(p) for p in rapid_tap["pairs"]) or "no pairs"))
     print()
-    print(f"{'key':8}{'now':>6}{'press':>7}{'release':>9}{'mode':>6}   (mm)")
+    print(f"{'key':8}{'now':>6}{'press':>7}{'release':>9}{'mode':>6}{'rapid':>7}   (mm; rapid is rapid trigger's distance, when it's on)")
     for name, k in report["keys"].items():
-        print(f"{name:8}{k['mm']:6.1f}{k['press']:7.2f}{k['release']:9.2f}{k['mode']:6d}")
+        rapid = f"{k['rapid_distance']:.1f}" if k["mode"] == RAPID_TRIGGER_MODE and k.get("rapid_distance") else ""
+        print(f"{name:8}{k['mm']:6.1f}{k['press']:7.2f}{k['release']:9.2f}{k['mode']:6d}{rapid:>7}")
 
 
 def set_deep(kb, names, mm):
@@ -4757,10 +4926,19 @@ def build_parser():
     pa.add_argument("--stay", action="store_true", help="leave the colours on at the end instead of restoring your normal lighting")
     pa.set_defaults(func=cmd_paint)
 
-    ra = commands.add_parser("rapid", help="see or set the keyboard's own rapid tap, per key")
+    ra = commands.add_parser("rapid", help="rapid trigger per key: fire and let go on every change of direction")
     ra.add_argument("keys", nargs="?", help="W, WASD, W,A,SPACE, or all. Leave out to just see which keys have it on")
     ra.add_argument("state", nargs="?", choices=("on", "off"))
+    ra.add_argument("--distance", type=float, metavar="MM", help="how far a key moves before it fires or lets go again, 0.1 to 4.0 mm")
+    ra.add_argument("--json", action="store_true")
     ra.set_defaults(func=cmd_rapid)
+
+    rt = commands.add_parser("rapid-tap", help="rapid tap: of two keys held together, the last one pressed wins")
+    rt.add_argument("state", nargs="?", choices=("on", "off"))
+    rt.add_argument("pairs", nargs="*", help="A/D W/S, which replace the pairs it has. A/D:first, :second or :neither picks "
+                                              "who wins instead of the last one pressed")
+    rt.add_argument("--json", action="store_true")
+    rt.set_defaults(func=cmd_rapid_tap)
 
     bi = commands.add_parser("bindings", help="what every key does, set on the keyboard itself")
     bi.add_argument("--layer", choices=("base", "ss", "deep", "all"), default="all",
@@ -4799,7 +4977,7 @@ def build_parser():
     lk.add_argument("key", nargs="?", help="any key, or SS to put it back. Leave out to see which it is")
     lk.set_defaults(func=cmd_layer_key)
 
-    pr = commands.add_parser("preset", help="keep named actuation and rapid tap setups on this computer")
+    pr = commands.add_parser("preset", help="keep named actuation and rapid trigger setups on this computer")
     pr.add_argument("action", choices=("save", "use", "list", "delete"))
     pr.add_argument("name", nargs="?")
     pr.set_defaults(func=cmd_preset)

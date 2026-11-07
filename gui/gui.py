@@ -163,6 +163,7 @@ TIMERS = [i * aerox.TIMER_STEP_MS for i in range(aerox.TIMER_MAX_MS // aerox.TIM
 # The keyboard's firmware levels, in millimetres. apex-analog picks the nearest for any depth.
 DEPTHS = [0.1, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.7, 4.0]
 TRAVEL_MM = 4.0
+RAPID_TRIGGER_MODE = 2  # the mode byte that turns on rapid trigger (apex-analog rapid)
 # How apex-analog spells keys that would otherwise break its own comma list or argument parser.
 KEY_ARGS = {"`": "GRAVE", "-": "MINUS", "=": "EQUALS", "[": "LBRACKET", "]": "RBRACKET", "\\": "BACKSLASH",
             ";": "SEMICOLON", "'": "QUOTE", ",": "COMMA", ".": "PERIOD", "/": "SLASH"}
@@ -556,8 +557,13 @@ class KeyboardDevice:
     def set_actuation(self, names, mm):
         return self.run("actuation", self.key_args(names), f"{mm:g}")
 
-    def set_rapid(self, names, on):
-        return self.run("rapid", self.key_args(names), "on" if on else "off")
+    def set_rapid(self, names, on, distance=None):
+        """Rapid trigger: fire and let go again whenever the key moves this far, in mm, anywhere in its travel."""
+        return self.run("rapid", self.key_args(names), "on" if on else "off", *(["--distance", f"{distance:g}"] if distance else []))
+
+    def set_rapid_tap(self, on, pairs):
+        """Rapid tap: of two keys held together, the last one pressed wins. pairs like ['A/D', 'W/S']."""
+        return self.run("rapid-tap", "on" if on else "off", *pairs)
 
     def set_deep(self, names, mm):
         """Where a deeper press starts. 0 puts it back at the bottom."""
@@ -1033,19 +1039,33 @@ class KeyPlate(QWidget):
         self.drag_mode = None
         self.band.hide()
 
-    def eventFilter(self, cap, event):
-        """A key takes the mouse when pressed, even a disabled one, so keys pass it up here and a drag can cross them."""
+    def catch_drags_on(self, around):
+        """Let a box start in the space around the keyboard too (left of Esc, say), not only on the plate itself."""
+        self.around = around
+        around.installEventFilter(self)
+
+    def eventFilter(self, source, event):
+        """A key takes the mouse when pressed, even a disabled one, so keys pass it up here and a drag can cross them. So does the
+        space around the plate, given by catch_drags_on."""
         kind = event.type()
-        if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseMove, QEvent.MouseButtonRelease):
-            point = cap.mapToParent(event.position().toPoint())
-            if kind == QEvent.MouseMove:
-                self.continue_drag(point)
-            elif kind == QEvent.MouseButtonRelease:
-                self.end_drag()
-            elif event.button() == Qt.LeftButton:
-                self.begin_drag(point)
-            return True
-        return False
+        if kind not in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseMove, QEvent.MouseButtonRelease):
+            return False
+        if source is getattr(self, "around", None):
+            point = self.mapFrom(source, event.position().toPoint())
+            if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick) and (
+                    event.button() != Qt.LeftButton or not -self.height() // 4 <= point.y() <= self.height() * 5 // 4):
+                return False  # only beside the keyboard, not below everything else in the window
+            if kind == QEvent.MouseMove and self.drag_mode is None:
+                return False
+        else:
+            point = source.mapToParent(event.position().toPoint())
+        if kind == QEvent.MouseMove:
+            self.continue_drag(point)
+        elif kind == QEvent.MouseButtonRelease:
+            self.end_drag()
+        elif event.button() == Qt.LeftButton:
+            self.begin_drag(point)
+        return True
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1715,6 +1735,7 @@ class KeyboardPage(QWidget):
         self.plate.picked.connect(self.selection_changed)
         frame = well()
         frame.layout().addWidget(self.plate, 0, Qt.AlignHCenter)
+        self.plate.catch_drags_on(frame)
         return frame
 
     def build_screen(self):
@@ -1855,10 +1876,34 @@ class KeyboardPage(QWidget):
         self.depth_shown()
         self.set_depth = QPushButton("Set actuation")
         self.set_depth.clicked.connect(self.apply_actuation)
-        self.rapid_on = QPushButton("Turn rapid tap on")
+        rapid_tip = ("Rapid trigger: the key fires as soon as it moves down this far from where it last turned, and lets go as soon as "
+                     "it moves back up this far, anywhere in its travel. No waiting for it to come back past where it fires.")
+        self.rapid_distance = QDoubleSpinBox()
+        self.rapid_distance.setRange(0.1, 4.0)
+        self.rapid_distance.setSingleStep(0.1)
+        self.rapid_distance.setDecimals(1)
+        self.rapid_distance.setSuffix(" mm")
+        self.rapid_distance.setValue(0.2)
+        self.rapid_distance.setToolTip(rapid_tip)
+        self.rapid_on = QPushButton("On")
+        self.rapid_on.setToolTip(rapid_tip)
         self.rapid_on.clicked.connect(lambda: self.apply_rapid(True))
-        self.rapid_off = QPushButton("Turn rapid tap off")
+        self.rapid_off = QPushButton("Off")
         self.rapid_off.clicked.connect(lambda: self.apply_rapid(False))
+        rapid_label = muted("Rapid trigger")
+        rapid_label.setToolTip(rapid_tip)
+        tap_tip = ("Rapid tap: of two keys held together, the last one pressed wins. Hold A, press D, and only D counts until you let "
+                   "go of it, for clean strafing. Pairs like A/D W/S; A/D:first makes A always win, :second D, :neither cancels both. "
+                   "SteelSeries + Q on the keyboard turns it on and off too.")
+        self.rapid_tap = QCheckBox("Rapid tap")
+        self.rapid_tap.setToolTip(tap_tip)
+        self.rapid_tap.clicked.connect(lambda: self.apply_rapid_tap())
+        self.rapid_pairs = QLineEdit("A/D")
+        self.rapid_pairs.setPlaceholderText("A/D W/S")
+        self.rapid_pairs.setToolTip(tap_tip)
+        self.rapid_pairs.returnPressed.connect(lambda: self.apply_rapid_tap())
+        self.rapid_tap_set = QPushButton("Set pairs")
+        self.rapid_tap_set.clicked.connect(lambda: self.apply_rapid_tap())
         check = QPushButton("Check switches")
         check.clicked.connect(lambda: self.show_report("health"))
         typing = QPushButton("How I type")
@@ -1871,7 +1916,8 @@ class KeyboardPage(QWidget):
         fill_hint.setWordWrap(True)
         self.report.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         panel = well(self.selection_label, row(*pick, None), pick_hint, row(muted("Fires at"), self.depth, self.depth_label),
-                     row(self.set_depth, None), row(self.rapid_on, self.rapid_off, None),
+                     row(self.set_depth, None), row(rapid_label, self.rapid_distance, self.rapid_on, self.rapid_off, None),
+                     row(self.rapid_tap, self.rapid_pairs, self.rapid_tap_set),
                      fill_hint,
                      row(check, typing, None), self.report)
         panel.layout().addStretch(1)
@@ -1966,6 +2012,16 @@ class KeyboardPage(QWidget):
         self.connection.setText(info.get("model", "Apex Pro Gen 3"))
         self.firmware.setText(f"firmware {info['firmware']}, {len(info['keys'])} keys with sensors")
         self.settings = info["keys"]
+        rapid_tap = info.get("rapid_tap")
+        self.rapid_tap.setEnabled(rapid_tap is not None)
+        self.rapid_tap_set.setEnabled(rapid_tap is not None)
+        self.rapid_tap.setToolTip(self.rapid_pairs.toolTip() if rapid_tap is not None else
+                                  "This needs apex-analog's daemon on newer code: run apex-analog stop, and it starts again on it.")
+        if rapid_tap is not None:
+            self.rapid_tap.setChecked(rapid_tap["on"])
+            if rapid_tap["pairs"]:
+                self.rapid_pairs.setText(" ".join(f"{p['a']}/{p['b']}" + (f":{p['mode']}" if p["mode"] != "last" else "")
+                                                  for p in rapid_tap["pairs"]))
         self.shortcuts = data.get("shortcuts", {})
         self.controller_config = data.get("controller") or dict(CONTROLLER_DEFAULTS, keys={})
         self.controller = self.controller_config["keys"]
@@ -2016,11 +2072,13 @@ class KeyboardPage(QWidget):
             self.set_cap_live(cap, bool(key))
             if key:
                 mm = self.key_depth(key)
-                rapid = key["mode"] != 0
+                rapid = key["mode"] == RAPID_TRIGGER_MODE
                 cap.fires_at = key["press"]
                 shortcut = self.shortcuts.get(name)
                 cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid or bool(shortcut))
-                cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else "") + (f". With the SteelSeries key: {shortcut}" if shortcut else ""))
+                distance = f" at {key['rapid_distance']:g} mm" if key.get("rapid_distance") else ""
+                cap.setToolTip(f"Fires at {mm:.1f} mm" + (f", rapid trigger{distance}" if rapid else "") +
+                               (f". With the SteelSeries key: {shortcut}" if shortcut else ""))
             else:
                 cap.set_detail("")
                 cap.setToolTip("")
@@ -2202,6 +2260,9 @@ class KeyboardPage(QWidget):
             button.setEnabled(bool(chosen))
         if len(chosen) == 1 and chosen[0] in self.settings:
             self.depth.setValue(DEPTHS.index(self.key_depth(self.settings[chosen[0]])))
+        distances = {self.settings[n].get("rapid_distance") for n in chosen if n in self.settings}
+        if len(distances) == 1 and None not in distances:
+            self.rapid_distance.setValue(distances.pop())
         self.show_set_label()
         self.show_shortcut_key()
         if chosen and hasattr(self, "bind_other"):
@@ -2413,8 +2474,19 @@ class KeyboardPage(QWidget):
     def apply_rapid(self, on):
         names = self.selected_keys()
         if names:
-            state = "on" if on else "off"
-            self.apply(lambda: self.device.set_rapid(names, on), f"Turned rapid tap {state} for {len(names)} key{'s' if len(names) != 1 else ''}.")
+            distance = round(self.rapid_distance.value(), 1) if on else None
+            what = f"on at {distance:g} mm" if on else "off"
+            self.apply(lambda: self.device.set_rapid(names, on, distance),
+                       f"Rapid trigger {what} for {len(names)} key{'s' if len(names) != 1 else ''}.")
+
+    def apply_rapid_tap(self):
+        on, pairs = self.rapid_tap.isChecked(), self.rapid_pairs.text().replace(",", " ").split()
+        if on and not pairs:
+            self.rapid_tap.setChecked(False)
+            self.status.say("Rapid tap needs a pair of keys, like A/D.", "bad")
+            return
+        self.apply(lambda: self.device.set_rapid_tap(on, pairs),
+                   f"Rapid tap on for {' '.join(pairs)}: the last one pressed wins." if on else "Rapid tap off.")
 
     def apply_effect(self):
         args = self.effect.currentData()
@@ -2507,7 +2579,14 @@ class ControllerWindow(QWidget):
         self.plate.picked.connect(self.selection_changed)
         self.plate.screen.hide()  # the screen and the wheel aren't part of the controller
         self.caps = self.plate.caps
-        root.addWidget(self.plate, 0, Qt.AlignHCenter)
+        around = QWidget()  # the full width, so a box can start beside the keys
+        line = QHBoxLayout(around)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.addStretch(1)
+        line.addWidget(self.plate)
+        line.addStretch(1)
+        self.plate.catch_drags_on(around)
+        root.addWidget(around)
 
         # what the picked keys do
         self.picked_label = QLabel("Pick keys on the keyboard")

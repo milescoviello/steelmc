@@ -352,7 +352,40 @@ class KeyboardPageTest(unittest.TestCase):
     def test_rapid(self):
         self.page.pick(["W"])
         self.page.rapid_off.click()
-        self.assertEqual(self.device.calls, [("set_rapid", ["W"], False)])
+        self.assertEqual(self.device.calls, [("set_rapid", ["W"], False, None)])
+        self.page.rapid_distance.setValue(0.5)
+        self.page.rapid_on.click()
+        self.assertEqual(self.device.calls[-1], ("set_rapid", ["W"], True, 0.5))
+        self.assertIn("Rapid trigger on at 0.5 mm", self.page.status.text())
+
+    def test_rapid_tap(self):
+        self.assertTrue(self.page.rapid_tap.isChecked())  # as the keyboard said
+        self.assertEqual(self.page.rapid_pairs.text(), "A/D W/S")
+        info = self.device.data["info"]
+        info["rapid_tap"] = {**info["rapid_tap"], "on": False}  # what the keyboard says after the click, when the page reloads
+        self.page.rapid_tap.click()  # off
+        self.assertEqual(self.device.calls[-1], ("set_rapid_tap", False, ["A/D", "W/S"]))
+        self.assertFalse(self.page.rapid_tap.isChecked())
+        self.page.rapid_pairs.setText("A/D:first")
+        info["rapid_tap"] = {"on": True, "pairs": [{"a": "A", "b": "D", "mode": "first"}]}
+        self.page.rapid_tap.click()  # on
+        self.assertEqual(self.page.rapid_pairs.text(), "A/D:first")
+        info["rapid_tap"] = {**info["rapid_tap"], "on": False}
+        self.assertEqual(self.device.calls[-1], ("set_rapid_tap", True, ["A/D:first"]))
+        self.assertIn("Rapid tap on for A/D:first", self.page.status.text())
+        self.page.rapid_tap.click()  # off again
+        self.page.rapid_pairs.setText("")
+        self.page.rapid_tap.click()
+        self.assertEqual(len([c for c in self.device.calls if c[0] == "set_rapid_tap"]), 3)  # nothing sent without a pair
+        self.assertFalse(self.page.rapid_tap.isChecked())
+        self.assertIn("needs a pair", self.page.status.text())
+
+    def test_rapid_tap_waits_for_a_newer_daemon(self):
+        info = {k: v for k, v in self.device.data["info"].items() if k != "rapid_tap"}
+        self.device.data = {**self.device.data, "info": info}
+        self.page.refresh()
+        self.assertFalse(self.page.rapid_tap.isEnabled())
+        self.assertIn("apex-analog stop", self.page.rapid_tap.toolTip())
 
     def test_lighting_shows_whats_running(self):
         self.assertEqual(self.page.effect.currentData(), ["lights", "--keep"])
@@ -689,6 +722,27 @@ class DragSelect(unittest.TestCase):
         self.assertNotIn("F", self.picked())
         self.event(self.plate, QEvent.MouseButtonRelease, self.center("H"))
         self.assertTrue(self.plate.band.isHidden())
+
+    def test_a_box_can_start_left_of_the_keys(self):
+        self.page.resize(1400, 1000)
+        self.page.show()
+        self.addCleanup(self.page.close)
+        QApplication.processEvents()
+        frame = self.plate.parentWidget()
+        self.assertGreater(self.plate.x(), 20)  # there's room beside the plate, which is where this starts
+
+        def send(kind, plate_point, buttons=Qt.LeftButton):
+            local = QPointF(self.plate.mapTo(frame, plate_point))
+            QApplication.sendEvent(frame, QMouseEvent(kind, local, local, Qt.LeftButton, buttons, Qt.NoModifier))
+        start = QPoint(-self.plate.x() // 2, self.page.caps["TAB"].geometry().center().y())
+        send(QEvent.MouseButtonPress, start)
+        send(QEvent.MouseMove, self.center("S"))
+        self.assertLessEqual({"Q", "W", "A", "S"}, self.picked())
+        self.assertNotIn("D", self.picked())
+        send(QEvent.MouseButtonRelease, self.center("S"), Qt.NoButton)
+        self.assertTrue(self.plate.band.isHidden())
+        send(QEvent.MouseMove, self.center("L"), Qt.NoButton)  # after letting go, moving does nothing
+        self.assertNotIn("L", self.picked())
 
     def test_a_box_keeps_what_was_picked_and_can_shrink(self):
         self.page.pick(["Q"])
@@ -1346,6 +1400,8 @@ class KeyboardCommand(unittest.TestCase):
         device = self.script('printf "%s " "$@"\n')
         self.assertEqual(device.set_actuation(["W", ","], 1.4), "actuation W,COMMA 1.4 ")
         self.assertEqual(device.set_rapid(["W"], False), "rapid W off ")
+        self.assertEqual(device.set_rapid(["W", "A"], True, 0.3), "rapid W,A on --distance 0.3 ")
+        self.assertEqual(device.set_rapid_tap(True, ["A/D", "W/S:first"]), "rapid-tap on A/D W/S:first ")
         self.assertEqual(device.lights(None), "lights --off ")
         self.assertEqual(device.lights(["lights", "--keep"], "ffffff"), "lights --keep --color ffffff ")
         self.assertEqual(device.save(), "save --yes ")

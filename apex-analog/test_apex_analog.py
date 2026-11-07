@@ -87,7 +87,7 @@ class Safety(unittest.TestCase):
                 kb._ask([command])
 
     def test_allowlist_has_not_grown_by_accident(self):
-        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4, 0xB3, 0xCD, 0xCE})
+        self.assertEqual(set(a.ALLOWED), {0xD7, 0xDA, 0xB1, 0xB2, 0x9E, 0xE2, 0xE0, 0xE3, 0xE4, 0xB3, 0xCD, 0xCE, 0xB4, 0x9A, 0x9B})
         self.assertEqual(set(a.BIND_COMMANDS), {0x63, 0x64, 0x60, 0x4D, 0x4E})
         self.assertEqual(set(a.BIND_CHECKS), set(a.BIND_COMMANDS))
 
@@ -141,6 +141,9 @@ class SimulatedKeyboard:
         self.first = {hid: (50, 46) for hid in a.DEEP_HIDS}  # press and release points, n/255
         self.second = {hid: (255, 255) for hid in a.DEEP_HIDS}  # where a deeper press starts: the bottom, out of the box
         self.lights = bytearray(32)  # keys lit while the SteelSeries layer is on, one bit per HID usage
+        self.modes, self.distances = {}, {}  # each key's mode byte (2 is rapid trigger) and rapid trigger distance in tenths
+        self.rapid_tap_on = 0
+        self.pairs = [(0x04, 0x07, 0)] + [(0, 0, 0)] * 9  # rapid tap's pairs: A/D, last pressed wins, out of the box
         self.light_color = bytes([0xFF, 0x20, 0x00])
         for hid, record in self.tables[1].items():
             if record[0]:
@@ -177,12 +180,21 @@ class SimulatedKeyboard:
             for i in range(count):
                 hid = p[first + stride * i]
                 if p[0] == 0xB2:
-                    out += bytes([hid, 0])
+                    out += bytes([hid, self.modes.get(hid, 0)])
                 else:
                     out += bytes([hid, *(self.second if deep else self.first)[hid]])
             return out.ljust(64, b"\0")
         if p[0] == 0xE4:
             return b"".join(self.wheel[0 if p[1] == 0 else 1]).ljust(64, b"\0")
+        if p[0] == 0xB4:
+            return b"".join(bytes([p[2 + 2 * i], self.distances.get(p[2 + 2 * i], 2)]) for i in range(p[1])).ljust(64, b"\0")
+        if p[0] == 0x9A:
+            return bytes([self.rapid_tap_on]).ljust(64, b"\0")
+        if p[0] == 0x9B:
+            count, start = p[1], p[2]
+            assert 1 <= count <= 10 and start + count <= 10, p.hex()
+            records = b"".join(bytes([start + i, *self.pairs[start + i], 0, 0]) for i in range(count))
+            return (bytes([0x9B, 0, count]) + records).ljust(64, b"\0")
         if p[0] == 0xE3:
             table, count = self.tables[self.table(p[1])], p[2]
             assert 1 <= count <= 10, p.hex()
@@ -214,6 +226,21 @@ class SimulatedKeyboard:
         elif p[0] == 0x4E:
             assert len(p) == 4, p.hex()
             self.light_color = bytes(p[1:4])
+        elif p[0] == 0x32:
+            for i in range(p[1]):
+                self.modes[p[2 + 2 * i]] = p[3 + 2 * i]
+        elif p[0] == 0x34:
+            for i in range(p[1]):
+                if 1 <= p[3 + 2 * i] <= 40:  # the firmware ignores anything else
+                    self.distances[p[2 + 2 * i]] = p[3 + 2 * i]
+        elif p[0] == 0x1A:
+            self.rapid_tap_on = int(p[1] != 0)
+        elif p[0] == 0x1B:
+            count, start = p[1], p[2]
+            if 1 <= count <= 10 and start < 10 and start + count <= 10:
+                for i in range(count):
+                    slot, key_a, key_b, mode = p[2 + 6 * i:6 + 6 * i]
+                    self.pairs[slot] = (0, 0, 0) if mode & 0x7F > 3 else (key_a, key_b, mode)
         elif p[0] == 0x33:
             assert p[1] == 2, p.hex()
             for i in range(p[2]):
@@ -360,6 +387,60 @@ class Bindings(unittest.TestCase):
             args = a.build_parser().parse_args(list(argv))
             args.func(args)
         return out.getvalue()
+
+    def test_rapid_trigger_with_its_distance(self):
+        sim = SimulatedKeyboard()
+        said = self.run_cli(sim, "rapid", "WASD", "on", "--distance", "0.5")
+        self.assertIn("Rapid trigger on at 0.5 mm for 4 keys, and read it back.", said)
+        for hid in (0x1A, 0x04, 0x16, 0x07):
+            self.assertEqual((sim.modes[hid], sim.distances[hid]), (a.RAPID_TRIGGER_MODE, 5))
+        listing = self.run_cli(sim, "rapid")
+        self.assertRegex(listing, r"Rapid trigger on: [WASD ]+ at 0.5 mm")
+        self.run_cli(sim, "rapid", "W", "off")
+        self.assertEqual(sim.modes[0x1A], 0)
+        self.assertEqual(json.loads(self.run_cli(sim, "rapid", "--json"))["A"], {"on": True, "distance": 0.5})
+
+    def test_rapid_tap_pairs_and_switch(self):
+        sim = SimulatedKeyboard()
+        self.assertIn("Rapid tap is off. Pairs: A/D (the last one pressed wins)", self.run_cli(sim, "rapid-tap"))
+        said = self.run_cli(sim, "rapid-tap", "on", "A/D", "w/s:first")
+        self.assertIn("Rapid tap on, and read it back", said)
+        self.assertEqual(sim.rapid_tap_on, 1)
+        self.assertEqual(sim.pairs[:3], [(0x04, 0x07, 0), (0x1A, 0x16, 1), (0, 0, 0)])
+        self.assertIn("W/S (W wins)", self.run_cli(sim, "rapid-tap"))
+        self.run_cli(sim, "rapid-tap", "off")
+        self.assertEqual((sim.rapid_tap_on, sim.pairs[1]), (0, (0x1A, 0x16, 1)))  # off keeps the pairs
+        self.run_cli(sim, "rapid-tap", "on")
+        self.assertEqual((sim.rapid_tap_on, sim.pairs[1]), (1, (0x1A, 0x16, 1)))
+        report = json.loads(self.run_cli(sim, "rapid-tap", "--json"))
+        self.assertEqual(report["pairs"][1], {"a": "W", "b": "S", "mode": "first"})
+
+    def test_rapid_tap_on_with_no_pairs_starts_with_a_d(self):
+        sim = SimulatedKeyboard()
+        sim.pairs = [(0, 0, 0)] * 10
+        self.run_cli(sim, "rapid-tap", "on")
+        self.assertEqual(sim.pairs[0], (0x04, 0x07, 0))
+
+    def test_rapid_writes_are_checked(self):
+        good = [0x1B, 2, 0, 0x04, 0x07, 0, 0, 0, 1, 0x1A, 0x16, 3]
+        a._check_rapid_tap_pairs(good)
+        for bad in ([*good[:8], 10, *good[9:]],         # a slot past 9 would land outside the pairs
+                    [*good[:8], 0, *good[9:]],          # out of order
+                    [*good[:3], 0x3A, *good[4:]],       # F1 has no sensor
+                    [*good[:3], 0x04, 0x04, *good[5:]], # the same key twice
+                    [*good[:11], 4],                    # no such mode
+                    [*good[:6], 1, *good[7:]],          # padding that isn't 0
+                    good[:-1]):
+            with self.assertRaises(ValueError, msg=bad):
+                a._check_rapid_tap_pairs(bad)
+        a._check_rapid_distance([0x34, 1, 0x1A, 40])
+        for bad in ([0x34, 1, 0x1A, 0], [0x34, 1, 0x1A, 41], [0x34, 1, 0x3A, 2], [0x34, 2, 0x1A, 2]):
+            with self.assertRaises(ValueError, msg=bad):
+                a._check_rapid_distance(bad)
+        with self.assertRaises(ValueError):
+            a._check_rapid_tap([0x1A, 2])
+        with self.assertRaises(ValueError):
+            a.parse_rapid_pair("A/D:sometimes")
 
     def test_bind_and_put_back(self):
         sim = SimulatedKeyboard()
@@ -1151,7 +1232,7 @@ class Actuation(unittest.TestCase):
         self.assertNotIn(a.BY_NAME["LGUI"][1], second[3:9:3])
 
     def test_settings_command_list_stays_short(self):
-        self.assertEqual(set(a.SETTING_COMMANDS), {0x31, 0x32, 0x33})
+        self.assertEqual(set(a.SETTING_COMMANDS), {0x31, 0x32, 0x33, 0x34, 0x1A, 0x1B})
         self.assertEqual(a.SAVE_COMMAND, 0x09)
 
 
@@ -1358,11 +1439,23 @@ class Writes(unittest.TestCase):
     def packet(self):
         return os.read(self.read, 65)
 
-    def test_rapid_tap_bytes(self):
-        self.kb.set_mode("W", a.RAPID_TAP_MODE)
+    def test_rapid_trigger_bytes(self):
+        self.kb.set_mode("W", a.RAPID_TRIGGER_MODE)
         self.assertEqual(self.packet()[:5], bytes([0, 0x32, 1, 0x1A, 2]))
         self.kb.set_mode("WA", 0)
         self.assertEqual(self.packet()[:7], bytes([0, 0x32, 2, 0x1A, 0, 0x04, 0]))
+
+    def test_rapid_distance_and_rapid_tap_bytes(self):
+        self.assertEqual(self.kb.set_rapid_distance("W", 0.24), 0.2)
+        self.assertEqual(self.packet()[:5], bytes([0, 0x34, 1, 0x1A, 2]))
+        self.kb.set_rapid_tap(on=True)
+        self.assertEqual(self.packet()[:3], bytes([0, 0x1A, 1]))
+        self.kb.set_rapid_tap(pairs=[("A", "D", "last"), ("W", "S", "first")])
+        packet = self.packet()
+        self.assertEqual(packet[1:16], bytes([0x1B, 10, 0, 0x04, 0x07, 0, 0, 0, 1, 0x1A, 0x16, 1, 0, 0, 2]))
+        self.assertEqual(packet[55:61], bytes([0, 0, 9, 0, 0, 0]))  # the last slot, empty, after the 2 bytes that end slot 8
+        with self.assertRaises(ValueError):
+            self.kb.set_rapid_distance("W", 4.1)
 
     def test_many_modes_split(self):
         self.kb.set_mode(list(a.BY_NAME)[:31], 0)

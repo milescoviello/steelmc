@@ -10,7 +10,7 @@ Configure SteelSeries gear on Linux with no vendor software. Not affiliated with
 | [`gui`](gui) | `steelmc`: one window for all of it | All of these |
 | [`aerox`](aerox/README.md) | `aerox`: battery, DPI, polling, sleep, button bindings, lighting | Aerox 9 Wireless mouse |
 | [`arctis`](arctis/README.md) | `arctis`: battery, ChatMix, sidetone, mic gain, EQ, surround and the sleep timer | Arctis 9 Wireless headset |
-| [`apex-analog`](apex-analog/README.md) | `apex-analog`: live key depth, actuation, rapid tap, key bindings, lighting, shortcuts, and using key depth as analog input | Apex Pro Gen 3 keyboard |
+| [`apex-analog`](apex-analog/README.md) | `apex-analog`: live key depth, actuation, rapid trigger, rapid tap, key bindings, lighting, shortcuts, and using key depth as analog input | Apex Pro Gen 3 keyboard |
 | [`apex-oled`](apex-oled/README.md) | `apex-oled`: the keyboard's screen: system stats, lyrics, notifications, your own frames | Apex Pro Gen 3 keyboard |
 
 ## Install
@@ -49,7 +49,8 @@ Run `steelmc`, or find SteelMC in your application menu.
 
 **Keyboard:**
 - Each key shows where it fires, fills as you press it, and sinks once it passes that point.
-- Drag across keys to pick several, or drag from an empty spot to box them, then set their actuation or rapid tap.
+- Drag across keys to pick several, or drag from an empty spot (beside the keys too) to box them, then set their actuation or rapid trigger and its distance.
+- **Rapid tap**: of two keys held together, the last one pressed wins, for clean strafing. Pairs like A/D W/S.
 - The keyboard's screen is mirrored live. You can choose what it shows, turn it off, or send it a message.
 - **Bindings** rebinds any key on the keyboard itself, numpad and wheel included, so it works with no software running. Each key has three layers: normally, while the SteelSeries key is held, and on a deeper press.
 - Keys bound on the SteelSeries layer glow while it's held, like the keyboard's own; pick the glow colour. **Your bindings** lists every change with a Remove button.

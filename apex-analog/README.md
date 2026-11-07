@@ -182,8 +182,13 @@ apex-analog actuation                # see what every key is set to
 apex-analog actuation W 1.0          # W fires at 1.0 mm
 apex-analog actuation WASD 1.2
 apex-analog actuation all 1.8        # the level every key on this board was on before any changes
-apex-analog rapid WASD on            # the keyboard's own rapid tap, per key
+apex-analog rapid WASD on            # rapid trigger: fire and let go on every change of direction, per key
+apex-analog rapid WASD on --distance 0.2   # ...once the key moves 0.2 mm (0.1 to 4.0)
+apex-analog rapid-tap on A/D W/S     # rapid tap: of two keys held together, the last one pressed wins
+apex-analog rapid-tap                # whether it's on, and its pairs
 ```
+
+**Rapid trigger** and **rapid tap** are two different things. With rapid trigger on, a key fires as soon as it moves down by its distance from where it last turned, and lets go as soon as it moves back up by it, anywhere in its travel. The keyboard's own menu calls this RAPID TAP. Rapid tap, as GG names it, is about pairs of keys: of two held together, only one counts. Out of the box that's the last one pressed (hold A, press D, and only D counts until you let go), and `A/D:first`, `:second` or `:neither` pick the first key, the second, or neither instead. Up to 10 pairs. SteelSeries + Q on the keyboard turns rapid tap on and off too.
 
 Each uses what the firmware offers and reads the result back to check it. LGUI's actuation can't be changed this way.
 
@@ -404,7 +409,7 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 - **Tested only with simulated key depths so far:** MIDI playing feel, pressure typing, the typing profile's numbers, and two players or pedals inside a game. MIDI did reach a real ALSA client, the overlay did run in a real browser, and the extra controllers and pedals did appear to Linux as joysticks.
 - `lights --keep` and the glow in `lights` work on the real keyboard.
 - The daemon ran on the real keyboard with several jobs at once, replacing jobs, reporting mistakes, and recovering when killed. The daemon, glow and recording together used about 6% of one core, and about 8% with a controller on top. A real replug reconnected every job by itself.
-- Sent to the real keyboard and read back correctly: `actuation`, `rapid`, `preset use`, and `save` (the keyboard answered again after 0.5 s with its settings intact).
+- Sent to the real keyboard and read back correctly: `actuation`, `rapid`, rapid tap's `1A` and `1B` (A/D and W/S, last pressed wins, felt right in a game), `preset use`, and `save` (the keyboard answered again after 0.5 s with its settings intact).
 - `bindings` read all three layers and the wheel on the real keyboard, and they matched the firmware's defaults. `bind` changed keys on the normal and SteelSeries layers and the wheel, read them back, and put them back. Setting where a deeper press starts, a deeper-press binding, and moving the SteelSeries layer to another key and back were also sent and read back. A real press of a rebound key and a binding kept through `save` and a replug haven't been tried yet.
 - Ran on the real keyboard without errors, with key presses and music simulated: every lighting effect, `paint`, `auto`, `type`, `midi`, every `map` preset, and frames through the real `apex-oledd`. Whether they look and feel right still needs someone watching.
 - `rev` read real UDP packets in BeamNG's format from its own source, but hasn't received them from a running game. A `save` that changes a setting hasn't been followed by a replug yet.
@@ -413,7 +418,7 @@ Apex Pro Gen 3 (`1038:1640`), firmware 4.16.8, Gentoo Linux, KDE Wayland, Python
 
 Unless you run something that sets colours or settings, this only reads the keyboard. Every command it can send is listed here, and each one's firmware handler was read first. Only `apex-analog save` reaches flash, and none of them reset the keyboard.
 
-These ten only copy memory into the reply:
+These thirteen only copy memory into the reply:
 
 | Send | Reply | |
 |---|---|---|
@@ -427,15 +432,21 @@ These ten only copy memory into the reply:
 | `E3 <layer> <n> [<hid> 0 0 0 0 0]...` | `<hid>` and 5 bytes of binding, per key | what keys do on a layer: 0 normal, 1 SteelSeries, 2 deeper press |
 | `E4 <layer>` | two 5-byte bindings | what the wheel does on a layer |
 | `B3 <2> <n> [<hid> 0 0]...` | `<hid> <press> <release>`... | where each key's deeper press starts |
+| `B4 <n> [<hid> 0]...` | `<hid> <tenths of a mm>`... | each key's rapid trigger distance |
+| `9A` | 1 byte | whether rapid tap is on |
+| `9B <n> <first slot>` | `9B 0 <n>`, then `<slot> <key A> <key B> <mode> 0 0` per pair | rapid tap's pairs |
 
-These eight change something in the keyboard's memory, and only when you ask:
+These eleven change something in the keyboard's memory, and only when you ask:
 
 | Send | | Used by |
 |---|---|---|
 | `3A <n> [<hid> <r> <g> <b>]...` | colours for up to 15 keys | `lights` |
 | `3B` | back to normal lighting | `lights` |
 | `31 <n> [<hid> <press> <release>]...` | actuation for up to 20 keys, as n/255 of the key's range | `actuation`, `preset` |
-| `32 <n> [<hid> <mode>]...` | mode for up to 30 keys, 2 is rapid tap | `rapid`, `preset` |
+| `32 <n> [<hid> <mode>]...` | mode for up to 30 keys, 2 is rapid trigger | `rapid`, `preset` |
+| `34 <n> [<hid> <tenths>]...` | rapid trigger distance for up to 30 keys, 1 to 40 tenths of a mm (the firmware ignores others) | `rapid --distance` |
+| `1A <0 or 1>` | rapid tap off or on | `rapid-tap` |
+| `1B <n> [<slot> <key A> <key B> <mode> 0 0]...` | up to 10 rapid tap pairs; mode 0 last pressed wins, 1 key A, 2 key B, 3 neither | `rapid-tap` |
 | `63 <layer> <n> [<hid> <binding>]...` | what up to 10 keys do on layer 0, 1 or 2 | `bind` |
 | `64 <layer> <up> <down>` | what the wheel does on layer 0 or 1 | `bind` |
 | `60 <hid>` | which key turns on the SteelSeries layer | `layer-key` |

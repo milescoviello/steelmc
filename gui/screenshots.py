@@ -75,13 +75,14 @@ def sample_bindings():
 
 
 def sample_keyboard():
-    keys = {n: {"press": 1.89, "release": 1.8, "mode": 0, "deep": None} for n in NAMES}
+    keys = {n: {"press": 1.89, "release": 1.8, "mode": 0, "deep": None, "rapid_distance": 0.2} for n in NAMES}
     for n in "WASD":
-        keys[n] = {"press": 1.08, "release": 1.0, "mode": 2, "deep": None}
-    keys["SPACE"] = {"press": 3.0, "release": 3.0, "mode": 0, "deep": None}
+        keys[n] = {"press": 1.08, "release": 1.0, "mode": 2, "deep": None, "rapid_distance": 0.2}
+    keys["SPACE"] = {"press": 3.0, "release": 3.0, "mode": 0, "deep": None, "rapid_distance": 0.2}
     keys["W"]["deep"] = 3.0
     return {
-        "info": {"firmware": "0416", "keys": keys},
+        "info": {"firmware": "0416", "keys": keys,
+                 "rapid_tap": {"on": True, "pairs": [{"a": "A", "b": "D", "mode": "last"}, {"a": "W", "b": "S", "mode": "last"}]}},
         "jobs": [{"name": "lights", "on": True, "command": "lights --keep", "age": "135 min"},
                  {"name": "recording", "on": True, "command": "record", "age": "135 min"}],
         "presets": ["gaming", "typing"],
