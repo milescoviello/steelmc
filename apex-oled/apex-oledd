@@ -1060,7 +1060,7 @@ class DecodeRate:
 
 
 class LlamaBackend:
-    """llama-server (qwen38, behind qwen-claude-proxy), read through
+    """llama-server (a local model, possibly behind a proxy), read through
     `qwen-status --json` plus llama-server's own /slots.
 
     `qwen-status --json` is the contract; its log parsing and nvidia-smi calls
