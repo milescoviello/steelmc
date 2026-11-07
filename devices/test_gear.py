@@ -159,6 +159,71 @@ class Talking(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
 
+class Headsets(unittest.TestCase):
+    def setUp(self):
+        self.ours, self.device = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        self.addCleanup(self.ours.close)
+        self.addCleanup(self.device.close)
+        self.sent, self.replies = [], {}
+        patcher = mock.patch("gear.time.sleep", lambda *_: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.config = tempfile.TemporaryDirectory()
+        self.addCleanup(self.config.cleanup)
+        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": self.config.name})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def open(self, pid):
+        g = gear.Gear(pid, FAMILIES, fd=self.ours.fileno())
+
+        def write(fd, data):
+            self.sent.append(bytes(data))
+            reply = self.replies.get(bytes(data[:2]))
+            if reply is not None:
+                self.device.send(reply)
+            return len(data)
+        g.write = write
+        return g
+
+    def test_raw_frames_are_padded_and_followed_by_a_save(self):
+        g = self.open("220e")  # Arctis 7+
+        g.set("sidetone", "medium")
+        self.assertEqual(self.sent[0], bytes([0x00, 0x39, 0x02]).ljust(64, b"\0"))
+        self.assertEqual(self.sent[1], bytes([0x00, 0x09]).ljust(64, b"\0"))
+        legacy = self.open("1260")  # Arctis 7, 31-byte packets on report 6
+        legacy.set("sidetone", "off")
+        self.assertEqual(self.sent[2], bytes([0x06, 0x35]).ljust(31, b"\0"))
+        self.assertEqual(self.sent[3], bytes([0x06, 0x09]).ljust(31, b"\0"))
+
+    def test_equalizer(self):
+        s = family("2202")["settings"]["equalizer"]
+        self.assertEqual(gear.frame(s, "flat"), [0x00, 0x33] + [0x14] * 10 + [0x00])
+        self.assertEqual(gear.frame(s, "1,2,3,4,5,-1,-2,-3,-4,-5")[2:12], [21, 22, 23, 24, 25, 19, 18, 17, 16, 15])
+        plus = family("220e")["settings"]["equalizer"]
+        self.assertEqual(gear.frame(plus, "bass")[2:12], [0x1F, 0x20, 0x1A, 0x15, 0x15, 0x16, 0x16, 0x16, 0x16, 0x23])
+        with self.assertRaises(gear.Refused):
+            gear.frame(s, "1,2,3")
+        with self.assertRaises(gear.Refused):
+            gear.frame(s, "11,0,0,0,0,0,0,0,0,0")
+        g = self.open("12e0")  # Nova Pro Wireless picks its custom preset first
+        g.set("equalizer", "0,0,0,0,0,0,0,0,0,1")
+        self.assertEqual(self.sent[0][:3], bytes([0x06, 0x2E, 0x04]))
+        self.assertEqual(self.sent[1][:2], bytes([0x06, 0x33]))
+
+    def test_status(self):
+        self.replies[bytes([0x00, 0xB0])] = bytes([0xB0, 0, 3, 0x01, 70, 30]).ljust(128, b"\0")
+        self.assertEqual(self.open("2202").status(), {"connected": True, "charging": True, "battery": 75, "chat": 30, "game": 70})
+        self.assertEqual(self.open("22a1").status()["battery"], 3)  # newer firmware reports a percentage
+        self.replies[bytes([0x00, 0xB0])] = bytes([0xB0, 0, 0, 0x00]).ljust(128, b"\0")
+        self.assertFalse(self.open("2202").status()["connected"])
+        self.replies[bytes([0x06, 0x18])] = bytes([0x06, 0x18, 55]).ljust(8, b"\0")
+        self.replies[bytes([0x06, 0x24])] = bytes([0x06, 0x24, 0, 223]).ljust(8, b"\0")
+        self.assertEqual(self.open("1260").status(), {"battery": 55, "game": 100, "chat": 50})
+        self.replies[bytes([0x00, 0xB0])] = bytes([0xB0, 0, 0, 3, 1, 80, 40]).ljust(128, b"\0")
+        self.assertEqual(self.open("230a").status(), {"left_battery": 80, "right_battery": None})
+
+
 class Cli(unittest.TestCase):
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()

@@ -261,10 +261,27 @@ def encode_gradient2(s, value):
     return packet + split + [0xFF, 0x00] + le(1500, 2) + le(650, 2) + [0, 0, 0, 0, 1, 0] + le(len(stops) - 1, 2) + le(duration, h["duration_length"])
 
 
+def encode_eq(s, value):
+    """A preset name, or one gain per band in dB, comma separated. Each byte is base + gain x per_db, as the device takes it."""
+    text = str(value).strip().lower()
+    if text in s.get("presets", {}):
+        gains = s["presets"][text]
+    else:
+        try:
+            gains = [float(g) for g in text.replace(" ", "").split(",") if g != ""]
+        except ValueError:
+            raise Refused(f"{value!r} isn't a preset or a list of gains. Presets: {', '.join(s.get('presets', {})) or 'none'}.") from None
+    if len(gains) != s["bands"]:
+        raise Refused(f"Give {s['bands']} gains, one per band, from {s['min']} to {s['max']} dB.")
+    if any(not s["min"] <= g <= s["max"] for g in gains):
+        raise Refused(f"Each gain goes from {s['min']} to {s['max']} dB.")
+    return [int(s["base"] + g * s["per_db"]) & 0xFF for g in gains]
+
+
 ENCODERS = {
     "choice": encode_choice, "number": encode_number, "number_choice": encode_number_choice, "dpi_stages": encode_dpi_stages,
     "color": encode_color, "reactive_color": encode_reactive_color, "action": encode_action, "buttons": encode_buttons,
-    "gradient": encode_gradient, "gradient2": encode_gradient2,
+    "gradient": encode_gradient, "gradient2": encode_gradient2, "eq": encode_eq,
 }
 
 
@@ -280,6 +297,26 @@ def frame(setting, value=None):
 
 
 # ---- reading replies -------------------------------------------------------------------------------------------------
+
+def decode_field(spec, reply):
+    """One value from a status reply: a percentage, a yes or no, or None when its condition doesn't hold."""
+    if spec["byte"] >= len(reply):
+        return None
+    when = spec.get("when")
+    if when and reply[when["byte"]] not in when["is"]:
+        return None
+    raw = reply[spec["byte"]]
+    if "is" in spec:
+        return raw in spec["is"]
+    if "not" in spec:
+        return raw not in spec["not"]
+    if "map" in spec:
+        if raw == 0 and "zero" in spec:
+            return spec["zero"]
+        low, high = spec["map"]
+        return max(0, min(100, round((raw - low) * 100 / (high - low))))
+    return raw
+
 
 def decode_battery(spec, reply):
     level = spec["level"]
@@ -352,10 +389,14 @@ class Gear:
         self.close()
 
     def send(self, spec, data):
-        report = bytes([0] + list(data))
+        """Families marked raw list the exact bytes, report ID first, padded to their packet size. Others get report 0 added."""
+        if self.family.get("raw"):
+            report = bytes(list(data) + [0] * max(0, self.family.get("packet", 0) - len(data)))
+        else:
+            report = bytes([0] + list(data))
         while select.select([self.fd], [], [], 0)[0]:
             os.read(self.fd, 64)
-        if spec.get("report", "output") == "feature":
+        if spec.get("report", "output") == "feature" or self.family.get("feature"):
             fcntl.ioctl(self.fd, _ioc(3, ord("H"), 0x06, len(report)), report)
         else:
             self.write(self.fd, report)
@@ -371,11 +412,27 @@ class Gear:
             raise Refused(f"The {self.name} has no setting {name!r}. It has: {', '.join(self.settings)}.")
         spec = self.settings[name]
         data = frame(spec, value)
+        for extra in spec.get("before", []):
+            self.send(spec, extra)
         self.send(spec, data)
         if spec.get("readback_length"):
             self.reply(spec["readback_length"])
+        for extra in spec.get("then", []):
+            self.send(spec, extra)
         remember(self.pid, name, value)
         return data
+
+    def status(self):
+        """What the device reports about itself: battery, charging, whether a wireless one is connected, ChatMix."""
+        out = {}
+        for read in self.family.get("status", []):
+            self.send(read, read["command"])
+            reply = self.reply(read["length"])
+            for name, spec in read["fields"].items():
+                if name == "battery" and "battery_map" in self.product:
+                    spec = dict(spec, map=self.product["battery_map"])
+                out[name] = decode_field(spec, reply)
+        return out
 
     def battery(self):
         spec = self.family.get("battery")

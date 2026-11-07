@@ -25,6 +25,18 @@ steelmc-devices save 1824                # keep it after the mouse loses power, 
 
 Only the commands a definition lists are ever sent, and every value is checked first. Most of these mice can't report their settings back, so the last values set here are kept in `~/.config/steelmc/devices.json`. **Changing settings on these is experimental**: the definitions come from how these mice are known to work, but nobody has tried them on a real one here. Please report what worked.
 
+## Settings for many more headsets
+
+`families/headsets.json` covers 36 more Arctis models: the Arctis 1 and 7 Wireless lines, the Arctis 7+, the Arctis Pro Wireless and GameDAC, and the Nova 3, 3P, 5, 7, 7P and Pro Wireless, with their special editions. Depending on the model that's sidetone, mic volume and mute light, the equalizer (presets or your own bands), volume limiter, lights, the sleep timer and Bluetooth options. `show` reports what the headset says about itself: whether it's connected, its battery and charging, and ChatMix.
+
+```
+steelmc-devices settings 2202                 # an Arctis Nova 7
+steelmc-devices set 2202 sidetone medium
+steelmc-devices set 2202 equalizer bass
+steelmc-devices set 2202 equalizer 2,1,0,0,0,0,0,1,2,3
+steelmc-devices show 2202
+```
+
 The Apex Pro boards, the Aerox 9 Wireless and the Arctis 9 have tools of their own, which go further, and keep them.
 
 ## Devices that aren't supported yet

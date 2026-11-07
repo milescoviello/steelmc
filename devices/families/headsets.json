@@ -1,0 +1,2520 @@
+{
+ "families": [
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_7",
+   "kind": "headset",
+   "name": "Arctis Nova 7",
+   "packet": 64,
+   "products": {
+    "2202": {
+     "battery_map": [
+      0,
+      4
+     ],
+     "interface": 3,
+     "name": "Arctis Nova 7"
+    },
+    "2206": {
+     "battery_map": [
+      0,
+      4
+     ],
+     "interface": 3,
+     "name": "Arctis Nova 7X"
+    },
+    "223a": {
+     "battery_map": [
+      0,
+      4
+     ],
+     "interface": 3,
+     "name": "Arctis Nova 7 Diablo IV Edition"
+    },
+    "2258": {
+     "interface": 3,
+     "name": "Arctis Nova 7X"
+    },
+    "227a": {
+     "battery_map": [
+      0,
+      4
+     ],
+     "interface": 3,
+     "name": "Arctis Nova 7 WOW Edition"
+    },
+    "227e": {
+     "interface": 3,
+     "name": "Arctis Nova 7 Gen 2"
+    },
+    "229e": {
+     "interface": 3,
+     "name": "Arctis Nova 7X"
+    },
+    "22a1": {
+     "interface": 3,
+     "name": "Arctis Nova 7"
+    },
+    "22a4": {
+     "battery_map": [
+      0,
+      4
+     ],
+     "interface": 3,
+     "name": "Arctis Nova 7X"
+    },
+    "22a5": {
+     "interface": 3,
+     "name": "Arctis Nova 7X"
+    },
+    "22a9": {
+     "interface": 3,
+     "name": "Arctis Nova 7 Diablo IV Edition"
+    },
+    "22ad": {
+     "interface": 3,
+     "name": "Arctis Nova 7X"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "bluetooth_call_volume": {
+     "choices": {
+      "0": [
+       0,
+       179,
+       0
+      ],
+      "1": [
+       0,
+       179,
+       1
+      ],
+      "2": [
+       0,
+       179,
+       2
+      ]
+     },
+     "command": [],
+     "label": "Bluetooth call volume",
+     "type": "choice"
+    },
+    "bluetooth_on_start": {
+     "choices": {
+      "off": [
+       0,
+       178,
+       0
+      ],
+      "on": [
+       0,
+       178,
+       1
+      ]
+     },
+     "command": [],
+     "label": "Bluetooth on when powered on",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "equalizer": {
+     "bands": 10,
+     "base": 20,
+     "command": [
+      0,
+      51
+     ],
+     "hz": [
+      31,
+      62,
+      125,
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000,
+      16000
+     ],
+     "label": "Equalizer",
+     "max": 10,
+     "min": -10,
+     "per_db": 1,
+     "presets": {
+      "bass": [
+       3.5,
+       5.5,
+       4,
+       1,
+       -1.5,
+       -1.5,
+       -1,
+       -1,
+       -1,
+       -1
+      ],
+      "flat": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "focus": [
+       -5,
+       -3.5,
+       -1,
+       -3.5,
+       -2.5,
+       4,
+       6,
+       -3.5,
+       0,
+       0
+      ],
+      "smiley": [
+       3,
+       3.5,
+       1.5,
+       -1.5,
+       -4,
+       -4,
+       -2.5,
+       1.5,
+       3,
+       4
+      ]
+     },
+     "suffix": [
+      0
+     ],
+     "type": "eq"
+    },
+    "mic_led": {
+     "choices": {
+      "0": [
+       0,
+       174,
+       0
+      ],
+      "1": [
+       0,
+       174,
+       1
+      ],
+      "2": [
+       0,
+       174,
+       2
+      ],
+      "3": [
+       0,
+       174,
+       3
+      ]
+     },
+     "command": [],
+     "label": "Mic mute light brightness",
+     "type": "choice"
+    },
+    "mic_volume": {
+     "choices": {
+      "0": [
+       0,
+       55,
+       0
+      ],
+      "1": [
+       0,
+       55,
+       1
+      ],
+      "2": [
+       0,
+       55,
+       2
+      ],
+      "3": [
+       0,
+       55,
+       3
+      ],
+      "4": [
+       0,
+       55,
+       4
+      ],
+      "5": [
+       0,
+       55,
+       5
+      ],
+      "6": [
+       0,
+       55,
+       6
+      ],
+      "7": [
+       0,
+       55,
+       7
+      ]
+     },
+     "command": [],
+     "label": "Mic volume",
+     "type": "choice"
+    },
+    "sidetone": {
+     "choices": {
+      "high": [
+       0,
+       57,
+       3
+      ],
+      "low": [
+       0,
+       57,
+       1
+      ],
+      "medium": [
+       0,
+       57,
+       2
+      ],
+      "off": [
+       0,
+       57,
+       0
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "type": "choice"
+    },
+    "sleep": {
+     "bytes": 1,
+     "command": [
+      0,
+      163
+     ],
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "type": "number"
+    },
+    "volume_limiter": {
+     "choices": {
+      "off": [
+       0,
+       58,
+       0
+      ],
+      "on": [
+       0,
+       58,
+       1
+      ]
+     },
+     "command": [],
+     "label": "Volume limiter",
+     "type": "choice"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      0,
+      176
+     ],
+     "fields": {
+      "battery": {
+       "byte": 2,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "charging": {
+       "byte": 3,
+       "is": [
+        1,
+        2
+       ]
+      },
+      "chat": {
+       "byte": 5,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "connected": {
+       "byte": 3,
+       "not": [
+        0
+       ]
+      },
+      "game": {
+       "byte": 4,
+       "map": [
+        0,
+        100
+       ]
+      }
+     },
+     "length": 128
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_7p",
+   "kind": "headset",
+   "name": "Arctis Nova 7P",
+   "packet": 64,
+   "products": {
+    "220a": {
+     "battery_map": [
+      0,
+      4
+     ],
+     "interface": 3,
+     "name": "Arctis Nova 7P"
+    },
+    "2298": {
+     "interface": 3,
+     "name": "Arctis Nova 7P"
+    },
+    "22a7": {
+     "interface": 3,
+     "name": "Arctis Nova 7P"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "bluetooth_call_volume": {
+     "choices": {
+      "0": [
+       0,
+       179,
+       0
+      ],
+      "1": [
+       0,
+       179,
+       1
+      ],
+      "2": [
+       0,
+       179,
+       2
+      ]
+     },
+     "command": [],
+     "label": "Bluetooth call volume",
+     "type": "choice"
+    },
+    "bluetooth_on_start": {
+     "choices": {
+      "off": [
+       0,
+       178,
+       0
+      ],
+      "on": [
+       0,
+       178,
+       1
+      ]
+     },
+     "command": [],
+     "label": "Bluetooth on when powered on",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "equalizer": {
+     "bands": 10,
+     "base": 20,
+     "command": [
+      0,
+      51
+     ],
+     "hz": [
+      31,
+      62,
+      125,
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000,
+      16000
+     ],
+     "label": "Equalizer",
+     "max": 10,
+     "min": -10,
+     "per_db": 1,
+     "presets": {
+      "bass": [
+       3.5,
+       5.5,
+       4,
+       1,
+       -1.5,
+       -1.5,
+       -1,
+       -1,
+       -1,
+       -1
+      ],
+      "flat": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "focus": [
+       -5,
+       -3.5,
+       -1,
+       -3.5,
+       -2.5,
+       4,
+       6,
+       -3.5,
+       0,
+       0
+      ],
+      "smiley": [
+       3,
+       3.5,
+       1.5,
+       -1.5,
+       -4,
+       -4,
+       -2.5,
+       1.5,
+       3,
+       4
+      ]
+     },
+     "suffix": [
+      0
+     ],
+     "type": "eq"
+    },
+    "mic_led": {
+     "choices": {
+      "0": [
+       0,
+       174,
+       0
+      ],
+      "1": [
+       0,
+       174,
+       1
+      ],
+      "2": [
+       0,
+       174,
+       2
+      ],
+      "3": [
+       0,
+       174,
+       3
+      ]
+     },
+     "command": [],
+     "label": "Mic mute light brightness",
+     "type": "choice"
+    },
+    "mic_volume": {
+     "choices": {
+      "0": [
+       0,
+       55,
+       0
+      ],
+      "1": [
+       0,
+       55,
+       1
+      ],
+      "2": [
+       0,
+       55,
+       2
+      ],
+      "3": [
+       0,
+       55,
+       3
+      ],
+      "4": [
+       0,
+       55,
+       4
+      ],
+      "5": [
+       0,
+       55,
+       5
+      ],
+      "6": [
+       0,
+       55,
+       6
+      ],
+      "7": [
+       0,
+       55,
+       7
+      ]
+     },
+     "command": [],
+     "label": "Mic volume",
+     "type": "choice"
+    },
+    "sleep": {
+     "bytes": 1,
+     "command": [
+      0,
+      163
+     ],
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "type": "number"
+    },
+    "volume_limiter": {
+     "choices": {
+      "off": [
+       0,
+       58,
+       0
+      ],
+      "on": [
+       0,
+       58,
+       1
+      ]
+     },
+     "command": [],
+     "label": "Volume limiter",
+     "type": "choice"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      0,
+      176
+     ],
+     "fields": {
+      "battery": {
+       "byte": 2,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "charging": {
+       "byte": 3,
+       "is": [
+        1,
+        2
+       ]
+      },
+      "connected": {
+       "byte": 3,
+       "not": [
+        0
+       ]
+      }
+     },
+     "length": 128
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_7",
+   "kind": "headset",
+   "name": "Arctis 7",
+   "packet": 31,
+   "products": {
+    "1252": {
+     "interface": 0,
+     "name": "Arctis Pro (2019)"
+    },
+    "1260": {
+     "interface": 0,
+     "name": "Arctis 7"
+    },
+    "1280": {
+     "interface": 0,
+     "name": "Arctis Pro GameDAC"
+    },
+    "12ad": {
+     "interface": 0,
+     "name": "Arctis 7 (2019)"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "lights": {
+     "choices": {
+      "off": [
+       6,
+       85,
+       1,
+       0
+      ],
+      "on": [
+       6,
+       85,
+       1,
+       2
+      ]
+     },
+     "command": [],
+     "label": "Lights",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sidetone": {
+     "choices": {
+      "1": [
+       6,
+       53,
+       1,
+       0,
+       2
+      ],
+      "10": [
+       6,
+       53,
+       1,
+       0,
+       18
+      ],
+      "2": [
+       6,
+       53,
+       1,
+       0,
+       4
+      ],
+      "3": [
+       6,
+       53,
+       1,
+       0,
+       5
+      ],
+      "4": [
+       6,
+       53,
+       1,
+       0,
+       7
+      ],
+      "5": [
+       6,
+       53,
+       1,
+       0,
+       9
+      ],
+      "6": [
+       6,
+       53,
+       1,
+       0,
+       11
+      ],
+      "7": [
+       6,
+       53,
+       1,
+       0,
+       13
+      ],
+      "8": [
+       6,
+       53,
+       1,
+       0,
+       14
+      ],
+      "9": [
+       6,
+       53,
+       1,
+       0,
+       16
+      ],
+      "off": [
+       6,
+       53
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sleep": {
+     "bytes": 1,
+     "command": [
+      6,
+      81
+     ],
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "number"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      6,
+      24
+     ],
+     "fields": {
+      "battery": {
+       "byte": 2,
+       "map": [
+        0,
+        100
+       ]
+      }
+     },
+     "length": 8
+    },
+    {
+     "command": [
+      6,
+      36
+     ],
+     "fields": {
+      "chat": {
+       "byte": 3,
+       "map": [
+        191,
+        255
+       ],
+       "zero": 100
+      },
+      "game": {
+       "byte": 2,
+       "map": [
+        191,
+        255
+       ],
+       "zero": 100
+      }
+     },
+     "length": 8
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_1_wireless",
+   "kind": "headset",
+   "name": "Arctis 1 Wireless",
+   "packet": 31,
+   "products": {
+    "12b3": {
+     "interface": 0,
+     "name": "Arctis 1 Wireless"
+    },
+    "12b6": {
+     "interface": 0,
+     "name": "Arctis 1 Wireless for Xbox"
+    },
+    "12d5": {
+     "interface": 0,
+     "name": "Arctis 7P Wireless"
+    },
+    "12d7": {
+     "interface": 0,
+     "name": "Arctis 7X Wireless"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "sidetone": {
+     "choices": {
+      "1": [
+       6,
+       53,
+       1,
+       0,
+       2
+      ],
+      "10": [
+       6,
+       53,
+       1,
+       0,
+       18
+      ],
+      "2": [
+       6,
+       53,
+       1,
+       0,
+       4
+      ],
+      "3": [
+       6,
+       53,
+       1,
+       0,
+       5
+      ],
+      "4": [
+       6,
+       53,
+       1,
+       0,
+       7
+      ],
+      "5": [
+       6,
+       53,
+       1,
+       0,
+       9
+      ],
+      "6": [
+       6,
+       53,
+       1,
+       0,
+       11
+      ],
+      "7": [
+       6,
+       53,
+       1,
+       0,
+       13
+      ],
+      "8": [
+       6,
+       53,
+       1,
+       0,
+       14
+      ],
+      "9": [
+       6,
+       53,
+       1,
+       0,
+       16
+      ],
+      "off": [
+       6,
+       53
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sleep": {
+     "bytes": 1,
+     "command": [
+      6,
+      83
+     ],
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "number"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      6,
+      18
+     ],
+     "fields": {
+      "battery": {
+       "byte": 3,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "charging": {
+       "byte": 2,
+       "is": [
+        255
+       ]
+      },
+      "connected": {
+       "byte": 2,
+       "not": [
+        1
+       ]
+      }
+     },
+     "length": 8
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_7_plus",
+   "kind": "headset",
+   "name": "Arctis 7+",
+   "packet": 64,
+   "products": {
+    "220e": {
+     "interface": 3,
+     "name": "Arctis 7+"
+    },
+    "2212": {
+     "interface": 3,
+     "name": "Arctis 7P+"
+    },
+    "2216": {
+     "interface": 3,
+     "name": "Arctis 7X+"
+    },
+    "2236": {
+     "interface": 3,
+     "name": "Arctis 7+ Destiny 2 Edition"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "equalizer": {
+     "bands": 10,
+     "base": 24,
+     "command": [
+      0,
+      51
+     ],
+     "hz": [
+      31,
+      62,
+      125,
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000,
+      16000
+     ],
+     "label": "Equalizer",
+     "max": 12,
+     "min": -12,
+     "per_db": 2,
+     "presets": {
+      "bass": [
+       3.5,
+       4.0,
+       1.0,
+       -1.5,
+       -1.5,
+       -1.0,
+       -1.0,
+       -1.0,
+       -1.0,
+       5.5
+      ],
+      "flat": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ],
+      "focus": [
+       3.0,
+       1.5,
+       -1.5,
+       -4.0,
+       -4.0,
+       -2.5,
+       1.5,
+       3.0,
+       4.0,
+       3.5
+      ],
+      "smiley": [
+       -5.0,
+       -1.0,
+       -3.5,
+       -2.5,
+       4.0,
+       6.0,
+       3.5,
+       -3.5,
+       0.0,
+       -3.5
+      ]
+     },
+     "suffix": [
+      0
+     ],
+     "then": [
+      [
+       0,
+       9
+      ]
+     ],
+     "type": "eq"
+    },
+    "sidetone": {
+     "choices": {
+      "high": [
+       0,
+       57,
+       3
+      ],
+      "low": [
+       0,
+       57,
+       1
+      ],
+      "medium": [
+       0,
+       57,
+       2
+      ],
+      "off": [
+       0,
+       57,
+       0
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       0,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sleep": {
+     "bytes": 1,
+     "command": [
+      0,
+      163
+     ],
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "then": [
+      [
+       0,
+       9
+      ]
+     ],
+     "type": "number"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      0,
+      176
+     ],
+     "fields": {
+      "battery": {
+       "byte": 2,
+       "map": [
+        0,
+        4
+       ]
+      },
+      "charging": {
+       "byte": 3,
+       "is": [
+        1
+       ]
+      },
+      "chat": {
+       "byte": 5,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "connected": {
+       "byte": 1,
+       "not": [
+        1
+       ]
+      },
+      "game": {
+       "byte": 4,
+       "map": [
+        0,
+        100
+       ]
+      }
+     },
+     "length": 128
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_3",
+   "feature": true,
+   "kind": "headset",
+   "name": "Arctis Nova 3",
+   "packet": 64,
+   "products": {
+    "12ec": {
+     "interface": 4,
+     "name": "Arctis Nova 3"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "equalizer": {
+     "bands": 6,
+     "base": 20,
+     "command": [
+      6,
+      51
+     ],
+     "label": "Equalizer",
+     "max": 6,
+     "min": -6,
+     "per_db": 2,
+     "presets": {
+      "bass": [
+       4.0,
+       2.5,
+       -1.5,
+       0.0,
+       0.0,
+       0.0
+      ],
+      "flat": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ],
+      "focus": [
+       -4.0,
+       -3.5,
+       -1.5,
+       2.0,
+       4.0,
+       0.0
+      ],
+      "smiley": [
+       3.0,
+       1.5,
+       -2.5,
+       -1.0,
+       1.5,
+       3.0
+      ]
+     },
+     "suffix": [],
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "eq"
+    },
+    "mic_led": {
+     "choices": {
+      "0": [
+       6,
+       174,
+       0
+      ],
+      "1": [
+       6,
+       174,
+       1
+      ],
+      "2": [
+       6,
+       174,
+       2
+      ],
+      "3": [
+       6,
+       174,
+       3
+      ]
+     },
+     "command": [],
+     "label": "Mic mute light brightness",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "mic_volume": {
+     "choices": {
+      "0": [
+       6,
+       55,
+       0
+      ],
+      "1": [
+       6,
+       55,
+       1
+      ],
+      "10": [
+       6,
+       55,
+       10
+      ],
+      "2": [
+       6,
+       55,
+       2
+      ],
+      "3": [
+       6,
+       55,
+       3
+      ],
+      "4": [
+       6,
+       55,
+       4
+      ],
+      "5": [
+       6,
+       55,
+       5
+      ],
+      "6": [
+       6,
+       55,
+       6
+      ],
+      "7": [
+       6,
+       55,
+       7
+      ],
+      "8": [
+       6,
+       55,
+       8
+      ],
+      "9": [
+       6,
+       55,
+       9
+      ]
+     },
+     "command": [],
+     "label": "Mic volume",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sidetone": {
+     "choices": {
+      "high": [
+       6,
+       57,
+       3
+      ],
+      "low": [
+       6,
+       57,
+       1
+      ],
+      "medium": [
+       6,
+       57,
+       2
+      ],
+      "off": [
+       6,
+       57,
+       0
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_3p",
+   "kind": "headset",
+   "name": "Arctis Nova 3P Wireless",
+   "packet": 64,
+   "products": {
+    "2269": {
+     "interface": 3,
+     "name": "Arctis Nova 3P Wireless"
+    },
+    "226d": {
+     "interface": 3,
+     "name": "Arctis Nova 3X Wireless"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "mic_volume": {
+     "choices": {
+      "0": [
+       0,
+       55,
+       0
+      ],
+      "1": [
+       0,
+       55,
+       1
+      ],
+      "10": [
+       0,
+       55,
+       10
+      ],
+      "11": [
+       0,
+       55,
+       11
+      ],
+      "12": [
+       0,
+       55,
+       12
+      ],
+      "13": [
+       0,
+       55,
+       13
+      ],
+      "14": [
+       0,
+       55,
+       14
+      ],
+      "15": [
+       0,
+       55,
+       15
+      ],
+      "2": [
+       0,
+       55,
+       2
+      ],
+      "3": [
+       0,
+       55,
+       3
+      ],
+      "4": [
+       0,
+       55,
+       4
+      ],
+      "5": [
+       0,
+       55,
+       5
+      ],
+      "6": [
+       0,
+       55,
+       6
+      ],
+      "7": [
+       0,
+       55,
+       7
+      ],
+      "8": [
+       0,
+       55,
+       8
+      ],
+      "9": [
+       0,
+       55,
+       9
+      ]
+     },
+     "command": [],
+     "label": "Mic volume",
+     "then": [
+      [
+       0,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sidetone": {
+     "choices": {
+      "0": [
+       0,
+       57,
+       0
+      ],
+      "1": [
+       0,
+       57,
+       1
+      ],
+      "10": [
+       0,
+       57,
+       10
+      ],
+      "2": [
+       0,
+       57,
+       2
+      ],
+      "3": [
+       0,
+       57,
+       3
+      ],
+      "4": [
+       0,
+       57,
+       4
+      ],
+      "5": [
+       0,
+       57,
+       5
+      ],
+      "6": [
+       0,
+       57,
+       6
+      ],
+      "7": [
+       0,
+       57,
+       7
+      ],
+      "8": [
+       0,
+       57,
+       8
+      ],
+      "9": [
+       0,
+       57,
+       9
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       0,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sleep": {
+     "choices": {
+      "0": [
+       0,
+       163,
+       0
+      ],
+      "1": [
+       0,
+       163,
+       1
+      ],
+      "10": [
+       0,
+       163,
+       10
+      ],
+      "15": [
+       0,
+       163,
+       15
+      ],
+      "30": [
+       0,
+       163,
+       30
+      ],
+      "45": [
+       0,
+       163,
+       45
+      ],
+      "5": [
+       0,
+       163,
+       5
+      ],
+      "60": [
+       0,
+       163,
+       60
+      ],
+      "75": [
+       0,
+       163,
+       75
+      ],
+      "90": [
+       0,
+       163,
+       90
+      ]
+     },
+     "command": [],
+     "label": "Turn off when silent, minutes (0 for never)",
+     "then": [
+      [
+       0,
+       9
+      ]
+     ],
+     "type": "choice"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      0,
+      176
+     ],
+     "fields": {
+      "battery": {
+       "byte": 3,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "charging": {
+       "byte": 4,
+       "is": [
+        1
+       ]
+      },
+      "connected": {
+       "byte": 1,
+       "not": [
+        2
+       ]
+      }
+     },
+     "length": 128
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_5",
+   "kind": "headset",
+   "name": "Arctis Nova 5",
+   "packet": 64,
+   "products": {
+    "2232": {
+     "interface": 3,
+     "name": "Arctis Nova 5"
+    },
+    "2253": {
+     "interface": 3,
+     "name": "Arctis Nova 5X"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "mic_led": {
+     "choices": {
+      "0": [
+       0,
+       174,
+       0
+      ],
+      "1": [
+       0,
+       174,
+       1
+      ],
+      "2": [
+       0,
+       174,
+       4
+      ],
+      "3": [
+       0,
+       174,
+       10
+      ]
+     },
+     "command": [],
+     "label": "Mic mute light brightness",
+     "then": [
+      [
+       0,
+       9
+      ],
+      [
+       0,
+       53,
+       1
+      ]
+     ],
+     "type": "choice"
+    },
+    "mic_volume": {
+     "choices": {
+      "0": [
+       0,
+       55,
+       0
+      ],
+      "1": [
+       0,
+       55,
+       1
+      ],
+      "10": [
+       0,
+       55,
+       10
+      ],
+      "11": [
+       0,
+       55,
+       11
+      ],
+      "12": [
+       0,
+       55,
+       12
+      ],
+      "13": [
+       0,
+       55,
+       13
+      ],
+      "14": [
+       0,
+       55,
+       14
+      ],
+      "15": [
+       0,
+       55,
+       15
+      ],
+      "2": [
+       0,
+       55,
+       2
+      ],
+      "3": [
+       0,
+       55,
+       3
+      ],
+      "4": [
+       0,
+       55,
+       4
+      ],
+      "5": [
+       0,
+       55,
+       5
+      ],
+      "6": [
+       0,
+       55,
+       6
+      ],
+      "7": [
+       0,
+       55,
+       7
+      ],
+      "8": [
+       0,
+       55,
+       8
+      ],
+      "9": [
+       0,
+       55,
+       9
+      ]
+     },
+     "command": [],
+     "label": "Mic volume",
+     "then": [
+      [
+       0,
+       9
+      ],
+      [
+       0,
+       53,
+       1
+      ]
+     ],
+     "type": "choice"
+    },
+    "sidetone": {
+     "choices": {
+      "0": [
+       0,
+       57,
+       0
+      ],
+      "1": [
+       0,
+       57,
+       1
+      ],
+      "10": [
+       0,
+       57,
+       10
+      ],
+      "2": [
+       0,
+       57,
+       2
+      ],
+      "3": [
+       0,
+       57,
+       3
+      ],
+      "4": [
+       0,
+       57,
+       4
+      ],
+      "5": [
+       0,
+       57,
+       5
+      ],
+      "6": [
+       0,
+       57,
+       6
+      ],
+      "7": [
+       0,
+       57,
+       7
+      ],
+      "8": [
+       0,
+       57,
+       8
+      ],
+      "9": [
+       0,
+       57,
+       9
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       0,
+       9
+      ],
+      [
+       0,
+       53,
+       1
+      ]
+     ],
+     "type": "choice"
+    },
+    "sleep": {
+     "bytes": 1,
+     "command": [
+      0,
+      163
+     ],
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "output": [
+      0,
+      90,
+      1
+     ],
+     "type": "number"
+    },
+    "volume_limiter": {
+     "choices": {
+      "off": [
+       0,
+       39,
+       0
+      ],
+      "on": [
+       0,
+       39,
+       1
+      ]
+     },
+     "command": [],
+     "label": "Volume limiter",
+     "then": [
+      [
+       0,
+       9
+      ],
+      [
+       0,
+       53,
+       1
+      ]
+     ],
+     "type": "choice"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      0,
+      176
+     ],
+     "fields": {
+      "battery": {
+       "byte": 3,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "charging": {
+       "byte": 4,
+       "is": [
+        1
+       ]
+      },
+      "chat": {
+       "byte": 6,
+       "map": [
+        0,
+        100
+       ]
+      },
+      "connected": {
+       "byte": 1,
+       "not": [
+        2
+       ]
+      },
+      "game": {
+       "byte": 5,
+       "map": [
+        0,
+        100
+       ]
+      }
+     },
+     "length": 128
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_nova_pro_wireless",
+   "kind": "headset",
+   "name": "Arctis Nova Pro Wireless",
+   "packet": 31,
+   "products": {
+    "12e0": {
+     "interface": 4,
+     "name": "Arctis Nova Pro Wireless"
+    },
+    "12e5": {
+     "interface": 4,
+     "name": "Arctis Nova Pro Wireless for Xbox"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "eq_preset": {
+     "choices": {
+      "bass": [
+       6,
+       46,
+       1
+      ],
+      "flat": [
+       6,
+       46,
+       0
+      ],
+      "focus": [
+       6,
+       46,
+       2
+      ],
+      "smiley": [
+       6,
+       46,
+       3
+      ]
+     },
+     "command": [],
+     "label": "Equalizer preset",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "equalizer": {
+     "bands": 10,
+     "base": 20,
+     "before": [
+      [
+       6,
+       46,
+       4
+      ]
+     ],
+     "command": [
+      6,
+      51
+     ],
+     "hz": [
+      31,
+      62,
+      125,
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000,
+      16000
+     ],
+     "label": "Equalizer",
+     "max": 10,
+     "min": -10,
+     "per_db": 2,
+     "presets": {},
+     "suffix": [],
+     "type": "eq"
+    },
+    "lights": {
+     "choices": {
+      "off": [
+       6,
+       191,
+       1
+      ],
+      "on": [
+       6,
+       191,
+       10
+      ]
+     },
+     "command": [],
+     "label": "Lights",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sidetone": {
+     "choices": {
+      "high": [
+       6,
+       57,
+       3
+      ],
+      "low": [
+       6,
+       57,
+       1
+      ],
+      "medium": [
+       6,
+       57,
+       2
+      ],
+      "off": [
+       6,
+       57,
+       0
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    },
+    "sleep": {
+     "choices": {
+      "0": [
+       6,
+       193,
+       0
+      ],
+      "1": [
+       6,
+       193,
+       1
+      ],
+      "13": [
+       6,
+       193,
+       4
+      ],
+      "23": [
+       6,
+       193,
+       5
+      ],
+      "3": [
+       6,
+       193,
+       2
+      ],
+      "45": [
+       6,
+       193,
+       6
+      ],
+      "8": [
+       6,
+       193,
+       3
+      ]
+     },
+     "command": [],
+     "label": "Turn off when silent, minutes (0 for never)",
+     "then": [
+      [
+       6,
+       9
+      ]
+     ],
+     "type": "choice"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      6,
+      176
+     ],
+     "fields": {
+      "battery": {
+       "byte": 6,
+       "map": [
+        0,
+        8
+       ]
+      },
+      "charging": {
+       "byte": 15,
+       "is": [
+        2
+       ]
+      },
+      "connected": {
+       "byte": 15,
+       "not": [
+        1
+       ]
+      }
+     },
+     "length": 128
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_pro_wireless",
+   "kind": "headset",
+   "name": "Arctis Pro Wireless",
+   "packet": 31,
+   "products": {
+    "1290": {
+     "interface": 0,
+     "name": "Arctis Pro Wireless"
+    }
+   },
+   "raw": true,
+   "settings": {
+    "sidetone": {
+     "choices": {
+      "0": [
+       57,
+       170,
+       0
+      ],
+      "1": [
+       57,
+       170,
+       1
+      ],
+      "2": [
+       57,
+       170,
+       2
+      ],
+      "3": [
+       57,
+       170,
+       3
+      ],
+      "4": [
+       57,
+       170,
+       4
+      ],
+      "5": [
+       57,
+       170,
+       5
+      ],
+      "6": [
+       57,
+       170,
+       6
+      ],
+      "7": [
+       57,
+       170,
+       7
+      ],
+      "8": [
+       57,
+       170,
+       8
+      ],
+      "9": [
+       57,
+       170,
+       9
+      ]
+     },
+     "command": [],
+     "label": "Sidetone",
+     "then": [
+      [
+       144,
+       170
+      ]
+     ],
+     "type": "choice"
+    },
+    "sleep": {
+     "choices": {
+      "0": [
+       60,
+       170,
+       0
+      ],
+      "10": [
+       60,
+       170,
+       1
+      ],
+      "20": [
+       60,
+       170,
+       2
+      ],
+      "30": [
+       60,
+       170,
+       3
+      ],
+      "40": [
+       60,
+       170,
+       4
+      ],
+      "50": [
+       60,
+       170,
+       5
+      ],
+      "60": [
+       60,
+       170,
+       6
+      ],
+      "70": [
+       60,
+       170,
+       7
+      ],
+      "80": [
+       60,
+       170,
+       8
+      ],
+      "90": [
+       60,
+       170,
+       9
+      ]
+     },
+     "command": [],
+     "label": "Turn off when silent, minutes (0 for never)",
+     "then": [
+      [
+       144,
+       170
+      ]
+     ],
+     "type": "choice"
+    }
+   },
+   "status": [
+    {
+     "command": [
+      65,
+      170
+     ],
+     "fields": {
+      "connected": {
+       "byte": 0,
+       "not": [
+        2
+       ]
+      }
+     },
+     "length": 2
+    },
+    {
+     "command": [
+      64,
+      170
+     ],
+     "fields": {
+      "battery": {
+       "byte": 0,
+       "map": [
+        0,
+        4
+       ]
+      }
+     },
+     "length": 1
+    }
+   ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_gamebuds",
+   "kind": "headset",
+   "name": "Arctis GameBuds",
+   "packet": 64,
+   "products": {
+    "230a": {
+     "interface": 3,
+     "name": "Arctis GameBuds"
+    }
+   },
+   "raw": true,
+   "settings": {},
+   "status": [
+    {
+     "command": [
+      0,
+      176
+     ],
+     "fields": {
+      "left_battery": {
+       "byte": 5,
+       "map": [
+        0,
+        100
+       ],
+       "when": {
+        "byte": 3,
+        "is": [
+         3
+        ]
+       }
+      },
+      "right_battery": {
+       "byte": 6,
+       "map": [
+        0,
+        100
+       ],
+       "when": {
+        "byte": 4,
+        "is": [
+         3
+        ]
+       }
+      }
+     },
+     "length": 128
+    }
+   ]
+  }
+ ]
+}

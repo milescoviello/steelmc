@@ -182,6 +182,9 @@ def describe_setting(name, s):
         values = "no value"
     elif kind == "buttons":
         values = "BUTTON=ACTION,..., or default. Buttons: " + ", ".join(s["buttons"])
+    elif kind == "eq":
+        presets = ", ".join(s.get("presets", {}))
+        values = f"{s['bands']} gains from {s['min']} to {s['max']} dB, comma separated" + (f", or a preset: {presets}" if presets else "")
     elif kind in ("gradient", "gradient2"):
         values = "one colour, or [ms:]COLOR@PERCENT,..., like 2000ms:red@0,blue@50,red@100"
     else:
@@ -203,7 +206,8 @@ def gear_command(args):
         return 0
     with gear.Gear(pid, covered) as g:
         if args.command == "show":
-            report = {"name": g.name, "id": f"1038:{pid}", "battery": g.battery(), "firmware": g.firmware(), "last_set": gear.remembered(pid)}
+            report = {"name": g.name, "id": f"1038:{pid}", "battery": g.battery(), "firmware": g.firmware(), "status": g.status(),
+                      "last_set": gear.remembered(pid)}
             if args.json:
                 print(json.dumps(report))
             else:
@@ -213,6 +217,14 @@ def gear_command(args):
                     print(f"  battery   {b['percent']}%" + (", charging" if b.get("charging") else ""))
                 if report["firmware"]:
                     print(f"  firmware  {report['firmware']}")
+                status = report["status"]
+                if status.get("connected") is False:
+                    print("  headset   not connected: turn it on, or bring it closer")
+                for key, label in (("battery", "battery"), ("left_battery", "left bud"), ("right_battery", "right bud")):
+                    if status.get(key) is not None and status.get("connected") is not False:
+                        print(f"  {label:9} {status[key]}%" + (", charging" if status.get("charging") else ""))
+                if status.get("chat") is not None:
+                    print(f"  ChatMix   game {status.get('game')}%, chat {status['chat']}%")
                 for name, value in report["last_set"].items():
                     print(f"  {name:22} {value}   (last set here)")
             return 0

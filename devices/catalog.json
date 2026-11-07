@@ -3144,6 +3144,42 @@
    "name": "Arctis Nova 7X Gen 2",
    "part": "device"
   },
+  "22a1": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7",
+   "part": "base station"
+  },
+  "22a4": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X",
+   "part": "base station"
+  },
+  "22a5": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X",
+   "part": "base station"
+  },
+  "22a7": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7P",
+   "part": "base station"
+  },
+  "22a9": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7 Diablo IV Edition",
+   "part": "base station"
+  },
+  "22ad": {
+   "kind": "headset",
+   "line": "arctis",
+   "name": "Arctis Nova 7X",
+   "part": "base station"
+  },
   "230a": {
    "kind": "headset",
    "line": "arctis",

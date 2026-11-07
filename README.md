@@ -8,7 +8,7 @@ Configure SteelSeries gear on Linux with no vendor software. Not affiliated with
 
 | Folder | What it is | Device |
 |---|---|---|
-| [`devices`](devices/README.md) | `steelmc-devices`: which SteelSeries devices are plugged in, and settings for 70 more mice: DPI, polling, lighting, buttons, battery | Any, and most Rival, Sensei, Prime, Kana, Kinzu and Aerox mice |
+| [`devices`](devices/README.md) | `steelmc-devices`: which SteelSeries devices are plugged in, and settings for 70 more mice and 36 more headsets: DPI, polling, lighting, buttons, sidetone, EQ, battery, ChatMix | Any, and most Rival, Sensei, Prime, Kana, Kinzu and Aerox mice and Arctis headsets |
 | [`gui`](gui) | `steelmc`: one window for all of it | All of these |
 | [`aerox`](aerox/README.md) | `aerox`: battery, DPI, polling, sleep, button bindings, lighting | Aerox 9 Wireless mouse |
 | [`arctis`](arctis/README.md) | `arctis`: battery, ChatMix, sidetone, mic gain, EQ, surround and the sleep timer | Arctis 9 Wireless headset |
