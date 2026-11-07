@@ -73,7 +73,8 @@ class Packages(unittest.TestCase):
 
     def test_up_to_date_does_nothing(self):
         said = []
-        with tempfile.TemporaryDirectory() as root:
+        with tempfile.TemporaryDirectory() as prefix:
+            root = os.path.join(prefix, "lib", "steelmc")  # what make install makes
             os.makedirs(os.path.join(root, "devices"))
             with open(os.path.join(root, "devices", "steelmc_devices.py"), "w") as f:
                 f.write('__version__ = "9.9.9"\n')
@@ -83,6 +84,39 @@ class Packages(unittest.TestCase):
         self.assertIn("Up to date", said[-1])
 
 
+class Kinds(unittest.TestCase):
+    def kind(self, root, pacman_says=None):
+        def run(argv, **kw):
+            if argv[0] == "pacman" and pacman_says:
+                return subprocess.CompletedProcess(argv, 0, pacman_says, "")
+            return subprocess.CompletedProcess(argv, 1, "", "")
+        tools = ("pacman",) if pacman_says else ()
+        with mock.patch("shutil.which", lambda name: f"/usr/bin/{name}" if name in tools else None):
+            return up.install_kind(root, run)
+
+    def test_tells_make_install_from_a_copy_and_the_aur(self):
+        with tempfile.TemporaryDirectory() as prefix:
+            made = os.path.join(prefix, "lib", "steelmc")
+            unpacked = os.path.join(prefix, "Downloads", "steelmc-main")
+            for root in (made, unpacked):
+                os.makedirs(root)
+            self.assertEqual(self.kind(made), "make")
+            self.assertEqual(self.kind(unpacked), "copy")
+            owned = "/usr/lib/steelmc/devices/steelmc_devices.py is owned by {} 1.0.0-1\n"
+            self.assertEqual(self.kind("/usr/lib/steelmc", owned.format("steelmc")), "arch")
+            self.assertEqual(self.kind("/usr/lib/steelmc", owned.format("steelmc-git")), "aur-git")
+
+    def test_a_copy_or_steelmc_git_says_how_to_update_instead(self):
+        state = tempfile.TemporaryDirectory()
+        self.addCleanup(state.cleanup)
+        for kind in ("copy", "aur-git"):
+            with mock.patch.object(up, "install_kind", lambda root, run, kind=kind: kind), \
+                    mock.patch.dict(os.environ, {"XDG_STATE_HOME": state.name}):
+                with self.assertRaises(up.UpdateError):
+                    up.update(yes=True, fetch=lambda url, accept=None: release(), say=lambda *_: None)
+                self.assertIsNone(up.check_for_app(1000, lambda url, accept=None: release()))
+
+
 class AppCheck(unittest.TestCase):
     def setUp(self):
         self.state = tempfile.TemporaryDirectory()
@@ -90,10 +124,11 @@ class AppCheck(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.state.name})
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.root = tempfile.TemporaryDirectory()
-        self.addCleanup(self.root.cleanup)
-        os.makedirs(os.path.join(self.root.name, "devices"))
-        with open(os.path.join(self.root.name, "devices", "steelmc_devices.py"), "w") as f:
+        prefix = tempfile.TemporaryDirectory()
+        self.addCleanup(prefix.cleanup)
+        self.root = os.path.join(prefix.name, "lib", "steelmc")  # a make install
+        os.makedirs(os.path.join(self.root, "devices"))
+        with open(os.path.join(self.root, "devices", "steelmc_devices.py"), "w") as f:
             f.write('__version__ = "1.0.0"\n')
         self.fetches = 0
 
@@ -102,7 +137,7 @@ class AppCheck(unittest.TestCase):
         return release("1.1.0")
 
     def check(self, now):
-        return up.check_for_app(now, self.fetch, self.root.name, lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", ""))
+        return up.check_for_app(now, self.fetch, self.root, lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", ""))
 
     def test_offers_a_newer_release_once_a_day_at_most(self):
         self.assertEqual(self.check(1000), "1.1.0")
@@ -119,7 +154,7 @@ class AppCheck(unittest.TestCase):
     def test_offline_and_off_are_silent(self):
         def offline(url, accept=None):
             raise up.UpdateError("no network")
-        self.assertIsNone(up.check_for_app(1000, offline, self.root.name, lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "")))
+        self.assertIsNone(up.check_for_app(1000, offline, self.root, lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "")))
         with mock.patch.dict(os.environ, {"STEELMC_NO_UPDATE_CHECK": "1"}):
             self.assertIsNone(self.check(5000))
 

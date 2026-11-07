@@ -3313,6 +3313,7 @@ class UpdateBar(QFrame):
         self.text.setText(f"Updating to {self.version}...")
         self.process = QProcess(self)
         self.process.finished.connect(self.finished)
+        self.process.errorOccurred.connect(lambda error: error == QProcess.FailedToStart and self.finished(1))
         program = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "update", "steelmc_update.py")
         self.process.start(sys.executable, [program, "--yes", "--graphical"])
 
@@ -3346,7 +3347,8 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.headset_page, "Headset")
         tabs.addTab(self.devices_page, "Other devices")
         self.update_bar = UpdateBar(**(updates or ({} if real else {"check": lambda: None})))
-        self.update_runner = runners[0]
+        # its own thread: a slow network must never hold up the device pages
+        self.update_runner = Runner() if real else runners[0]
         central = QWidget()
         stack = QVBoxLayout(central)
         stack.setContentsMargins(0, 0, 0, 0)

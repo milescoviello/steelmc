@@ -71,7 +71,8 @@ def latest_release(fetch=_get):
 
 
 def install_kind(root=ROOT, run=subprocess.run):
-    """How this copy got here: 'git', 'deb', 'rpm', 'arch' or 'make'."""
+    """How this copy got here: 'git', 'deb', 'rpm', 'arch', 'aur-git' (steelmc-git, which its AUR helper updates),
+    'make' (make install, so root is PREFIX/lib/steelmc) or 'copy' (none of those, such as an unpacked zip)."""
     if os.path.isdir(os.path.join(root, ".git")):
         return "git"
     probe = os.path.join(root, "devices", "steelmc_devices.py")
@@ -79,8 +80,13 @@ def install_kind(root=ROOT, run=subprocess.run):
         if shutil.which(argv[0]):
             result = run(argv, capture_output=True, text=True)
             if result.returncode == 0 and "not owned" not in result.stdout + result.stderr:
+                owner = re.search(r"is owned by (\S+)", result.stdout)
+                if kind == "arch" and owner and owner.group(1).endswith("-git"):
+                    return "aur-git"
                 return kind
-    return "make"
+    if os.path.basename(root) == "steelmc" and os.path.basename(os.path.dirname(root)) == "lib":
+        return "make"
+    return "copy"
 
 
 ASSET_PATTERNS = {"deb": r"\.deb$", "rpm": r"\.rpm$", "arch": r"\.pkg\.tar\.zst$"}
@@ -156,6 +162,11 @@ def update(check_only=False, yes=False, graphical=False, root=ROOT, fetch=_get, 
         run([os.path.join(root, "install.sh")] + (["--yes"] if yes else []))
         say("Updated. Restart the app, and run apex-analog stop so its daemon starts again on the new code.")
         return 0
+    if kind == "aur-git":
+        raise UpdateError("This is steelmc-git from the AUR: update it with your AUR helper (yay -S steelmc-git, say).")
+    if kind == "copy" and not check_only:
+        raise UpdateError(f"This copy didn't come from git, a package or make install, so it can't update itself. "
+                          f"Get the new one from https://github.com/{REPO}/releases, or clone it with git.")
     current = installed_version(root)
     release = latest_release(fetch)
     if not newer(release["version"], current):
@@ -217,8 +228,8 @@ def check_for_app(now=None, fetch=_get, root=ROOT, run=subprocess.run):
     state = load_state()
     try:
         if "checked" not in state or now - state["checked"] >= 86400:
-            if install_kind(root, run) == "git":
-                return None  # a clone updates with git; nothing to offer from releases
+            if install_kind(root, run) in ("git", "aur-git", "copy"):
+                return None  # these update another way (git, the AUR helper, by hand): the Update button can't
             state["latest"] = latest_release(fetch)["version"]
             state["checked"] = now
             save_state(state)
