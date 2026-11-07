@@ -53,6 +53,8 @@ if [ -n "$missing" ]; then
     command -v python3 >/dev/null 2>&1 || { echo "Python 3 is needed for everything here."; exit 1; }
     if ! has_qt && [ ! -x "$venv/bin/python" ] && ask "Get PySide6 for the app from PyPI instead, into $venv?"; then
         echo "Getting PySide6 from PyPI (a few hundred MB)..."
+        # PyPI's Qt brings its own libraries but not these system ones; desktops have them, minimal installs may not
+        command -v apt-get >/dev/null 2>&1 && { sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 >/dev/null 2>&1 || true; }
         python3 -m venv --system-site-packages "$venv" && "$venv/bin/python" -m pip install --quiet PySide6 && echo "PySide6 is ready for the app" \
             || { rm -rf "$venv"; echo "That didn't work: python3-venv may be missing. The command-line tools still work."; }
     fi
