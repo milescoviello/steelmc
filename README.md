@@ -10,6 +10,7 @@ Configure SteelSeries gear on Linux with no vendor software. Not affiliated with
 |---|---|---|
 | [`gui`](gui) | `steelmc`: one window for all of it | Both below |
 | [`aerox`](aerox/README.md) | `aerox`: battery, DPI, polling, sleep, button bindings, lighting | Aerox 9 Wireless mouse |
+| [`arctis`](arctis/README.md) | `arctis`: battery, ChatMix, sidetone, mic gain, EQ, surround and the sleep timer | Arctis 9 Wireless headset |
 | [`apex-analog`](apex-analog/README.md) | `apex-analog`: live key depth, actuation, rapid tap, key bindings, lighting, shortcuts, and using key depth as analog input | Apex Pro Gen 3 keyboard |
 | [`apex-oled`](apex-oled/README.md) | `apex-oled`: the keyboard's screen: system stats, lyrics, notifications, your own frames | Apex Pro Gen 3 keyboard |
 
@@ -52,6 +53,7 @@ These tools come from reading each device's firmware, because commands aren't wh
 
 ```
 python3 aerox/test_aerox.py
+python3 arctis/test_arctis.py
 python3 gui/test_gui.py                # nothing on screen
 python3 apex-oled/apex-oled-test
 cd apex-analog && python3 -m unittest  # creates virtual input devices if it's allowed to

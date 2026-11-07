@@ -8,6 +8,7 @@ bin="$HOME/.local/bin"
 apps="$HOME/.local/share/applications"
 
 sh "$repo/aerox/install.sh"
+sh "$repo/arctis/install.sh"
 sh "$repo/apex-analog/install.sh"
 bash "$repo/apex-oled/install.sh"
 

@@ -1,0 +1,5 @@
+# arctis: let the logged-in user talk to the Arctis 9 Wireless transmitter's vendor interface.
+# Interface 0 only (transmitter 12c2). The others carry media keys and the audio chip's own updates.
+# ATTRS must all match on one parent, and the IDs and interface number live on different ones, hence two steps.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1038", ATTRS{idProduct}=="12c2", ENV{ARCTIS_DEVICE}="1"
+ENV{ARCTIS_DEVICE}=="1", ATTRS{bInterfaceNumber}=="00", MODE="0660", GROUP="input", TAG+="uaccess"

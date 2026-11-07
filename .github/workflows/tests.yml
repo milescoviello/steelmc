@@ -57,6 +57,18 @@ jobs:
           python-version: "3.14"
       - run: python test_aerox.py
 
+  arctis:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: arctis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python test_arctis.py
+
   apex-oled:
     runs-on: ubuntu-latest
     defaults:
