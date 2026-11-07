@@ -24,7 +24,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPalett
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QRubberBand, QSizePolicy, QSlider,
-    QSpinBox, QDoubleSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QPlainTextEdit,
+    QSpinBox, QDoubleSpinBox, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QPlainTextEdit,
     QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -1778,9 +1778,10 @@ class KeyboardPage(QWidget):
         deep_layout = row(muted("Deeper press starts at"), self.deep_depth, self.deep_set, None)
         deep_layout.setContentsMargins(0, 0, 0, 0)
         self.deep_row.setLayout(deep_layout)
-        hint = muted("Bindings live on the keyboard itself, so they work with no software running. They last until you unplug it, "
-                     "and Save to keyboard keeps them. For text, commands or macros, use Shortcuts.")
+        hint = muted("Bindings live on the keyboard, no software needed.")
         hint.setWordWrap(True)
+        hint.setToolTip("They work with no software running. They last until you unplug it, and Save to keyboard keeps them. "
+                        "For text, commands or macros, use Shortcuts.")
         self.changed_title = QLabel("Your bindings")
         self.changed_title.setObjectName("title")
         self.ss_lights = QPushButton("Light up SteelSeries-layer keys")
@@ -1792,13 +1793,25 @@ class KeyboardPage(QWidget):
                                                                f"While the SteelSeries key is held, its keys glow {color}. Save to keep it."))
         self.changed_list = QVBoxLayout()
         self.changed_list.setSpacing(4)
+        self.changed_list.setContentsMargins(0, 0, 0, 0)
+        changed_box = QWidget()
+        changed_box.setLayout(self.changed_list)
+        self.changed_scroll = QScrollArea()  # every key could be changed, so the list scrolls instead of squeezing the panel
+        self.changed_scroll.setWidget(changed_box)
+        self.changed_scroll.setWidgetResizable(True)
+        self.changed_scroll.setFrameShape(QFrame.NoFrame)
+        self.changed_scroll.setMinimumHeight(70)
+        self.changed_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.changed_scroll.viewport().setAutoFillBackground(False)
+        changed_box.setAutoFillBackground(False)
+        changed_box.setStyleSheet("background: transparent;")
+        self.changed_list.setAlignment(Qt.AlignTop)
         panel = well(self.bind_title, self.bind_layer, self.bind_other, self.deep_row, self.bind_picker,
                      row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, None),
                      row(self.ss_lights, muted("glow"), self.ss_color, None),
-                     self.changed_title)
-        panel.layout().addLayout(self.changed_list)
+                     self.changed_title, self.changed_scroll)
         self.deep_row.hide()
-        panel.layout().addStretch(1)
+        panel.layout().setStretchFactor(self.changed_scroll, 1)  # the list takes the room that's left
         return panel
 
     def build_actuation(self):
