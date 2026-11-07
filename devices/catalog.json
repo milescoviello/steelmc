@@ -712,6 +712,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova Pro Wireless",
+   "paired_with": "12e0",
    "part": "device"
   },
   "12e5": {
@@ -724,6 +725,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova Pro Wireless",
+   "paired_with": "12e5",
    "part": "device"
   },
   "12ec": {
@@ -2956,6 +2958,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 5",
+   "paired_with": "2232",
    "part": "device"
   },
   "2232": {
@@ -3010,12 +3013,14 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova Elite",
+   "paired_with": "2244",
    "part": "device"
   },
   "2251": {
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 5X",
+   "paired_with": "2253",
    "part": "device"
   },
   "2253": {
@@ -3046,12 +3051,14 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova Pro Wireless White",
+   "paired_with": "225d",
    "part": "device"
   },
   "2262": {
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 5X White",
+   "paired_with": "2264",
    "part": "device"
   },
   "2264": {
@@ -3064,6 +3071,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 3 Wireless",
+   "paired_with": "2269",
    "part": "device"
   },
   "2269": {
@@ -3076,6 +3084,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 3X Wireless",
+   "paired_with": "226d",
    "part": "device"
   },
   "226d": {
@@ -3100,6 +3109,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 7 Gen 2",
+   "paired_with": "227e",
    "part": "device"
   },
   "227e": {
@@ -3112,6 +3122,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 7P Gen 2",
+   "paired_with": "2298",
    "part": "device"
   },
   "2290": {
@@ -3124,6 +3135,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova Pro Omni",
+   "paired_with": "2290",
    "part": "device"
   },
   "2298": {
@@ -3136,6 +3148,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 7X Gen 2",
+   "paired_with": "229e",
    "part": "device"
   },
   "229e": {
@@ -3154,6 +3167,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis Nova 7X",
+   "paired_with": "22a5",
    "part": "base station"
   },
   "22a5": {
@@ -3196,6 +3210,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis GameBuds",
+   "paired_with": "230a",
    "part": "device"
   },
   "230d": {
@@ -3220,6 +3235,7 @@
    "kind": "headset",
    "line": "arctis",
    "name": "Arctis GameBuds X",
+   "paired_with": "2317",
    "part": "device"
   },
   "231b": {

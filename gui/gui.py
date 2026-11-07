@@ -3035,6 +3035,8 @@ class DevicesPage(QWidget):
             return f"On the {OWN_TABS[d['kind']]} tab"
         if d["support"] == "part of a supported device":
             return "Part of a device above"
+        if d["support"] == "paired":
+            return f"Its settings are on its transmitter, {d['tools'][0]}" if d.get("tools") else "Its settings are on its transmitter"
         return "Not supported yet"
 
     @staticmethod
@@ -3066,7 +3068,7 @@ class DevicesPage(QWidget):
         layout.addWidget(title)
         if pid not in self.covered:
             note = self.support_note(d, pid)
-            text = (f"{note}." if note.startswith("On the") else
+            text = (f"{note}." if note.startswith(("On the", "Its settings")) else
                     "This one isn't supported yet. steelmc-devices probe in a terminal prints what's needed to add it.")
             layout.addWidget(muted(text))
             layout.addStretch(1)

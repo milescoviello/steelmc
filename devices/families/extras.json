@@ -2326,6 +2326,27 @@
      "interface_unconfirmed": true,
      "usage_page": 65472,
      "usage": 1
+    },
+    "202f": {
+     "name": "MSI Per Key RGB Keyboard (202f)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "203f": {
+     "name": "SteelSeries Gaming Keyboard (MSI laptop, 203f)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2056": {
+     "name": "SteelSeries Gaming Keyboard (MSI laptop, 2056)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
     }
    },
    "save": {
@@ -2527,6 +2548,41 @@
      "interface_unconfirmed": true,
      "usage_page": 65472,
      "usage": 1
+    },
+    "115f": {
+     "name": "MSI Matrix (115f)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1161": {
+     "name": "MSI Matrix (1161)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1163": {
+     "name": "MSI Matrix (1163)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1165": {
+     "name": "MSI Matrix (1165)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1169": {
+     "name": "MSI Matrix (1169)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
     }
    },
    "save": {
@@ -2720,6 +2776,117 @@
       1
      ],
      "packet_length": 64
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "arctis_gamebuds_x",
+   "kind": "headset",
+   "name": "Arctis GameBuds X",
+   "packet": 65,
+   "products": {
+    "2317": {
+     "name": "Arctis GameBuds X (dongle)",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1,
+     "firmware_checked": "1.10.0"
+    }
+   },
+   "raw": true,
+   "save": {
+    "command": [
+     0,
+     9
+    ]
+   },
+   "settings": {
+    "noise_mode": {
+     "type": "choice",
+     "command": [
+      0,
+      189
+     ],
+     "label": "Noise mode (0, 1 or 2, as the case numbers them)",
+     "choices": {
+      "0": 0,
+      "1": 1,
+      "2": 2
+     }
+    },
+    "anc_level": {
+     "type": "number",
+     "command": [
+      0,
+      184
+     ],
+     "label": "Noise cancelling strength (1 to 3)",
+     "input": [
+      1,
+      3,
+      1
+     ],
+     "output": [
+      1,
+      3,
+      1
+     ]
+    },
+    "wear_sense": {
+     "type": "choice",
+     "command": [
+      0,
+      197
+     ],
+     "label": "Pause when taken out",
+     "choices": {
+      "on": 1,
+      "off": 0
+     }
+    },
+    "volume_limiter": {
+     "type": "choice",
+     "command": [
+      0,
+      39
+     ],
+     "label": "Volume limiter",
+     "choices": {
+      "on": 1,
+      "off": 0
+     }
+    },
+    "audio_mode": {
+     "type": "choice",
+     "command": [
+      0,
+      170
+     ],
+     "label": "Audio mode (0 or 1)",
+     "choices": {
+      "0": 0,
+      "1": 1
+     }
+    },
+    "sleep": {
+     "type": "number",
+     "command": [
+      0,
+      193
+     ],
+     "label": "Turn off after this many minutes without sound (0 for never)",
+     "input": [
+      0,
+      90,
+      1
+     ],
+     "output": [
+      0,
+      90,
+      1
+     ]
     }
    }
   }

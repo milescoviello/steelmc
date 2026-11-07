@@ -27,7 +27,7 @@ USB = "/sys/bus/usb/devices"
 CATALOG = os.path.join(os.path.dirname(os.path.realpath(__file__)), "catalog.json")
 # Products a dedicated tool here handles. The general definitions never take over from them.
 DEDICATED = {"1640", "1610", "1614", "1858", "185a", "1874", "1876", "12c2", "12c4"}
-LEVELS = {"full": "supported", "experimental": "supported, changes experimental", "read-only": "read-only for now", "part of a supported device": "part of a supported device", None: "not supported yet"}
+LEVELS = {"full": "supported", "experimental": "supported, changes experimental", "read-only": "read-only for now", "part of a supported device": "part of a supported device", "paired": "the headset half of a set: its settings go through the transmitter", None: "not supported yet"}
 
 
 def load_catalog(path=CATALOG):
@@ -112,6 +112,9 @@ def scan(usb=USB, catalog=None, covered=None):
         support = (known or {}).get("support", {})
         if not support and pid in covered:
             support = {"level": "experimental", "tools": ["steelmc-devices"]}
+        partner = (known or {}).get("paired_with")
+        if not support and partner and (partner in covered or partner in DEDICATED):
+            support = {"level": "paired", "tools": [f"1038:{partner}"]}
         found.append({
             "id": f"{VENDOR}:{pid}", "product": _read(f"{path}/product"), "firmware": _read(f"{path}/bcdDevice"),
             "port": os.path.basename(path), "known": known is not None,

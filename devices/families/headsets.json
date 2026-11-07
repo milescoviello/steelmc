@@ -60,9 +60,9 @@
       0,
       4
      ],
+     "firmware_checked": "2.31",
      "interface": 3,
-     "name": "Arctis Nova 7X",
-     "firmware_checked": "2.31"
+     "name": "Arctis Nova 7X"
     },
     "22a5": {
      "interface": 3,
@@ -1763,6 +1763,11 @@
     "2253": {
      "interface": 3,
      "name": "Arctis Nova 5X"
+    },
+    "2264": {
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "name": "Arctis Nova 5X White"
     }
    },
    "raw": true,
@@ -2083,6 +2088,11 @@
     "12e5": {
      "interface": 4,
      "name": "Arctis Nova Pro Wireless for Xbox"
+    },
+    "225d": {
+     "interface": 4,
+     "interface_unconfirmed": true,
+     "name": "Arctis Nova Pro Wireless White"
     }
    },
    "raw": true,

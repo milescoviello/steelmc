@@ -76,6 +76,13 @@ class Scanning(unittest.TestCase):
         self.assertFalse(found[1]["known"])
         self.assertIn("not in the catalog", sd.describe(found[1]))
 
+    def test_a_headset_half_points_to_its_transmitter(self):
+        self.sys.device("3-4", "1038", "2230", "0100", "Arctis Nova 5")  # the headset side; GG pairs it with the 2232 transmitter
+        found = sd.scan(self.usb)
+        self.assertEqual(found[0]["support"], "paired")
+        self.assertEqual(found[0]["tools"], ["1038:2232"])
+        self.assertIn("settings go through the transmitter", sd.describe(found[0]))
+
     def test_probe_decodes_each_interface(self):
         path = self.sys.device("3-8.2", "1038", "12c2", "0101", "SteelSeries Arctis 9", hid=[ARCTIS, MEDIA])
         first, second = sd.interfaces(path)
