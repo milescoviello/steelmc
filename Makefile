@@ -25,13 +25,14 @@ RULES = aerox/udev/70-aerox.rules arctis/udev/70-arctis.rules devices/udev/70-st
 # command name -> file under $(LIBDIR)
 COMMANDS = steelmc:gui/gui.py steelmc-devices:devices/steelmc_devices.py aerox:aerox/aerox.py arctis:arctis/arctis.py \
            apex-analog:apex-analog/apex_analog.py apex-oled:apex-oled/apex-oled apex-oledd:apex-oled/apex-oledd \
-           apex-oledd-supervise:apex-oled/apex-oledd-supervise
+           apex-oledd-supervise:apex-oled/apex-oledd-supervise steelmc-update:update/steelmc_update.py
 
 .PHONY: install uninstall test
 
 install:
-	install -d "$(DESTDIR)$(LIBDIR)/gui" "$(DESTDIR)$(LIBDIR)/aerox" "$(DESTDIR)$(LIBDIR)/arctis" "$(DESTDIR)$(LIBDIR)/apex-analog" \
-	           "$(DESTDIR)$(LIBDIR)/apex-oled" "$(DESTDIR)$(LIBDIR)/devices/families"
+	install -d "$(DESTDIR)$(LIBDIR)" "$(DESTDIR)$(LIBDIR)/devices" "$(DESTDIR)$(LIBDIR)/gui" "$(DESTDIR)$(LIBDIR)/aerox" "$(DESTDIR)$(LIBDIR)/arctis" "$(DESTDIR)$(LIBDIR)/apex-analog" \
+	           "$(DESTDIR)$(LIBDIR)/apex-oled" "$(DESTDIR)$(LIBDIR)/devices/families" "$(DESTDIR)$(LIBDIR)/update"
+	install -m 0755 update/steelmc_update.py "$(DESTDIR)$(LIBDIR)/update/"
 	install -m 0755 gui/gui.py "$(DESTDIR)$(LIBDIR)/gui/"
 	install -m 0755 aerox/aerox.py "$(DESTDIR)$(LIBDIR)/aerox/"
 	install -m 0755 arctis/arctis.py "$(DESTDIR)$(LIBDIR)/arctis/"
@@ -63,6 +64,7 @@ uninstall:
 	rm -f "$(DESTDIR)$(MODLOADDIR)/steelmc.conf" "$(DESTDIR)$(APPDIR)/net.local.steelmc.desktop"
 
 test:
+	cd update && python3 -m unittest -q
 	cd aerox && python3 -m unittest -q
 	cd arctis && python3 -m unittest -q
 	cd devices && python3 -m unittest -q

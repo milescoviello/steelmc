@@ -81,6 +81,8 @@ if ! has_qt && [ -x "$venv/bin/python" ]; then  # the app runs with the PySide6 
 else
     ln -sfn "$repo/gui/gui.py" "$bin/steelmc"
 fi
+chmod +x "$repo/update/steelmc_update.py"
+ln -sfn "$repo/update/steelmc_update.py" "$bin/steelmc-update"  # in a clone: git pull, then this script again
 sed "s|^Exec=.*|Exec=$bin/steelmc|" "$repo/gui/net.local.steelmc.desktop" > "$apps/net.local.steelmc.desktop"
 echo "Linked $bin/steelmc and added SteelMC to the app menu"
 case ":$PATH:" in
