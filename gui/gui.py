@@ -29,7 +29,9 @@ from PySide6.QtWidgets import (
 )
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "aerox"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "arctis"))
 import aerox  # noqa: E402
+import arctis  # noqa: E402
 
 CHASSIS = "#26282b"
 WELL = "#1b1d1f"
@@ -290,7 +292,7 @@ class Runner(QObject):
             call, done, failed = self._jobs.get()
             try:
                 value = call()
-            except (aerox.AeroxError, KeyboardError, OSError) as e:
+            except (aerox.AeroxError, arctis.ArctisError, KeyboardError, OSError) as e:
                 if failed:
                     self._finished.emit(failed, e)
             else:
@@ -333,6 +335,25 @@ class MouseDevice:
             m.ready()
             m.restore(backup)
             m.clear_zone_colors()
+
+
+class HeadsetDevice:
+    """Opens the transmitter for each call, so `arctis` in a terminal can use it in between."""
+
+    def read(self):
+        with arctis.Arctis.open() as h:
+            h.ready()
+            return {"status": h.status(), "versions": h.versions(), "sidetone": h.sidetone(), "mic": h.mic(),
+                    "surround": h.surround(), "preset": h.eq_preset(), "bands": h.eq_bands(), "sleep": h.sleep_seconds()}
+
+    def status(self):
+        with arctis.Arctis.open() as h:
+            return h.status()
+
+    def call(self, method, *args):
+        with arctis.Arctis.open() as h:
+            h.ready()
+            return getattr(h, method)(*args)
 
 
 class KeyboardError(Exception):
@@ -2182,19 +2203,255 @@ class KeyboardPage(QWidget):
             self.apply(self.device.save, "Saved to the keyboard.")
 
 
+SIDETONE_LEVELS = [("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")]
+EQ_PRESET_LABELS = [("Flat", 0), ("Bass boost", 1), ("Reference", 2), ("Smiley", 3), ("Custom", 4)]
+SLEEP_MINUTES = [0, 5, 10, 15, 30, 60, 90]
+
+
+class HeadsetPage(QWidget):
+    """The Arctis 9: what the headset is doing, and its settings. Each change is sent and read back straight away."""
+    POLL_MS = 5000
+
+    def __init__(self, device, runner, confirm=ask, parent=None):
+        super().__init__(parent)
+        self.setObjectName("page")
+        self.device, self.runner, self.confirm = device, runner, confirm
+        self.loading = False
+        self.data = {}
+        self.poller = QTimer(self, interval=self.POLL_MS)
+        self.poller.timeout.connect(self.poll)
+        self.build()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.poller.start()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.poller.stop()
+
+    def build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(10)
+        self.connection = QLabel("Looking for the headset")
+        self.connection.setObjectName("title")
+        self.firmware = muted("")
+        self.retry = QPushButton("Try again")
+        self.retry.clicked.connect(self.refresh)
+        self.retry.hide()
+        root.addWidget(header(self.connection, self.firmware, None, self.retry))
+        self.content = QWidget()
+        body = QHBoxLayout(self.content)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(10)
+        body.addWidget(self.build_status(), 2)
+        body.addWidget(self.build_settings(), 3)
+        body.addWidget(self.build_eq(), 5)
+        root.addWidget(self.content, 1)
+        self.status = StatusLine()
+        self.save_button = QPushButton("Save to transmitter")
+        self.save_button.setObjectName("primary")
+        self.save_button.clicked.connect(self.save)
+        root.addLayout(row(self.status, self.save_button))
+
+    def build_status(self):
+        self.link = QLabel("")
+        self.link.setWordWrap(True)
+        self.battery = muted("")
+        self.chatmix = muted("")
+        self.mic_state = muted("")
+        panel = well(self.link, self.battery, self.chatmix, self.mic_state, title="Headset")
+        panel.layout().addStretch(1)
+        return panel
+
+    def build_settings(self):
+        self.sidetone = QComboBox()
+        for label, value in SIDETONE_LEVELS:
+            self.sidetone.addItem(label, value)
+        self.sidetone.activated.connect(self.sidetone_picked)
+        self.mic = QSlider(Qt.Horizontal)
+        self.mic.setRange(arctis.MIC_DB.start, arctis.MIC_DB.stop - 1)
+        self.mic_label = QLabel()
+        self.mic_label.setFixedWidth(52)
+        self.mic.valueChanged.connect(lambda v: self.mic_label.setText(f"{v} dB"))
+        self.mic.sliderReleased.connect(self.mic_picked)
+        self.surround = QCheckBox("Surround")
+        self.surround.clicked.connect(self.surround_picked)
+        self.sleep = QComboBox()
+        for minutes in SLEEP_MINUTES:
+            self.sleep.addItem("Never" if minutes == 0 else f"After {minutes} min", minutes)
+        self.sleep.activated.connect(self.sleep_picked)
+        hint = muted("Changes apply right away. Save to transmitter keeps them after it loses power.")
+        hint.setWordWrap(True)
+        panel = well(row(muted("Sidetone"), self.sidetone), row(muted("Mic gain"), self.mic, self.mic_label), self.surround,
+                     row(muted("Turn off when silent"), self.sleep), hint, title="Settings")
+        panel.layout().addStretch(1)
+        return panel
+
+    def build_eq(self):
+        self.preset = QComboBox()
+        for label, number in EQ_PRESET_LABELS:
+            self.preset.addItem(label, number)
+        self.preset.activated.connect(self.preset_picked)
+        bands = QHBoxLayout()
+        self.bands = []
+        for name in arctis.EQ_BANDS:
+            slider = QSlider(Qt.Vertical)
+            slider.setRange(-100, 100)  # tenths of a dB
+            slider.setMinimumHeight(140)
+            label = muted("+0.0")
+            slider.valueChanged.connect(lambda v, l=label: l.setText(f"{v / 10:+.1f}"))
+            column = QVBoxLayout()
+            column.addWidget(label, 0, Qt.AlignHCenter)
+            column.addWidget(slider, 1, Qt.AlignHCenter)
+            column.addWidget(muted(name), 0, Qt.AlignHCenter)
+            bands.addLayout(column)
+            self.bands.append(slider)
+        self.use_bands = QPushButton("Use these bands")
+        self.use_bands.clicked.connect(self.bands_picked)
+        panel = well(row(muted("Preset"), self.preset, None), bands, row(None, self.use_bands), title="Equalizer")
+        return panel
+
+    # Loading
+
+    def refresh(self):
+        self.runner.submit(self.device.read, self.loaded, self.lost)
+
+    def poll(self):
+        if self.data:
+            self.runner.submit(self.device.status, self.show_status, lambda e: None)
+
+    def loaded(self, data):
+        self.loading = True
+        self.data = data
+        self.retry.hide()
+        self.content.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self.connection.setText("Arctis 9 Wireless")
+        self.firmware.setText(f"transmitter {data['versions']['transmitter']}, headset {data['versions']['headset']}")
+        self.show_status(data["status"])
+        level = arctis.SIDETONE_NAMES.get(data["sidetone"])
+        self.sidetone.setCurrentIndex(max(0, self.sidetone.findData(level)))
+        self.mic.setValue(data["mic"])
+        self.mic_label.setText(f"{data['mic']} dB")
+        self.surround.setChecked(data["surround"])
+        minutes = data["sleep"] // 60
+        index = self.sleep.findData(minutes)
+        if index < 0:
+            self.sleep.addItem(f"After {minutes} min", minutes)
+            index = self.sleep.count() - 1
+        self.sleep.setCurrentIndex(index)
+        self.preset.setCurrentIndex(max(0, self.preset.findData(data["preset"])))
+        for slider, db in zip(self.bands, data["bands"]):
+            slider.setValue(round(db * 10))
+        self.loading = False
+        if not self.status.text():
+            self.status.say("Changes apply right away. Save to keep them after the transmitter loses power.")
+
+    def show_status(self, status):
+        if not status.get("ready"):
+            self.link.setText("The transmitter is starting up.")
+            return
+        if not status["connected"]:
+            self.link.setText("The headset isn't connected. Turn it on, or bring it closer.")
+            self.battery.setText("")
+        else:
+            self.link.setText("Connected")
+            self.battery.setText(f"Battery {status['battery_mv'] / 1000:.2f} V")
+        self.chatmix.setText(f"ChatMix: chat {status['chat']}, game {status['game']}")
+        self.mic_state.setText("Mic muted" if status["mic_muted"] else "Mic on")
+
+    def lost(self, error):
+        self.data = {}
+        self.content.setEnabled(False)
+        self.save_button.setEnabled(False)
+        self.connection.setText("Headset not reachable")
+        self.firmware.setText("")
+        self.retry.show()
+        self.status.say(str(error), "bad")
+
+    # Applying
+
+    def apply(self, method, *args, message):
+        def done(_):
+            self.status.say(message)
+            self.refresh()
+
+        self.runner.submit(lambda: self.device.call(method, *args), done, lambda e: self.status.say(str(e), "bad"))
+
+    def sidetone_picked(self, *_):
+        if not self.loading:
+            level = self.sidetone.currentData()
+            self.apply("set_sidetone", arctis.SIDETONE[level], message=f"Sidetone: {level}.")
+
+    def mic_picked(self):
+        if not self.loading:
+            self.apply("set_mic", self.mic.value(), message=f"Mic gain: {self.mic.value()} dB.")
+
+    def surround_picked(self, on):
+        if not self.loading:
+            self.apply("set_surround", on, message=f"Surround {'on' if on else 'off'}.")
+
+    def sleep_picked(self, *_):
+        if not self.loading:
+            minutes = self.sleep.currentData()
+            self.apply("set_sleep", minutes * 60, message="The headset never turns itself off." if not minutes else
+                       f"The headset turns off after {minutes} min without sound.")
+
+    def preset_picked(self, *_):
+        if not self.loading:
+            self.apply("set_eq_preset", self.preset.currentData(), message=f"EQ: {self.preset.currentText()}.")
+
+    def bands_picked(self):
+        dbs = [slider.value() / 10 for slider in self.bands]
+
+        def both():
+            self.device.call("set_eq_bands", dbs)
+            self.device.call("set_eq_preset", arctis.EQ_PRESETS["custom"])
+
+        def done(_):
+            self.status.say("EQ: your own bands.")
+            self.refresh()
+
+        self.runner.submit(both, done, lambda e: self.status.say(str(e), "bad"))
+
+    def save(self):
+        if self.confirm(self, "Save to transmitter", "Write the current settings to the transmitter's flash, so they come back after it loses power?",
+                        "Save to transmitter"):
+            self.apply("save", message="Saved to the transmitter.")
+
+
+class NoHeadset:
+    """For a window made with other devices passed in: it never reaches for a real headset."""
+
+    def read(self):
+        raise arctis.ArctisError("No Arctis 9 transmitter found. Is it plugged in?")
+
+    def status(self):
+        return self.read()
+
+    def call(self, *_):
+        return self.read()
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None):
+    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None, headset=None):
         super().__init__()
         self.setWindowTitle("SteelMC")
-        runners = runners or (Runner(), Runner(), Runner())
+        runners = runners or (Runner(), Runner(), Runner(), Runner())
         self.mouse_page = MousePage(mouse or MouseDevice(), runners[0], confirm)
         self.keyboard_page = KeyboardPage(keyboard or KeyboardDevice(), runners[1], confirm, oled=oled or (OledDevice() if keyboard is None else None),
                                           oled_runner=runners[-1])
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
         tabs.tabBar().setDrawBase(False)
+        real = mouse is None and keyboard is None
+        self.headset_page = HeadsetPage(headset or (HeadsetDevice() if real else NoHeadset()), runners[3] if len(runners) > 3 else runners[0],
+                                        confirm)
         tabs.addTab(self.mouse_page, "Mouse")
         tabs.addTab(self.keyboard_page, "Keyboard")
+        tabs.addTab(self.headset_page, "Headset")
         self.setCentralWidget(tabs)
         self.tabs = tabs
         self.setMinimumSize(QSize(1100, 800))
@@ -2202,6 +2459,7 @@ class MainWindow(QMainWindow):
     def load(self):
         self.mouse_page.refresh()
         self.keyboard_page.refresh()
+        self.headset_page.refresh()
 
     def closeEvent(self, event):
         self.keyboard_page.stop_stream()

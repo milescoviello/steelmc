@@ -32,7 +32,7 @@ class Inline:
     def submit(self, call, done=None, failed=None):
         try:
             value = call()
-        except (aerox.AeroxError, gui.KeyboardError, OSError) as e:
+        except (aerox.AeroxError, gui.arctis.ArctisError, gui.KeyboardError, OSError) as e:
             if failed:
                 failed(e)
         else:
@@ -734,6 +734,88 @@ class BindingsMode(unittest.TestCase):
         self.assertEqual(self.page.mode, "actuation")
 
 
+class FakeHeadset:
+    def __init__(self):
+        self.calls = []
+        self.fail = None
+        self.data = {"status": {"ready": True, "connected": True, "rf_status": 1, "battery_mv": 3950, "battery_status": 1, "mic_muted": False,
+                                "mic_db": -5, "sidetone_on": True, "sidetone_db": -18, "chat": 70, "game": 30, "mode": 1},
+                     "versions": {"transmitter": "1.1", "headset": "1.4"}, "sidetone": -18, "mic": -5, "surround": False,
+                     "preset": 1, "bands": [0.0] * 10, "sleep": 1800}
+
+    def read(self):
+        if self.fail:
+            raise self.fail
+        return self.data
+
+    def status(self):
+        return self.read()["status"]
+
+    def call(self, method, *args):
+        if self.fail:
+            raise self.fail
+        self.calls.append((method, *args))
+
+
+class HeadsetPageTest(unittest.TestCase):
+    def setUp(self):
+        self.device = FakeHeadset()
+        self.page = gui.HeadsetPage(self.device, Inline(), yes)
+        self.page.refresh()
+
+    def test_loading_shows_everything_and_sends_nothing(self):
+        self.assertEqual(self.device.calls, [])
+        self.assertEqual(self.page.link.text(), "Connected")
+        self.assertIn("3.95 V", self.page.battery.text())
+        self.assertIn("chat 70, game 30", self.page.chatmix.text())
+        self.assertEqual(self.page.sidetone.currentData(), "low")
+        self.assertEqual(self.page.mic.value(), -5)
+        self.assertEqual(self.page.sleep.currentData(), 30)
+        self.assertEqual(self.page.preset.currentText(), "Bass boost")
+
+    def test_each_control_sends_its_setting(self):
+        page = self.page
+        page.sidetone.setCurrentIndex(page.sidetone.findData("high"))
+        page.sidetone.activated.emit(page.sidetone.currentIndex())
+        page.mic.setValue(-12)
+        page.mic.sliderReleased.emit()
+        page.surround.click()
+        page.sleep.setCurrentIndex(page.sleep.findData(0))
+        page.sleep.activated.emit(page.sleep.currentIndex())
+        page.preset.setCurrentIndex(page.preset.findData(3))
+        page.preset.activated.emit(page.preset.currentIndex())
+        page.bands[0].setValue(25)
+        page.use_bands.click()
+        self.assertEqual(self.device.calls, [("set_sidetone", -3), ("set_mic", -12), ("set_surround", True), ("set_sleep", 0),
+                                             ("set_eq_preset", 3), ("set_eq_bands", [2.5] + [0.0] * 9), ("set_eq_preset", 4)])
+
+    def test_save_asks_first(self):
+        page = gui.HeadsetPage(self.device, Inline(), no)
+        page.refresh()
+        page.save_button.click()
+        self.assertEqual(self.device.calls, [])
+        self.page.save_button.click()
+        self.assertEqual(self.device.calls, [("save",)])
+
+    def test_headset_off(self):
+        self.device.data["status"] = {**self.device.data["status"], "connected": False}
+        self.page.refresh()
+        self.assertIn("isn't connected", self.page.link.text())
+        self.assertEqual(self.page.battery.text(), "")
+
+    def test_no_transmitter(self):
+        self.device.fail = gui.arctis.ArctisError("No Arctis 9 transmitter found. Is it plugged in?")
+        self.page.refresh()
+        self.assertEqual(self.page.connection.text(), "Headset not reachable")
+        self.assertFalse(self.page.content.isEnabled())
+        self.assertTrue(self.page.retry.isVisibleTo(self.page))
+
+    def test_window_with_other_devices_never_opens_a_real_headset(self):
+        window = gui.MainWindow(FakeMouse(), FakeKeyboard(), (Inline(), Inline()), yes)
+        self.assertIsInstance(window.headset_page.device, gui.NoHeadset)
+        self.assertEqual(window.tabs.tabText(2), "Headset")
+
+
 class WholeKeyboard(unittest.TestCase):
     def setUp(self):
         self.page = gui.KeyboardPage(FakeKeyboard(), Inline(), yes)
@@ -1178,10 +1260,10 @@ class RunnerThread(unittest.TestCase):
 
 
 class Window(unittest.TestCase):
-    def test_fits_and_has_both_pages(self):
+    def test_fits_and_has_every_page(self):
         window = gui.MainWindow(FakeMouse(), FakeKeyboard(), (Inline(), Inline()), yes)
         window.load()
-        self.assertEqual(window.tabs.count(), 2)
+        self.assertEqual([window.tabs.tabText(i) for i in range(window.tabs.count())], ["Mouse", "Keyboard", "Headset"])
         self.assertLessEqual(window.minimumSize().width(), 1100)
         self.assertLessEqual(window.minimumSize().height(), 800)
         window.close()

@@ -8,7 +8,7 @@ Configure SteelSeries gear on Linux with no vendor software. Not affiliated with
 
 | Folder | What it is | Device |
 |---|---|---|
-| [`gui`](gui) | `steelmc`: one window for all of it | Both below |
+| [`gui`](gui) | `steelmc`: one window for all of it | All of these |
 | [`aerox`](aerox/README.md) | `aerox`: battery, DPI, polling, sleep, button bindings, lighting | Aerox 9 Wireless mouse |
 | [`arctis`](arctis/README.md) | `arctis`: battery, ChatMix, sidetone, mic gain, EQ, surround and the sleep timer | Arctis 9 Wireless headset |
 | [`apex-analog`](apex-analog/README.md) | `apex-analog`: live key depth, actuation, rapid tap, key bindings, lighting, shortcuts, and using key depth as analog input | Apex Pro Gen 3 keyboard |
@@ -27,6 +27,8 @@ Or run the `install.sh` in just the folders you want. The command-line tools nee
 Run `steelmc`, or find SteelMC in your application menu.
 
 **Mouse:** rebind any button, set DPI stages, polling rate and sleep time, and change lighting. Changes apply as you make them and last until the mouse powers off. **Save to mouse** keeps them, and **Undo changes** goes back to how things were when the page loaded.
+
+**Headset:** shows whether the headset is connected, its battery, ChatMix and mic. Set sidetone, mic gain, surround, when it turns itself off, and the EQ, as a preset or ten bands. Save to transmitter keeps them.
 
 **Keyboard:**
 - Each key shows where it fires, fills as you press it, and sinks once it passes that point.

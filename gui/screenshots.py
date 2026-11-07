@@ -23,7 +23,7 @@ class Inline:
     def submit(self, call, done=None, failed=None):
         try:
             value = call()
-        except (aerox.AeroxError, gui.KeyboardError, OSError) as e:
+        except (aerox.AeroxError, gui.arctis.ArctisError, gui.KeyboardError, OSError) as e:
             if failed:
                 failed(e)
         else:
