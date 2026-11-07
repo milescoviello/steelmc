@@ -78,6 +78,10 @@ class FakeKeyboard:
             raise self.fail
         return self.data
 
+    def set_controller(self, config, run=True):
+        self.calls.append(("set_controller", config, run))
+        self.data = {**self.data, "controller": config}
+
     def __getattr__(self, name):
         if name == "stream_command":
             raise AttributeError(name)
@@ -382,11 +386,58 @@ class KeyboardPageTest(unittest.TestCase):
         self.assertEqual(self.device.calls, [("start", "oled")])
 
     def test_feature_state_comes_from_the_daemon(self):
-        self.device.data["jobs"].append({"name": "gamepad", "on": True, "command": "gamepad", "age": "1 min"})
+        self.device.data["jobs"].append({"name": "oled", "on": True, "command": "oled", "age": "1 min"})
         self.page.refresh()
-        self.assertTrue(self.page.feature_boxes["gamepad"].isChecked())
-        self.page.feature_boxes["gamepad"].click()
-        self.assertEqual(self.device.calls, [("stop", "gamepad")])
+        self.assertTrue(self.page.feature_boxes["oled"].isChecked())
+        self.page.feature_boxes["oled"].click()
+        self.assertEqual(self.device.calls, [("stop", "oled")])
+
+    def picked(self, *names):
+        for name in names:
+            QTest.mouseClick(self.page.caps[name], Qt.LeftButton)
+
+    def test_keys_act_as_a_controller_from_the_actuation_tab(self):
+        self.picked("W")
+        self.page.pad_output.setCurrentIndex(self.page.pad_output.findData("ly-"))
+        self.page.pad_set.click()
+        name, config, run = self.device.calls[-1]
+        self.assertEqual((name, config["keys"], run), ("set_controller", {"W": "ly-"}, True))
+        self.assertEqual(config["deadzone"], 0.3)
+
+    def test_quick_setups_and_own_axes(self):
+        self.page.pad_layout.setCurrentIndex(self.page.pad_layout.findData("W A S D as the left stick"))
+        self.page.pad_layout.activated.emit(self.page.pad_layout.currentIndex())
+        self.assertEqual(self.device.calls[-1][1]["keys"], {"W": "ly-", "S": "ly+", "A": "lx-", "D": "lx+"})
+        self.page.pad_layout.setCurrentIndex(self.page.pad_layout.findData("Every key its own axis"))
+        self.page.pad_layout.activated.emit(self.page.pad_layout.currentIndex())
+        keys = self.device.calls[-1][1]["keys"]
+        self.assertGreater(len(keys), 40)
+        self.assertEqual(sorted(int(v[5:]) for v in keys.values()), list(range(1, len(keys) + 1)))
+        self.assertNotIn("SS", keys)
+        self.picked("J", "K")
+        self.page.pad_output.setCurrentIndex(self.page.pad_output.findData(gui.OWN_AXIS))
+        self.page.pad_set.click()
+        keys = self.device.calls[-1][1]["keys"]
+        self.assertEqual(len(set(keys.values())), len(keys))  # no two keys share an axis
+        self.assertNotEqual(keys["J"], keys["K"])
+
+    def test_the_toggle_and_response_are_settings(self):
+        self.page.pad_toggle.setCurrentIndex(self.page.pad_toggle.findData("G"))
+        self.page.pad_deadzone.setValue(0.5)
+        self.page.pad_curve.setValue(1.5)
+        self.picked("W")
+        self.page.pad_output.setCurrentIndex(self.page.pad_output.findData("rt"))
+        self.page.pad_set.click()
+        config = self.device.calls[-1][1]
+        self.assertEqual((config["toggle"], config["deadzone"], config["curve"]), ("G", 0.5, 1.5))
+        argv = gui.KeyboardDevice.controller_args(config)
+        self.assertEqual(argv[:2], ["map", "W=rt"])
+        self.assertIn("--toggle", argv)
+        self.assertEqual(argv[argv.index("--toggle-colors") + 1], "00ff00,ff0000")
+        self.page.pad_toggle.setCurrentIndex(self.page.pad_toggle.findData("W"))
+        calls = len(self.device.calls)
+        self.page.pad_apply.click()
+        self.assertEqual(len(self.device.calls), calls)  # W can't be the toggle and on the controller
 
     def test_turn_off_buttons_follow_the_jobs(self):
         self.assertEqual(self.page.turn_off.count(), 2)
@@ -691,6 +742,10 @@ class BindingsMode(unittest.TestCase):
         row.itemAt(row.count() - 1).widget().click()
         self.assertEqual(self.device.calls[-1][0], "bind")
         self.assertEqual(self.device.calls[-1][2:], ("default", "ss"))
+
+    def test_ss_layer_lights_can_be_synced(self):
+        self.page.ss_lights.click()
+        self.assertEqual(self.device.calls[-1], ("sync_ss_lights",))
 
     def test_bind_a_key(self):
         QTest.mouseClick(self.page.caps["CAPS"], Qt.LeftButton)

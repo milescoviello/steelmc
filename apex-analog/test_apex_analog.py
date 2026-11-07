@@ -813,6 +813,17 @@ class Modes(unittest.TestCase):
         os.close(one)
         os.close(two)
 
+    def test_any_key_can_be_its_own_axis_eight_to_a_device(self):
+        m = self.mapper("A=axis:1", "S=axis:2", "D=axis:9")
+        self.assertEqual(len(m.axes.paths), 2)
+        first, second = hold(m.axes.paths[0]), hold(m.axes.paths[1])
+        m.update({"A": 3.5, "D": 1.9}, 0.01)
+        self.assertEqual(drain(first), [(a.EV_ABS, 0x00, 4095)])
+        self.assertEqual(drain(second), [(a.EV_ABS, 0x00, 2047)])
+        self.assertEqual(m.values["axis:1"], 1.0)
+        os.close(first)
+        os.close(second)
+
     def test_pedals_are_their_own_device(self):
         m = self.mapper("manual")
         fd = hold(m.pedals.path)
@@ -1521,6 +1532,55 @@ class Macros(unittest.TestCase):
         m.update({"J": 3.5}, 0.01)
         self.assertEqual(drain(fd), [(a.EV_KEY, 194, 1), (a.EV_KEY, 194, 0)])
         os.close(fd)
+
+
+class Toggle(unittest.TestCase):
+    def test_axis_rules(self):
+        self.assertEqual((a.Mapping("A=axis:3").kind, a.Mapping("A=axis:3").target), ("axis", 3))
+        for bad in ("A=axis:0", "A=axis:65", "A=axis:x"):
+            with self.assertRaises(ValueError):
+                a.Mapping(bad)
+
+    def test_ss_and_the_toggle_key_turn_mapping_off_and_on(self):
+        m = a.Mapper(["J=key:F13"], swallow=False, pause_key=None, toggle="G")
+        self.assertIn("SS", m.keys)
+        self.assertIn("G", m.keys)
+        self.assertNotIn("G", m.held)  # the toggle key itself keeps typing
+        m.update({"G": 3.5}, 0.01)  # without SS it's just G
+        self.assertFalse(m.paused)
+        m.update({"SS": 2.0, "G": 3.5}, 0.01)
+        self.assertTrue(m.paused)
+        m.update({"SS": 2.0, "G": 3.5}, 0.01)  # still held: no second flip
+        self.assertTrue(m.paused)
+        m.update({"SS": 2.0}, 0.01)
+        m.update({"SS": 2.0, "G": 3.5}, 0.01)
+        self.assertFalse(m.paused)
+        with self.assertRaises(ValueError):
+            a.Mapper(["J=key:F13"], swallow=False, pause_key=None, toggle="Q")  # SS+Q is the keyboard's own
+
+    def test_the_toggle_key_glows_its_state_while_ss_is_held(self):
+        class Lights:
+            def __init__(self):
+                self.calls = []
+
+            def set_colors(self, colors):
+                self.calls.append(("set", colors))
+
+            def clear_colors(self):
+                self.calls.append(("clear",))
+
+        m = a.Mapper(["J=key:F13"], swallow=False, pause_key=None, toggle="G")
+        glow, kb = a.ToggleGlow(m, (0, 255, 0), (255, 0, 0)), Lights()
+        glow.update(kb, {}, 0)
+        self.assertEqual(kb.calls, [])
+        glow.update(kb, {"SS": 2.0}, 0)
+        glow.update(kb, {"SS": 2.0}, 0)  # sent once, not every frame
+        self.assertEqual(kb.calls, [("set", {"G": (0, 255, 0)})])
+        m.set_paused(True)
+        glow.update(kb, {"SS": 2.0}, 0)
+        self.assertEqual(kb.calls[-1], ("set", {"G": (255, 0, 0)}))
+        glow.update(kb, {}, 0)
+        self.assertEqual(kb.calls[-1], ("clear",))
 
 
 class Shortcuts(unittest.TestCase):

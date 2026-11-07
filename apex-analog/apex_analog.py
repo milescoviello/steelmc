@@ -1153,6 +1153,49 @@ class Pedals:
         self.device.close()
 
 
+class Axes:
+    """As many plain analog axes as wanted, so any key can be its own axis: axis:1 to axis:64, eight to a virtual device,
+    since games that read DirectInput take eight per device. Each one runs from 0 at rest to full at the bottom.
+
+    with Axes({1, 2, 9}) as axes:   # two devices: axes 1-8 and 9-16
+        axes.set({1: 0.5, 9: 1.0})
+    """
+    CODES = (0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07)  # X Y Z RX RY RZ throttle rudder
+    LIMIT = 64
+    MAX = 4095
+
+    def __init__(self, numbers):
+        self.devices = {}
+        for bank in sorted({(n - 1) // len(self.CODES) for n in numbers}):
+            self.devices[bank] = _Uinput(f"Apex Analog Axes {bank + 1}", (BUS_USB, 0x1209, 0x0010 + bank, 1), keys=[0x120],
+                                         abses={code: (0, self.MAX) for code in self.CODES})
+        self.paths = [d.path for d in self.devices.values()]
+        self._sent = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def set(self, values):
+        changed = set()
+        for number, value in values.items():
+            level = int(max(0.0, min(1.0, value)) * self.MAX)
+            if self._sent.get(number, 0) != level:
+                self._sent[number] = level
+                bank, index = divmod(number - 1, len(self.CODES))
+                self.devices[bank].emit(EV_ABS, self.CODES[index], level)
+                changed.add(bank)
+        for bank in changed:
+            self.devices[bank].sync()
+
+    def close(self):
+        self.set({number: 0.0 for number in self._sent})
+        for device in self.devices.values():
+            device.close()
+
+
 # Names for keystroke outputs: every key with a sensor, plus the ones without.
 KEYCODES = {name: code for name, (_, _, code) in BY_NAME.items() if code is not None}
 KEYCODES.update({"ESC": 1, "PRTSC": 99, "SCRLK": 70, "PAUSE": 119, "INSERT": 110, "DELETE": 111, "HOME": 102, "END": 107, "PGUP": 104,
@@ -1386,6 +1429,8 @@ class Mapping:
             self.kind, self.target = "run", RUN_TARGETS[target]
         elif target in Pedals.AXES:
             self.kind, self.target = "pedal", target
+        elif target.startswith("axis:") and target[5:].isdigit() and 1 <= int(target[5:]) <= Axes.LIMIT:
+            self.kind, self.target = "axis", int(target[5:])
         elif target.startswith("mouse-") and target[6:] in Mouse.BUTTONS:
             self.kind, self.target = "mouse-button", target[6:]
         elif target.replace("-", "_") in Gamepad.BUTTONS or target.replace("-", "_") in Gamepad.DPAD:
@@ -1400,6 +1445,7 @@ class Mapping:
             raise ValueError(f"unknown output {target!r} in {text!r}. Sticks: lx- lx+ ly- ly+ rx- rx+ ry- ry+. Triggers: lt rt. "
                              f"Buttons: {' '.join(Gamepad.BUTTONS)} dpad-up dpad-down dpad-left dpad-right. "
                              "Add p2: for a second controller. Pedals: " + " ".join(Pedals.AXES) + ". "
+                             f"Any number of plain axes, eight to a device: axis:1 to axis:{Axes.LIMIT}. "
                              "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
                              "Keystroke: key:F13. Repeating keystroke: tap:RIGHT. Desktop: volume+ volume- brightness+ brightness-. "
                              "Command: run:your-command. Macro: macro:NAME")
@@ -1485,10 +1531,20 @@ class _KeyHolder:
         self.keys, self.key_outputs = [], set()
         self.virtual_keys, self.swallow = None, None
         self.warned = False
+        self._paused = False
 
     @property
     def paused(self):
-        return bool(self.swallow and self.swallow.paused)
+        return self.swallow.paused if self.swallow else self._paused
+
+    def set_paused(self, paused):
+        """Pause or resume, as the pause key does: while paused, held-back keys type again and nothing is sent."""
+        self._paused = paused
+        if self.swallow and self.swallow.paused != paused:
+            self.swallow.paused = paused
+            if not paused and self.swallow.output:
+                for held in self.swallow.output.down & self.swallow.blocked:  # a key typed during the pause must not stay down
+                    self.swallow.output.send(held, 0)
 
     def held_keys(self):
         return self.keys
@@ -1536,7 +1592,7 @@ class Mapper(_KeyHolder):
     """Turns key depths into controller, pedal, mouse, keystroke and command output. Nothing is created until it is needed."""
 
     def __init__(self, maps, deadzone=0.3, full=3.5, curve=1.0, rapid=0.0, mouse_speed=1200.0, wheel_speed=15.0,
-                 tap_rate=20.0, run_rate=8.0, swallow=True, pause_key="PAUSE"):
+                 tap_rate=20.0, run_rate=8.0, swallow=True, pause_key="PAUSE", toggle=None):
         super().__init__(swallow, pause_key)
         if not full > deadzone:
             raise ValueError("--full must be deeper than --deadzone")
@@ -1545,7 +1601,12 @@ class Mapper(_KeyHolder):
             raise ValueError("nothing to map. Try: apex-analog map drive")
         self.deadzone, self.full, self.curve = deadzone, full, curve
         self.mouse_speed, self.wheel_speed, self.tap_rate, self.run_rate = mouse_speed, wheel_speed, tap_rate, run_rate
-        self.keys = sorted({m.key for m in self.maps} | {m.chord for m in self.maps if m.chord}, key=lambda n: BY_NAME[n][0])
+        self.toggle = key_name(toggle) if toggle else None
+        if self.toggle in (*SHORTCUT_TAKEN, SHORTCUT_HOLD):
+            raise ValueError(f"SS+{self.toggle} belongs to the keyboard. Pick another key for --toggle.")
+        self.toggle_down = False
+        extra = {self.toggle, SHORTCUT_HOLD} if self.toggle else set()
+        self.keys = sorted({m.key for m in self.maps} | {m.chord for m in self.maps if m.chord} | extra, key=lambda n: BY_NAME[n][0])
         self.held = sorted({m.key for m in self.maps if not m.chord and not m.ss_tap}, key=lambda n: BY_NAME[n][0])
         self.want_swallow = self.want_swallow and bool(self.held)  # shortcuts never need to grab the keyboard
         self.ss_taps = [m for m in self.maps if m.ss_tap]
@@ -1555,6 +1616,7 @@ class Mapper(_KeyHolder):
             self.pads[player] = Gamepad(f"Apex Analog Player {player} (Xbox 360 layout)")
         kinds = {m.kind for m in self.maps}
         self.pedals = Pedals() if "pedal" in kinds else None
+        self.axes = Axes({m.target for m in self.maps if m.kind == "axis"}) if "axis" in kinds else None
         self.mouse = Mouse() if kinds & {"mouse-axis", "mouse-button"} else None
         self.key_outputs = {m.target for m in self.maps if m.kind in ("key", "tap")}
         self.macros, self.macro_thread = {}, None
@@ -1630,10 +1692,23 @@ class Mapper(_KeyHolder):
         m.owed -= whole
         return whole
 
+    def ss_held(self, depths):
+        return depths.get(SHORTCUT_HOLD, 0.0) >= SHORTCUT_DOWN
+
+    def _check_toggle(self, depths):
+        """SteelSeries + the toggle key turns everything off, so the keys type again, and on again."""
+        pressed = self.ss_held(depths) and depths.get(self.toggle, 0.0) >= SHORTCUT_DOWN
+        if pressed and not self.toggle_down:
+            self.set_paused(not self.paused)
+            _say("Mapping off: the keys type again." if self.paused else "Mapping on.")
+        self.toggle_down = pressed
+
     def update(self, depths, dt):
+        if self.toggle:
+            self._check_toggle(depths)
         if self.paused:
             depths = {}
-        pad_values, pedal_values, keys, moves, clicks = {}, {}, {}, {}, {}
+        pad_values, pedal_values, axis_values, keys, moves, clicks = {}, {}, {}, {}, {}, {}
         if self.ss_taps and self._ss_tap(depths, dt):
             for m in self.ss_taps:
                 self._fire(m)
@@ -1651,6 +1726,8 @@ class Mapper(_KeyHolder):
                 slots[m.target] = m.digital.update(mm) or slots.get(m.target, False)
             elif m.kind == "pedal":
                 pedal_values[m.target] = max(pedal_values.get(m.target, 0.0), amount)
+            elif m.kind == "axis":
+                axis_values[m.target] = max(axis_values.get(m.target, 0.0), amount)
             elif m.kind == "mouse-axis":
                 rate = self.wheel_speed if "wheel" in m.target else self.mouse_speed
                 moves[m.target] = moves.get(m.target, 0.0) + m.sign * amount * rate * dt
@@ -1684,6 +1761,9 @@ class Mapper(_KeyHolder):
         if self.pedals:
             self.pedals.set(**pedal_values)
             values.update(pedal_values)
+        if self.axes:
+            self.axes.set(axis_values)
+            values.update({f"axis:{n}": v for n, v in axis_values.items()})
         self.values = values
         if self.mouse:
             whole = {}
@@ -1720,7 +1800,7 @@ class Mapper(_KeyHolder):
         self.release()
         if self.macro_thread:
             self.macro_thread.join(10)
-        for device in (*self.pads.values(), self.pedals, self.mouse, self.virtual_keys):
+        for device in (*self.pads.values(), self.pedals, self.axes, self.mouse, self.virtual_keys):
             if device:
                 device.close()
 
@@ -3600,6 +3680,36 @@ def _rgb_any(value):
     raise ValueError(f"{value!r} should be a colour like \"FF5A00\" or [255, 90, 0]")
 
 
+class ToggleGlow:
+    """While the SteelSeries key is held, light the toggle key: one colour while mapping is on, another while it's off."""
+
+    def __init__(self, mapper, on=(0, 255, 0), off=(255, 0, 0), then=None):
+        self.mapper, self.on, self.off, self.then = mapper, on, off, then
+        self.shown = None
+
+    def start(self, kb):
+        if self.then:
+            self.then.start(kb)
+
+    def update(self, kb, depths, now):
+        if self.then:
+            self.then.update(kb, depths, now)
+        want = (self.off if self.mapper.paused else self.on) if self.mapper.ss_held(depths) else None
+        if want != self.shown:
+            if want:
+                kb.set_colors({self.mapper.toggle: want})
+            else:
+                kb.clear_colors()
+            self.shown = want
+
+    def stop(self, kb):
+        if self.shown:
+            kb.clear_colors()
+            self.shown = None
+        if self.then:
+            self.then.stop(kb)
+
+
 def _lights_from(args):
     return make_effect(args.effect, _rgb(args.color) if args.color else None, _rgb(args.base), args.fade, args.keep,
                        tuple(args.stats.split(",")), args.port, args.redline)
@@ -4099,7 +4209,7 @@ def cmd_map(args):
     if not _in_job():
         Keyboard().close()  # say what's wrong with the keyboard before creating virtual devices
     mapper = Mapper(maps, args.deadzone, args.full, args.curve, args.rapid, args.mouse_speed, args.wheel_speed,
-                    args.tap_rate, args.run_rate, not args.no_swallow, args.pause_key)
+                    args.tap_rate, args.run_rate, not args.no_swallow, args.pause_key, getattr(args, "toggle", None))
     read = sorted({*mapper.keys, *(explicit or [])}, key=lambda n: BY_NAME[n][0]) if args.keys != "all" else None
     if mapper.ss_taps and read is not None:
         fixed = read
@@ -4108,7 +4218,14 @@ def cmd_map(args):
         _say(f"Virtual controller {player} ready: {pad.path}")
     if mapper.pedals:
         _say(f"Virtual pedals ready: {mapper.pedals.path}. They have no default bindings, so bind them in your game once.")
-    _drive(mapper, args.hz or 120, read, _map_lines, sinks, explicit, _lights_from(args) if args.lights else None)
+    if mapper.axes:
+        _say(f"Virtual axes ready: {' '.join(mapper.axes.paths)}, eight axes each. Bind them in your game once.")
+    lights = _lights_from(args) if args.lights else None
+    if mapper.toggle:
+        on, _, off = args.toggle_colors.partition(",")
+        lights = ToggleGlow(mapper, _rgb(on), _rgb(off or "ff0000"), lights)
+        _say(f"Hold the SteelSeries key and press {mapper.toggle} to turn mapping off and on. {mapper.toggle} lights up while it's held.")
+    _drive(mapper, args.hz or 120, read, _map_lines, sinks, explicit, lights)
 
 
 def _apply_shortcuts(saved):
@@ -4517,7 +4634,7 @@ def build_parser():
         p = commands.add_parser(name, help=summary, fromfile_prefix_chars="@", description=summary, epilog=(
             "Rules look like KEY=OUTPUT, or KEY=OUTPUT@mm for on/off outputs. Sticks: lx- lx+ ly- ly+ rx- rx+ ry- ry+. Triggers: lt rt. "
             "Buttons: a b x y lb rb back start guide ls rs dpad-up dpad-down dpad-left dpad-right. Add p2: for a second controller. "
-            "Pedals: clutch handbrake pedal3 pedal4 pedal5 pedal6. "
+            "Pedals: clutch handbrake pedal3 pedal4 pedal5 pedal6. Plain axes, eight to a device: axis:1 to axis:64. "
             "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
             "Keystroke: key:F13. Repeating keystroke, faster the deeper you press: tap:RIGHT. "
             "Desktop: volume+ volume- brightness+ brightness-. Any command: run:your-command. A saved macro: macro:NAME. "
@@ -4533,6 +4650,9 @@ def build_parser():
         p.add_argument("--run-rate", type=float, default=8.0, metavar="N/S", help="run: and desktop repeats at full depth (default 8)")
         p.add_argument("--no-swallow", action="store_true", help="let mapped keys keep typing as well")
         p.add_argument("--pause-key", default="PAUSE", metavar="KEY", help="key that pauses mapping so you can type (default PAUSE)")
+        p.add_argument("--toggle", metavar="KEY", help="hold the SteelSeries key and press this key to turn mapping off and on")
+        p.add_argument("--toggle-colors", default="00ff00,ff0000", metavar="ON,OFF",
+                       help="colour of the --toggle key while the SteelSeries key is held: mapping on, then off (default 00ff00,ff0000)")
         p.add_argument("--lights", action="store_true", help="also make these keys glow as you press them")
         _add_light_options(p)
         _add_network_options(p)

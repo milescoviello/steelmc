@@ -24,7 +24,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPalette, QPen, QPoly
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QRubberBand, QSizePolicy, QSlider,
-    QSpinBox,
+    QSpinBox, QDoubleSpinBox,
     QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -216,9 +216,51 @@ CONTROL_LABELS = {name: label for label, name in OTHER_CONTROLS}
 CAP_MEDIA = {"play-pause": "Play", "next": "Next", "previous": "Prev", "stop": "Stop", "mute": "Mute", "volume-up": "Vol+",
              "volume-down": "Vol-"}
 FEATURES = [
-    ("gamepad", "W, A, S, D as an analog controller", "While this is on, those keys stop typing."),
     ("oled", "Key depth on the keyboard's screen", "Shows how far each key is pressed on the small display."),
 ]
+# What a key can do on the virtual controller: (label, apex-analog map output, short label for the keycap). Sticks and
+# triggers follow how far the key is pressed; buttons press at the key's actuation point.
+CONTROLLER_OUTPUTS = [
+    ("Left stick up", "ly-", "LS\u2191"), ("Left stick down", "ly+", "LS\u2193"), ("Left stick left", "lx-", "LS\u2190"),
+    ("Left stick right", "lx+", "LS\u2192"), ("Right stick up", "ry-", "RS\u2191"), ("Right stick down", "ry+", "RS\u2193"),
+    ("Right stick left", "rx-", "RS\u2190"), ("Right stick right", "rx+", "RS\u2192"), ("Left trigger", "lt", "LT"),
+    ("Right trigger", "rt", "RT"), ("A", "a", "A"), ("B", "b", "B"), ("X", "x", "X"), ("Y", "y", "Y"), ("Left bumper", "lb", "LB"),
+    ("Right bumper", "rb", "RB"), ("Left stick click", "ls", "L3"), ("Right stick click", "rs", "R3"), ("Start", "start", "Start"),
+    ("Back", "back", "Back"), ("Guide", "guide", "Home"), ("D-pad up", "dpad-up", "D\u2191"), ("D-pad down", "dpad-down", "D\u2193"),
+    ("D-pad left", "dpad-left", "D\u2190"), ("D-pad right", "dpad-right", "D\u2192"),
+]
+OWN_AXIS = "own axis"  # the picker's entry for giving each picked key the next free plain axis
+CONTROLLER_SHORT = {out: short for _, out, short in CONTROLLER_OUTPUTS}
+AXIS_LIMIT = 64  # apex-analog's plain axes: axis:1 to axis:64, eight to a virtual device
+CONTROLLER_LAYOUTS = {
+    "W A S D as the left stick": {"W": "ly-", "S": "ly+", "A": "lx-", "D": "lx+"},
+    "W A S D for driving": {"W": "rt", "S": "lt", "A": "lx-", "D": "lx+"},
+    "Every key its own axis": "every",
+}
+CONTROLLER_DEFAULTS = {"keys": {}, "toggle": None, "toggle_on": "00ff00", "toggle_off": "ff0000", "deadzone": 0.3, "full": 3.5, "curve": 1.0}
+TOGGLE_KEYS = [c for c in "ABCDEFGHJKLMNPRSUVWXYZ"] + ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]  # not SS+Q, I, O or T
+
+
+def controller_short(out):
+    return f"Ax{out[5:]}" if out.startswith("axis:") else CONTROLLER_SHORT.get(out, out)
+
+
+def controller_label(out):
+    return f"Axis {out[5:]}" if out.startswith("axis:") else dict((o, l) for l, o, _ in CONTROLLER_OUTPUTS).get(out, out)
+
+
+def valid_controller_output(out):
+    return out in CONTROLLER_SHORT or (isinstance(out, str) and out.startswith("axis:") and out[5:].isdigit()
+                                       and 1 <= int(out[5:]) <= AXIS_LIMIT)
+
+
+def next_axes(taken, count):
+    """The lowest free axis numbers."""
+    used = {int(o[5:]) for o in taken if o.startswith("axis:")}
+    free = [n for n in range(1, AXIS_LIMIT + 1) if n not in used]
+    if len(free) < count:
+        raise ValueError(f"Only {AXIS_LIMIT} axes: {len(free)} are free.")
+    return [f"axis:{n}" for n in free[:count]]
 
 
 def pretty_action(action):
@@ -388,7 +430,8 @@ class KeyboardDevice:
         info = json.loads(self.run("info", "--json"))
         status = self.run("status")
         presets = [line.strip() for line in self.run("preset", "list").splitlines() if line.strip()]
-        return {"info": info, "jobs": parse_jobs(status), "presets": presets, "shortcuts": self.shortcuts(), "bindings": self.bindings()}
+        return {"info": info, "jobs": parse_jobs(status), "presets": presets, "shortcuts": self.shortcuts(), "bindings": self.bindings(),
+                "controller": self.controller()}
 
     def bindings(self):
         try:
@@ -399,6 +442,10 @@ class KeyboardDevice:
     def bind(self, keys, action, layer):
         for key in keys:
             self.run("bind", KEY_ARGS.get(key, key), action, "--layer", layer)
+
+    def sync_ss_lights(self):
+        """Light up every key bound on the SteelSeries layer while SS is held, the way GG does."""
+        return self.run("ss-lights", "sync")
 
     def restore_bindings(self, items):
         """Put keys back as they were: [(key, action, layer)]."""
@@ -446,6 +493,43 @@ class KeyboardDevice:
         if args is None:
             return self.run("lights", "--off")
         return self.run(*args, *(["--color", color] if color else []))
+
+    @staticmethod
+    def controller_path():
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+        return os.path.join(base, "steelmc", "controller.json")
+
+    def controller(self):
+        """The virtual controller setup kept on this computer: which keys do what, the SS toggle, and how presses map to axes."""
+        config = dict(CONTROLLER_DEFAULTS, keys={})
+        try:
+            with open(self.controller_path()) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return config
+        if isinstance(data, dict):
+            config.update({k: v for k, v in data.items() if k in CONTROLLER_DEFAULTS})
+            config["keys"] = {k: v for k, v in (data.get("keys") or {}).items() if valid_controller_output(v)}
+        return config
+
+    @staticmethod
+    def controller_args(config):
+        argv = ["map", *[f"{KEY_ARGS.get(k, k)}={out}" for k, out in sorted(config["keys"].items())],
+                "--deadzone", f"{config['deadzone']:g}", "--full", f"{config['full']:g}", "--curve", f"{config['curve']:g}"]
+        if config.get("toggle"):
+            argv += ["--toggle", config["toggle"], "--toggle-colors", f"{config['toggle_on']},{config['toggle_off']}"]
+        return argv
+
+    def set_controller(self, config, run=True):
+        """Keep the setup, and run it (or stop it when no key is set). Those keys stop typing while it runs."""
+        path = self.controller_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w") as f:
+            json.dump(config, f, indent=1)
+        os.replace(path + ".tmp", path)
+        if config["keys"] and run:
+            return self.run(*self.controller_args(config))
+        return self.run("off", "map")
 
     def start(self, name):
         return self.run(name)
@@ -1482,6 +1566,9 @@ class KeyboardPage(QWidget):
         self.shortcuts = {}
         self.mode = "actuation"
         self.bindings = None  # as apex-analog bindings --json gives them
+        self.controller = {}  # key -> controller output, as kept on this computer
+        self.controller_config = dict(CONTROLLER_DEFAULTS, keys={})
+        self.controller_on = False
         self.bindings_original = None  # as they were when the page first loaded, for undo
         self.bind_control = None  # a control that isn't on the plate, like the wheel
         self.build()
@@ -1636,10 +1723,14 @@ class KeyboardPage(QWidget):
         hint.setWordWrap(True)
         self.changed_title = QLabel("Your bindings")
         self.changed_title.setObjectName("title")
+        self.ss_lights = QPushButton("Light up SteelSeries-layer keys")
+        self.ss_lights.setToolTip("While the SteelSeries key is held, every key bound on that layer glows. New bindings do this by themselves.")
+        self.ss_lights.clicked.connect(lambda: self.apply(self.device.sync_ss_lights, "Every key bound on the SteelSeries layer lights up while it's held."))
         self.changed_list = QVBoxLayout()
         self.changed_list.setSpacing(4)
         panel = well(self.bind_title, self.bind_layer, self.bind_other, self.deep_row, self.bind_picker,
-                     row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, None), self.changed_title)
+                     row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, self.ss_lights, None),
+                     self.changed_title)
         panel.layout().addLayout(self.changed_list)
         self.deep_row.hide()
         panel.layout().addStretch(1)
@@ -1677,10 +1768,55 @@ class KeyboardPage(QWidget):
         fill_hint = muted("Shading shows where a key fires. Keys fill as you press them.")
         fill_hint.setWordWrap(True)
         self.report.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.pad_output = QComboBox()
+        self.pad_output.addItem("Its own axis (one each)", OWN_AXIS)
+        for label, out, _ in CONTROLLER_OUTPUTS:
+            self.pad_output.addItem(label, out)
+        self.pad_set = QPushButton("Use picked keys")
+        self.pad_set.setToolTip("The picked keys act as this on a virtual controller, by how far they're pressed")
+        self.pad_set.clicked.connect(self.apply_controller_key)
+        self.pad_clear = QPushButton("Picked keys type again")
+        self.pad_clear.clicked.connect(self.clear_controller_keys)
+        self.pad_layout = QComboBox()
+        self.pad_layout.addItem("Quick setup", None)
+        for name in CONTROLLER_LAYOUTS:
+            self.pad_layout.addItem(name, name)
+        self.pad_layout.activated.connect(self.controller_layout_picked)
+        self.pad_run = QPushButton("Start controller")
+        self.pad_run.clicked.connect(self.toggle_controller)
+        self.pad_note = muted("")
+        self.pad_note.setWordWrap(True)
+        self.pad_toggle = QComboBox()
+        self.pad_toggle.addItem("no toggle", None)
+        for key in TOGGLE_KEYS:
+            self.pad_toggle.addItem(f"SteelSeries + {key}", key)
+        self.pad_on_color, self.pad_off_color = Swatch("00ff00"), Swatch("ff0000")
+        self.pad_on_color.setToolTip("The toggle key's colour while SteelSeries is held and the controller is on")
+        self.pad_off_color.setToolTip("Its colour while the controller is off")
+        self.pad_deadzone, self.pad_full, self.pad_curve = QDoubleSpinBox(), QDoubleSpinBox(), QDoubleSpinBox()
+        for spin, low, high, step, suffix in ((self.pad_deadzone, 0.0, 3.9, 0.1, " mm"), (self.pad_full, 0.2, 4.0, 0.1, " mm"),
+                                              (self.pad_curve, 0.2, 4.0, 0.1, "")):
+            spin.setRange(low, high)
+            spin.setSingleStep(step)
+            spin.setDecimals(1)
+            spin.setSuffix(suffix)
+        self.pad_deadzone.setToolTip("An axis stays at 0 until the key is this deep")
+        self.pad_full.setToolTip("An axis is all the way at this depth")
+        self.pad_curve.setToolTip("Above 1 gives finer control near the top of the press")
+        self.pad_apply = QPushButton("Use these settings")
+        self.pad_apply.clicked.connect(self.apply_controller_settings)
+        pad_title = QLabel("Controller")
+        pad_title.setObjectName("title")
         panel = well(self.selection_label, row(*pick, None), pick_hint, row(muted("Fires at"), self.depth, self.depth_label),
                      row(self.set_depth, None), row(self.rapid_on, self.rapid_off, None),
                      fill_hint,
-                     row(check, typing, None), self.report)
+                     row(check, typing, None), self.report,
+                     pad_title, self.pad_layout, row(muted("Picked keys act as"), self.pad_output), row(self.pad_set, self.pad_clear, None),
+                     row(muted("Turn on and off with"), self.pad_toggle),
+                     row(muted("Toggle key glows"), self.pad_on_color, muted("on,"), self.pad_off_color, muted("off"), None),
+                     row(muted("Axes start at"), self.pad_deadzone, muted("full at"), self.pad_full),
+                     row(muted("Curve"), self.pad_curve, None, self.pad_apply),
+                     row(self.pad_run, None), self.pad_note)
         panel.layout().addStretch(1)
         self.selection_changed()
         return panel
@@ -1775,6 +1911,10 @@ class KeyboardPage(QWidget):
         self.firmware.setText(f"firmware {info['firmware']}, {len(info['keys'])} keys with sensors")
         self.settings = info["keys"]
         self.shortcuts = data.get("shortcuts", {})
+        self.controller_config = data.get("controller") or dict(CONTROLLER_DEFAULTS, keys={})
+        self.controller = self.controller_config["keys"]
+        self.show_controller_settings()
+        self.controller_on = any(j["on"] and j["name"] == "input" and j["command"] == "map" for j in data["jobs"])
         self.bindings = data.get("bindings")
         if self.bindings and self.bindings_original is None:
             self.bindings_original = self.bindings
@@ -1820,6 +1960,11 @@ class KeyboardPage(QWidget):
                 rapid = key["mode"] != 0
                 cap.fires_at = key["press"]
                 shortcut = self.shortcuts.get(name)
+                pad = self.controller.get(name)
+                if pad:
+                    cap.set_detail(controller_short(pad), fill=key["press"] / TRAVEL_MM, marked=True)
+                    cap.setToolTip(f"Controller: {controller_label(pad)}" + ("" if self.controller_on else " (not running)"))
+                    continue
                 cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid or bool(shortcut))
                 cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else "") + (f". With the SteelSeries key: {shortcut}" if shortcut else ""))
             else:
@@ -1999,8 +2144,10 @@ class KeyboardPage(QWidget):
         else:
             text = f"{len(chosen)} keys picked"
         self.selection_label.setText(text)
-        for button in (self.set_depth, self.rapid_on, self.rapid_off):
+        for button in (self.set_depth, self.rapid_on, self.rapid_off, self.pad_set):
             button.setEnabled(bool(chosen))
+        self.pad_clear.setEnabled(any(n in self.controller for n in chosen))
+        self.show_controller()
         if len(chosen) == 1 and chosen[0] in self.settings:
             self.depth.setValue(DEPTHS.index(self.key_depth(self.settings[chosen[0]])))
         self.show_set_label()
@@ -2222,6 +2369,96 @@ class KeyboardPage(QWidget):
         default = EFFECTS[self.effect.currentIndex()][2]
         color = self.effect_color.color if default and self.effect_color.color != default else None
         self.apply(lambda: self.device.lights(args, color), f"Lighting set: {self.effect.currentText().lower()}.")
+
+    def show_controller(self):
+        if not hasattr(self, "pad_run"):
+            return
+        self.pad_run.setText("Stop controller" if self.controller_on else "Start controller")
+        self.pad_run.setEnabled(bool(self.controller) or self.controller_on)
+        if not self.controller:
+            self.pad_note.setText("Pick keys and choose what they do, or use a quick setup. Sticks and triggers follow how far a key "
+                                  "is pressed. While the controller runs, its keys stop typing.")
+        else:
+            keys = " ".join(f"{KEY_LABELS.get(k, k)}={controller_short(v)}" for k, v in sorted(self.controller.items()))
+            toggle = self.controller_config.get("toggle")
+            self.pad_note.setText(("Running: " if self.controller_on else "Not running: ") + keys
+                                  + (f". SteelSeries + {toggle} turns it off and on." if toggle else ""))
+
+    def show_controller_settings(self):
+        config = self.controller_config
+        self.pad_toggle.setCurrentIndex(max(0, self.pad_toggle.findData(config.get("toggle"))))
+        self.pad_on_color.set_color(config["toggle_on"])
+        self.pad_off_color.set_color(config["toggle_off"])
+        self.pad_deadzone.setValue(config["deadzone"])
+        self.pad_full.setValue(config["full"])
+        self.pad_curve.setValue(config["curve"])
+
+    def controller_settings(self):
+        return {"toggle": self.pad_toggle.currentData(), "toggle_on": self.pad_on_color.color, "toggle_off": self.pad_off_color.color,
+                "deadzone": round(self.pad_deadzone.value(), 1), "full": round(self.pad_full.value(), 1), "curve": round(self.pad_curve.value(), 1)}
+
+    def change_controller(self, mapping, done):
+        if mapping and self.pad_full.value() <= self.pad_deadzone.value():
+            self.status.say("Full has to be deeper than where axes start.", "bad")
+            return
+        toggle = self.pad_toggle.currentData()
+        if toggle and mapping.get(toggle):
+            self.status.say(f"{toggle} is the toggle key, so it can't be on the controller too. Pick another toggle.", "bad")
+            return
+        config = {**self.controller_config, **self.controller_settings(), "keys": mapping}
+
+        def after(_):
+            self.status.say(done)
+            self.refresh()
+        run = bool(mapping)
+        self.runner.submit(lambda: self.device.set_controller(config, run), after, lambda e: self.status.say(str(e), "bad"))
+
+    def apply_controller_settings(self):
+        self.change_controller(dict(self.controller), "Controller settings saved." + (" It's running with them." if self.controller else ""))
+
+    def apply_controller_key(self):
+        names = self.selected_keys()
+        out = self.pad_output.currentData()
+        if not names or not out:
+            return
+        names = [n for n in names if n != "SS"]
+        try:
+            outs = next_axes([v for k, v in self.controller.items() if k not in names], len(names)) if out == OWN_AXIS else [out] * len(names)
+        except ValueError as e:
+            self.status.say(str(e), "bad")
+            return
+        mapping = {**self.controller, **dict(zip(names, outs))}
+        label = "their own axes" if out == OWN_AXIS and len(names) > 1 else controller_label(outs[0]) if outs else ""
+        self.change_controller(mapping, f"{self.target_label(names)} now {'act' if len(names) > 1 else 'acts'} as {label}. "
+                                        f"The controller is running, and those keys don't type while it does.")
+
+    def clear_controller_keys(self):
+        names = [n for n in self.selected_keys() if n in self.controller]
+        mapping = {k: v for k, v in self.controller.items() if k not in names}
+        self.change_controller(mapping, f"{self.target_label(names)} type again." + ("" if mapping else " The controller is off."))
+
+    def controller_layout_picked(self, *_):
+        name = self.pad_layout.currentData()
+        self.pad_layout.setCurrentIndex(0)
+        if not name:
+            return
+        layout = CONTROLLER_LAYOUTS[name]
+        if layout == "every":
+            toggle = self.pad_toggle.currentData()
+            keys = [k for k in self.caps if k in self.settings and k not in ("SS", toggle)]
+            mapping = dict(zip(keys, next_axes([], len(keys))))
+            self.change_controller(mapping, f"Every key is its own axis: {len(keys)} axes, eight to a virtual device. Nothing types while "
+                                            "it runs" + (f", so SteelSeries + {toggle} turns it off." if toggle else ". Pause turns it off."))
+            return
+        mapping = {**{k: v for k, v in self.controller.items() if k not in layout}, **layout}
+        self.change_controller(mapping, f"{name}. The controller is running, and those keys don't type while it does.")
+
+    def toggle_controller(self):
+        if self.controller_on:
+            self.runner.submit(lambda: self.device.stop("map"), lambda _: (self.status.say("Controller off: the keys type again."), self.refresh()),
+                               self.failed)
+        elif self.controller:
+            self.change_controller(dict(self.controller), "Controller on.")
 
     def toggle_feature(self, name, on):
         call = (lambda: self.device.start(name)) if on else (lambda: self.device.stop(name))
