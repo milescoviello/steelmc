@@ -87,6 +87,7 @@ ALLOWED = {
     0xE4: "what the volume wheel does, on one layer",
     0xB3: "each key's press and release points, or with 2 first, where its deeper press starts",
     0xCD: "which keys light up while the SteelSeries layer is on",
+    0xCE: "the colour those keys light up in",
 }
 
 # The only commands that change anything, sent only for lights. Each handler was read on both chips: they store colours in the
@@ -120,6 +121,7 @@ BIND_COMMANDS = {
     0x64: "set what the volume wheel does, on one layer",
     0x60: "choose which key turns on the SteelSeries layer while held",
     0x4D: "choose which keys light up while the SteelSeries layer is on",
+    0x4E: "choose the colour they light up in",
 }
 # The one command that writes flash: all current settings, over one of the five saved configs. Same code as the Save Config menu.
 SAVE_COMMAND = 0x09
@@ -324,7 +326,13 @@ def _check_layer_lights(payload):
         raise ValueError("refused to send 4D: it takes exactly 32 bytes of key bits")
 
 
-BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel, 0x60: _check_layer_key, 0x4D: _check_layer_lights}
+def _check_layer_light_color(payload):
+    """4E <r> <g> <b>: one colour."""
+    if len(payload) != 4 or any(not 0 <= b <= 0xFF for b in payload[1:]):
+        raise ValueError("refused to send 4E: it takes one colour, three bytes")
+
+
+BIND_CHECKS = {0x63: _check_bind, 0x64: _check_wheel, 0x60: _check_layer_key, 0x4D: _check_layer_lights, 0x4E: _check_layer_light_color}
 
 
 def _check_deep_actuation(payload):
@@ -826,6 +834,15 @@ class Keyboard:
         """HID usages of the keys that light up while the SteelSeries layer is on. Everything else goes dark then."""
         reply = self._ask([0xCD], lambda r: len(r) >= 32)
         return {hid for hid in range(256) if reply[hid // 8] >> (hid % 8) & 1}
+
+    def layer_light_color(self):
+        """(r, g, b): the colour the SteelSeries layer's keys glow in while it's on. (255, 32, 0) out of the box."""
+        reply = self._ask([0xCE], lambda r: len(r) >= 3)
+        return tuple(reply[:3])
+
+    def set_layer_light_color(self, rgb):
+        """Glow in another colour while the SteelSeries layer is on. Kept in the config save writes; takes effect straight away."""
+        self._write([0x4E, *rgb])
 
     def set_layer_lights(self, hids):
         """Light exactly these keys while the SteelSeries layer is on. The keyboard keeps the mask in the config save writes,
@@ -3491,7 +3508,8 @@ your terminal back, and several can run at once. Add --watch to keep one in the 
     bind KEY ACTION      what a key does, on the keyboard itself, like: bind CAPS esc. --layer ss or deep too
     unbind KEY           put a key back to what it does out of the box
     bindings             what every key does
-    ss-lights [sync]     which keys glow while the SteelSeries key is held. sync lights every key bound there
+    ss-lights [sync]     which keys glow while the SteelSeries key is held. sync lights every key bound there,
+                         --color 00ffff sets their colour
     layer-key KEY        move the SteelSeries layer to another key, so the SteelSeries key itself can be bound
     preset save|use NAME keep setups on this computer
     save                 write the current settings to the keyboard's flash, so they survive a replug
@@ -3802,7 +3820,8 @@ def _binding_entry(record, default):
 def read_bindings(kb, layers=(0, 1, 2)):
     """Everything bound on the keyboard, as `bindings --json` prints it."""
     layer_key = kb.layer_key()
-    report = {"layer_key": BIND_NAMES.get(layer_key, f"{layer_key:#04x}"), "layers": {}, "wheel": {}}
+    report = {"layer_key": BIND_NAMES.get(layer_key, f"{layer_key:#04x}"), "layers": {}, "wheel": {},
+              "ss_light_color": bytes(kb.layer_light_color()).hex()}
     for layer in layers:
         report["layers"][LAYER_NAMES[layer]] = {name: _binding_entry(record, default_binding(layer, BIND_HIDS[name]))
                                                 for name, record in kb.bindings(layer).items()}
@@ -3834,8 +3853,19 @@ def cmd_bindings(args):
 
 
 def cmd_ss_lights(args):
-    """Which keys glow while the SteelSeries layer is on. sync lights exactly the keys bound on that layer, the way GG does."""
+    """Which keys glow while the SteelSeries layer is on. sync lights exactly the keys bound on that layer, the way GG does.
+    --color sets the colour they glow in."""
     with Keyboard() as kb:
+        if args.color:
+            rgb = _rgb(args.color)
+            kb.set_layer_light_color(rgb)
+            time.sleep(0.1)
+            if kb.layer_light_color() != rgb:
+                raise ApexError("Sent, but the colour reads back differently.")
+            print(f"While the SteelSeries key is held, its keys now glow {bytes(rgb).hex()}. "
+                  f"It lasts until you unplug the keyboard. apex-analog save keeps it.")
+            if not args.action:
+                return 0
         if args.action == "sync":
             bound = kb.bindings(1)
             want = {BIND_HIDS[name] for name, record in bound.items() if record[0]}
@@ -3847,8 +3877,9 @@ def cmd_ss_lights(args):
                   f"It lasts until you unplug the keyboard. apex-analog save keeps it.")
             return 0
         lit = kb.layer_lights()
+        color = kb.layer_light_color()
     names = [BIND_NAMES.get(hid, f"{hid:#04x}") for hid in sorted(lit)]
-    print("While the SteelSeries layer is on, these light up: " + (" ".join(names) if names else "none") + ".")
+    print("While the SteelSeries layer is on, these light up: " + (" ".join(names) if names else "none") + f", in {bytes(color).hex()}.")
     return 0
 
 
@@ -4761,6 +4792,7 @@ def build_parser():
 
     sl = commands.add_parser("ss-lights", help="which keys light up while the SteelSeries layer is on")
     sl.add_argument("action", nargs="?", choices=("sync",), help="sync: light exactly the keys bound on that layer")
+    sl.add_argument("--color", metavar="RRGGBB", help="the colour they glow in, like 00ffff (out of the box ff2000)")
     sl.set_defaults(func=cmd_ss_lights)
 
     lk = commands.add_parser("layer-key", help="which key turns on the SteelSeries layer while held, so the SteelSeries key itself can be bound")

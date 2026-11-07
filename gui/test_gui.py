@@ -776,6 +776,10 @@ class BindingsMode(unittest.TestCase):
         self.page.ss_lights.click()
         self.assertEqual(self.device.calls[-1], ("sync_ss_lights",))
 
+    def test_ss_layer_glow_colour(self):
+        self.page.ss_color.picked.emit("00ffff")
+        self.assertEqual(self.device.calls[-1], ("set_ss_light_color", "00ffff"))
+
     def test_bind_a_key(self):
         QTest.mouseClick(self.page.caps["CAPS"], Qt.LeftButton)
         self.assertEqual(self.page.bind_picker.action_text(), "esc")

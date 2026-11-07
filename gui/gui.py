@@ -493,6 +493,10 @@ class KeyboardDevice:
         """Light up every key bound on the SteelSeries layer while SS is held, the way GG does."""
         return self.run("ss-lights", "sync")
 
+    def set_ss_light_color(self, color):
+        """The colour the SteelSeries layer's keys glow in while it's held."""
+        return self.run("ss-lights", "--color", color)
+
     def restore_bindings(self, items):
         """Put keys back as they were: [(key, action, layer)]."""
         for key, action, layer in items:
@@ -1782,10 +1786,15 @@ class KeyboardPage(QWidget):
         self.ss_lights = QPushButton("Light up SteelSeries-layer keys")
         self.ss_lights.setToolTip("While the SteelSeries key is held, every key bound on that layer glows. New bindings do this by themselves.")
         self.ss_lights.clicked.connect(lambda: self.apply(self.device.sync_ss_lights, "Every key bound on the SteelSeries layer lights up while it's held."))
+        self.ss_color = Swatch("ff2000")
+        self.ss_color.setToolTip("The colour the SteelSeries layer's keys glow in while it's held. Click to change it.")
+        self.ss_color.picked.connect(lambda color: self.apply(lambda: self.device.set_ss_light_color(color),
+                                                               f"While the SteelSeries key is held, its keys glow {color}. Save to keep it."))
         self.changed_list = QVBoxLayout()
         self.changed_list.setSpacing(4)
         panel = well(self.bind_title, self.bind_layer, self.bind_other, self.deep_row, self.bind_picker,
-                     row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, self.ss_lights, None),
+                     row(self.bind_reset, self.bind_apply, None), self.bind_note, hint, row(self.bind_undo, None),
+                     row(self.ss_lights, muted("glow"), self.ss_color, None),
                      self.changed_title)
         panel.layout().addLayout(self.changed_list)
         self.deep_row.hide()
@@ -1927,6 +1936,8 @@ class KeyboardPage(QWidget):
             self.controller_window.loaded(self.controller_config, self.controller_on, self.settings)
         self.controller_on = any(j["on"] and j["name"] == "input" and j["command"] == "map" for j in data["jobs"])
         self.bindings = data.get("bindings")
+        if self.bindings and self.bindings.get("ss_light_color") and hasattr(self, "ss_color"):
+            self.ss_color.set_color(self.bindings["ss_light_color"])
         if self.bindings and self.bindings_original is None:
             self.bindings_original = self.bindings
         self.mode_buttons["bindings"].setEnabled(self.bindings is not None)

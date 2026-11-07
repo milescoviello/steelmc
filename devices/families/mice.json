@@ -338,11 +338,13 @@
    "products": {
     "183a": {
      "interface": 3,
-     "name": "Aerox 3 Wireless (wired mode)"
+     "name": "Aerox 3 Wireless (wired mode)",
+     "firmware_checked": "1.11.4"
     },
     "187a": {
      "interface": 3,
-     "name": "Aerox 3 Wireless CS2 Dragon Lore Edition (wired mode)"
+     "name": "Aerox 3 Wireless CS2 Dragon Lore Edition (wired mode)",
+     "firmware_checked": "1.14.1"
     }
    },
    "save": {
@@ -1650,15 +1652,18 @@
    "products": {
     "1854": {
      "interface": 3,
-     "name": "Aerox 5 Wireless (wired mode)"
+     "name": "Aerox 5 Wireless (wired mode)",
+     "firmware_checked": "1.11.4"
     },
     "185e": {
      "interface": 3,
-     "name": "Aerox 5 Wireless Destiny 2 Edition (wired mode)"
+     "name": "Aerox 5 Wireless Destiny 2 Edition (wired mode)",
+     "firmware_checked": "1.11.4"
     },
     "1862": {
      "interface": 3,
-     "name": "Aerox 5 Wireless Diablo IV Edition (wired mode)"
+     "name": "Aerox 5 Wireless Diablo IV Edition (wired mode)",
+     "firmware_checked": "1.11.4"
     }
    },
    "save": {
@@ -2576,11 +2581,13 @@
    "products": {
     "185a": {
      "interface": 3,
-     "name": "Aerox 9 Wireless (wired mode)"
+     "name": "Aerox 9 Wireless (wired mode)",
+     "firmware_checked": "1.2.4"
     },
     "1876": {
      "interface": 3,
-     "name": "Aerox 9 Wireless WOW Edition (wired mode)"
+     "name": "Aerox 9 Wireless WOW Edition (wired mode)",
+     "firmware_checked": "1.5.2"
     }
    },
    "save": {
@@ -3992,11 +3999,13 @@
    "products": {
     "1842": {
      "interface": 3,
-     "name": "Prime Wireless (wired mode)"
+     "name": "Prime Wireless (wired mode)",
+     "firmware_checked": "1.1.7"
     },
     "184a": {
      "interface": 3,
-     "name": "Prime Mini Wireless (wired mode)"
+     "name": "Prime Mini Wireless (wired mode)",
+     "firmware_checked": "1.1.7"
     }
    },
    "save": {
