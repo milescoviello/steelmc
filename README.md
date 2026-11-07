@@ -17,11 +17,19 @@ Configure SteelSeries gear on Linux with no vendor software. Not affiliated with
 
 ## Install
 
+**Any distro, for you:**
+
 ```
+git clone https://github.com/milescoviello/steelmc
+cd steelmc
 ./install.sh
 ```
 
-Or run the `install.sh` in just the folders you want. The command-line tools need Python, and `apex-oled` also needs Pillow. The GUI needs PySide6.
+It installs anything missing with your distro's own packages (Python, PySide6 for the app, Pillow for the keyboard's screen) on Arch, Debian, Ubuntu, Fedora, openSUSE, Gentoo, Void and Alpine. It asks for your password once for the udev rules, so your devices open without sudo, and it puts SteelMC in your app menu. The commands point into the clone, so `git pull` updates them. `./install.sh --yes` doesn't ask anything. To install just some tools, run the `install.sh` in their folders.
+
+**Any distro, system-wide:** `sudo make install` puts everything under `/usr/local`, and `sudo make uninstall` takes it out again. Packagers: `make DESTDIR="$pkgdir" PREFIX=/usr install`. `packaging/aur` has the Arch packages.
+
+The command-line tools need only Python 3.8 or newer. The app needs PySide6, and `apex-oled` needs Pillow.
 
 ## The app
 
