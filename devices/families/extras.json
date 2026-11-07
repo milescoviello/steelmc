@@ -1643,6 +1643,149 @@
      }
     }
    }
+  },
+  {
+   "battery": {
+    "command": [
+     146
+    ],
+    "length": 64,
+    "level": {
+     "byte": 2
+    }
+   },
+   "changes": "experimental",
+   "family": "aerox3_wireless_gen2_dongle",
+   "kind": "mouse",
+   "name": "Aerox 3 Wireless Gen 2 (through its dongle)",
+   "products": {
+    "1890": {
+     "name": "Aerox 3 Wireless Gen 2 (dongle)",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1,
+     "firmware_checked": "1.1.6"
+    }
+   },
+   "save": {
+    "command": [
+     17,
+     0
+    ],
+    "packet_length": 64,
+    "readback_length": 64
+   },
+   "settings": {
+    "polling_rate": {
+     "type": "choice",
+     "label": "Polling rate (Hz; wireless can go higher than the cable)",
+     "command": [
+      107
+     ],
+     "choices": {
+      "4000 wireless, 1000 wired": [
+       0,
+       2
+      ],
+      "2000 wireless, 1000 wired": [
+       1,
+       2
+      ],
+      "1000": [
+       2,
+       2
+      ],
+      "500": [
+       3,
+       3
+      ],
+      "250": [
+       4,
+       4
+      ],
+      "125": [
+       5,
+       5
+      ]
+     },
+     "default": "1000",
+     "packet_length": 64,
+     "readback_length": 64
+    }
+   },
+   "tunnel_mask": 64
+  },
+  {
+   "battery": {
+    "command": [
+     146
+    ],
+    "length": 64,
+    "level": {
+     "byte": 2
+    }
+   },
+   "changes": "experimental",
+   "family": "aerox3_wireless_gen2_cable",
+   "kind": "mouse",
+   "name": "Aerox 3 Wireless Gen 2",
+   "products": {
+    "1892": {
+     "name": "Aerox 3 Wireless Gen 2",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1,
+     "firmware_checked": "1.1.6"
+    }
+   },
+   "save": {
+    "command": [
+     17,
+     0
+    ],
+    "packet_length": 64,
+    "readback_length": 64
+   },
+   "settings": {
+    "polling_rate": {
+     "type": "choice",
+     "label": "Polling rate (Hz; wireless can go higher than the cable)",
+     "command": [
+      43
+     ],
+     "choices": {
+      "4000 wireless, 1000 wired": [
+       0,
+       2
+      ],
+      "2000 wireless, 1000 wired": [
+       1,
+       2
+      ],
+      "1000": [
+       2,
+       2
+      ],
+      "500": [
+       3,
+       3
+      ],
+      "250": [
+       4,
+       4
+      ],
+      "125": [
+       5,
+       5
+      ]
+     },
+     "default": "1000",
+     "packet_length": 64,
+     "readback_length": 64
+    }
+   }
   }
  ]
 }
