@@ -20,7 +20,7 @@ import threading
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QProcess, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPalette, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QRubberBand, QSizePolicy, QSlider,
@@ -1668,22 +1668,27 @@ class KeyboardPage(QWidget):
         """Actuation or bindings: the same keys, picked on the plate, with a different panel under them."""
         self.mode_buttons = {}
         group = QButtonGroup(self)
-        for mode, label in (("actuation", "Actuation"), ("bindings", "Bindings")):
+        for mode, label in (("actuation", "Actuation"), ("bindings", "Bindings"), ("controller", "Controller")):
             button = QPushButton(label)
             button.setObjectName("segment")
             button.setCheckable(True)
             button.clicked.connect(lambda checked=False, m=mode: self.set_mode(m))
+            bold = button.font()
+            bold.setBold(True)
+            button.setMinimumWidth(QFontMetrics(bold).horizontalAdvance(label) + 28)  # room for the bold checked label
             group.addButton(button)
             self.mode_buttons[mode] = button
         self.mode_buttons["actuation"].setChecked(True)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.build_actuation())
         self.mode_stack.addWidget(self.build_bindings())
+        self.mode_stack.addWidget(self.build_controller())
+        self.selection_changed()
         box = QWidget()
         layout = QVBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        layout.addLayout(row(self.mode_buttons["actuation"], self.mode_buttons["bindings"], None))
+        layout.addLayout(row(self.mode_buttons["actuation"], self.mode_buttons["bindings"], self.mode_buttons["controller"], None))
         layout.addWidget(self.mode_stack, 1)
         return box
 
@@ -1768,6 +1773,17 @@ class KeyboardPage(QWidget):
         fill_hint = muted("Shading shows where a key fires. Keys fill as you press them.")
         fill_hint.setWordWrap(True)
         self.report.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        panel = well(self.selection_label, row(*pick, None), pick_hint, row(muted("Fires at"), self.depth, self.depth_label),
+                     row(self.set_depth, None), row(self.rapid_on, self.rapid_off, None),
+                     fill_hint,
+                     row(check, typing, None), self.report)
+        panel.layout().addStretch(1)
+        return panel
+
+    def build_controller(self):
+        """Keys as a virtual controller: pick them on the plate, say what each does, and run it."""
+        self.pad_selection = QLabel("Pick keys for the controller")
+        self.pad_selection.setObjectName("title")
         self.pad_output = QComboBox()
         self.pad_output.addItem("Its own axis (one each)", OWN_AXIS)
         for label, out, _ in CONTROLLER_OUTPUTS:
@@ -1791,8 +1807,8 @@ class KeyboardPage(QWidget):
         for key in TOGGLE_KEYS:
             self.pad_toggle.addItem(f"SteelSeries + {key}", key)
         self.pad_on_color, self.pad_off_color = Swatch("00ff00"), Swatch("ff0000")
-        self.pad_on_color.setToolTip("The toggle key's colour while SteelSeries is held and the controller is on")
-        self.pad_off_color.setToolTip("Its colour while the controller is off")
+        self.pad_on_color.setToolTip("While SteelSeries is held, the toggle key glows this colour when the controller is on")
+        self.pad_off_color.setToolTip("...and this colour when it's off")
         self.pad_deadzone, self.pad_full, self.pad_curve = QDoubleSpinBox(), QDoubleSpinBox(), QDoubleSpinBox()
         for spin, low, high, step, suffix in ((self.pad_deadzone, 0.0, 3.9, 0.1, " mm"), (self.pad_full, 0.2, 4.0, 0.1, " mm"),
                                               (self.pad_curve, 0.2, 4.0, 0.1, "")):
@@ -1805,20 +1821,22 @@ class KeyboardPage(QWidget):
         self.pad_curve.setToolTip("Above 1 gives finer control near the top of the press")
         self.pad_apply = QPushButton("Use these settings")
         self.pad_apply.clicked.connect(self.apply_controller_settings)
-        pad_title = QLabel("Controller")
-        pad_title.setObjectName("title")
-        panel = well(self.selection_label, row(*pick, None), pick_hint, row(muted("Fires at"), self.depth, self.depth_label),
-                     row(self.set_depth, None), row(self.rapid_on, self.rapid_off, None),
-                     fill_hint,
-                     row(check, typing, None), self.report,
-                     pad_title, self.pad_layout, row(muted("Picked keys act as"), self.pad_output), row(self.pad_set, self.pad_clear, None),
-                     row(muted("Turn on and off with"), self.pad_toggle),
-                     row(muted("Toggle key glows"), self.pad_on_color, muted("on,"), self.pad_off_color, muted("off"), None),
-                     row(muted("Axes start at"), self.pad_deadzone, muted("full at"), self.pad_full),
-                     row(muted("Curve"), self.pad_curve, None, self.pad_apply),
-                     row(self.pad_run, None), self.pad_note)
+        for widget in (self.pad_output, self.pad_layout, self.pad_toggle):
+            widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            widget.setMinimumContentsLength(12)
+        settings = QLabel("Settings")
+        settings.setObjectName("title")
+        pick = []
+        for label, names in (("All", None), ("None", [])):
+            button = QPushButton(label)
+            button.clicked.connect(lambda checked=False, n=names: self.pick(n))
+            pick.append(button)
+        panel = well(self.pad_selection, row(*pick, None), self.pad_layout, self.pad_output, row(self.pad_set, self.pad_clear, None), self.pad_note,
+                     row(self.pad_run, None),
+                     settings, row(muted("Toggle"), self.pad_toggle, self.pad_on_color, self.pad_off_color, None),
+                     row(muted("Axes from"), self.pad_deadzone, muted("to"), self.pad_full, None),
+                     row(muted("Curve"), self.pad_curve, None, self.pad_apply))
         panel.layout().addStretch(1)
-        self.selection_changed()
         return panel
 
     def build_lighting(self):
@@ -1960,7 +1978,7 @@ class KeyboardPage(QWidget):
                 rapid = key["mode"] != 0
                 cap.fires_at = key["press"]
                 shortcut = self.shortcuts.get(name)
-                pad = self.controller.get(name)
+                pad = self.controller.get(name) if self.mode == "controller" else None
                 if pad:
                     cap.set_detail(controller_short(pad), fill=key["press"] / TRAVEL_MM, marked=True)
                     cap.setToolTip(f"Controller: {controller_label(pad)}" + ("" if self.controller_on else " (not running)"))
@@ -2001,7 +2019,7 @@ class KeyboardPage(QWidget):
             mode = "actuation"
         self.mode = mode
         self.mode_buttons[mode].setChecked(True)
-        self.mode_stack.setCurrentIndex(0 if mode == "actuation" else 1)
+        self.mode_stack.setCurrentIndex({"actuation": 0, "bindings": 1, "controller": 2}[mode])
         for cap in self.caps.values():
             cap.setChecked(False)
         self.bind_control = None
@@ -2144,6 +2162,8 @@ class KeyboardPage(QWidget):
         else:
             text = f"{len(chosen)} keys picked"
         self.selection_label.setText(text)
+        if hasattr(self, "pad_selection"):
+            self.pad_selection.setText(text.replace("Pick keys to change", "Pick keys for the controller"))
         for button in (self.set_depth, self.rapid_on, self.rapid_off, self.pad_set):
             button.setEnabled(bool(chosen))
         self.pad_clear.setEnabled(any(n in self.controller for n in chosen))
