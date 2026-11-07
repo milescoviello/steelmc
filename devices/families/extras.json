@@ -869,6 +869,194 @@
      }
     }
    ]
+  },
+  {
+   "changes": "experimental",
+   "family": "arena_7",
+   "kind": "speakers",
+   "name": "Arena 7",
+   "packet": 64,
+   "products": {
+    "1a00": {
+     "name": "Arena 7",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1,
+     "firmware_checked": "2.17.18"
+    }
+   },
+   "raw": true,
+   "save": {
+    "command": [
+     6,
+     9
+    ]
+   },
+   "settings": {
+    "equalizer": {
+     "type": "eq",
+     "label": "Equalizer, your own (10 bands, -10 to 10 dB)",
+     "command": [
+      6,
+      51
+     ],
+     "bands": 10,
+     "min": -10,
+     "max": 10,
+     "format": "float32"
+    },
+    "sleep": {
+     "type": "number",
+     "label": "Sleep after this many minutes without sound (0 for never)",
+     "command": [
+      6,
+      143
+     ],
+     "input": [
+      0,
+      60,
+      1
+     ],
+     "output": [
+      0,
+      3600,
+      60
+     ],
+     "bytes": 2
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "arena_9",
+   "kind": "speakers",
+   "name": "Arena 9",
+   "packet": 64,
+   "products": {
+    "1a05": {
+     "name": "Arena 9",
+     "interface": 3,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1,
+     "firmware_checked": "2.7.11"
+    }
+   },
+   "raw": true,
+   "save": {
+    "command": [
+     6,
+     9
+    ]
+   },
+   "settings": {
+    "equalizer": {
+     "type": "eq",
+     "label": "Equalizer, your own (10 bands, -10 to 10 dB)",
+     "command": [
+      6,
+      51
+     ],
+     "bands": 10,
+     "min": -10,
+     "max": 10,
+     "format": "float32"
+    },
+    "sleep": {
+     "type": "number",
+     "label": "Sleep after this many minutes without sound (0 for never)",
+     "command": [
+      6,
+      143
+     ],
+     "input": [
+      0,
+      60,
+      1
+     ],
+     "output": [
+      0,
+      3600,
+      60
+     ],
+     "bytes": 2
+    },
+    "surround_upmix": {
+     "type": "choice",
+     "label": "Surround upmix",
+     "command": [
+      6,
+      81
+     ],
+     "choices": {
+      "on": 1,
+      "off": 0
+     }
+    },
+    "screen_brightness": {
+     "type": "number",
+     "label": "Screen brightness (%)",
+     "command": [
+      6,
+      133
+     ],
+     "input": [
+      0,
+      100,
+      1
+     ],
+     "output": [
+      0,
+      100,
+      1
+     ]
+    },
+    "screen_dim_timer": {
+     "type": "number",
+     "label": "Dim the screen after this many minutes (0 for never)",
+     "command": [
+      6,
+      131
+     ],
+     "input": [
+      0,
+      60,
+      1
+     ],
+     "output": [
+      0,
+      60,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "sims4_plumbob",
+   "kind": "accessory",
+   "name": "Sims 4 Plumbob",
+   "products": {
+    "1500": {
+     "name": "Sims 4 Plumbob",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "settings": {
+    "color": {
+     "type": "color",
+     "label": "Colour",
+     "command": [
+      7,
+      0
+     ],
+     "packet_length": 32
+    }
+   }
   }
  ]
 }
