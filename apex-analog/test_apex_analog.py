@@ -824,6 +824,16 @@ class Modes(unittest.TestCase):
         os.close(first)
         os.close(second)
 
+    def test_two_keys_can_share_one_axis(self):
+        m = self.mapper("LSHIFT=axis:1+", "LCTRL=axis:1-")
+        fd = hold(m.axes.paths[0])
+        m.update({}, 0.01)  # rests in the middle, which was sent when it was made
+        self.assertEqual(m.values["axis:1"], 0.5)
+        m.update({"LSHIFT": 3.5}, 0.01)
+        m.update({"LCTRL": 3.5}, 0.01)
+        self.assertEqual(drain(fd), [(a.EV_ABS, 0x00, 4095), (a.EV_ABS, 0x00, 0)])
+        os.close(fd)
+
     def test_pedals_are_their_own_device(self):
         m = self.mapper("manual")
         fd = hold(m.pedals.path)
@@ -1537,7 +1547,8 @@ class Macros(unittest.TestCase):
 class Toggle(unittest.TestCase):
     def test_axis_rules(self):
         self.assertEqual((a.Mapping("A=axis:3").kind, a.Mapping("A=axis:3").target), ("axis", 3))
-        for bad in ("A=axis:0", "A=axis:65", "A=axis:x"):
+        self.assertEqual((a.Mapping("A=axis:3+").target, a.Mapping("A=axis:3+").sign, a.Mapping("A=axis:3-").sign), (3, 1, -1))
+        for bad in ("A=axis:0", "A=axis:65", "A=axis:x", "A=axis:3+-"):
             with self.assertRaises(ValueError):
                 a.Mapping(bad)
 

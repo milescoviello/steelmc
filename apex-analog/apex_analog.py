@@ -1164,13 +1164,16 @@ class Axes:
     LIMIT = 64
     MAX = 4095
 
-    def __init__(self, numbers):
+    def __init__(self, numbers, centred=()):
+        """centred: axes that two keys share, resting in the middle. One key moves it up from there, the other down."""
         self.devices = {}
         for bank in sorted({(n - 1) // len(self.CODES) for n in numbers}):
             self.devices[bank] = _Uinput(f"Apex Analog Axes {bank + 1}", (BUS_USB, 0x1209, 0x0010 + bank, 1), keys=[0x120],
                                          abses={code: (0, self.MAX) for code in self.CODES})
         self.paths = [d.path for d in self.devices.values()]
         self._sent = {}
+        self.rest = {n: (0.5 if n in centred else 0.0) for n in numbers}
+        self.set(dict(self.rest))
 
     def __enter__(self):
         return self
@@ -1182,7 +1185,7 @@ class Axes:
         changed = set()
         for number, value in values.items():
             level = int(max(0.0, min(1.0, value)) * self.MAX)
-            if self._sent.get(number, 0) != level:
+            if self._sent.get(number) != level:
                 self._sent[number] = level
                 bank, index = divmod(number - 1, len(self.CODES))
                 self.devices[bank].emit(EV_ABS, self.CODES[index], level)
@@ -1191,7 +1194,7 @@ class Axes:
             self.devices[bank].sync()
 
     def close(self):
-        self.set({number: 0.0 for number in self._sent})
+        self.set(dict(self.rest))
         for device in self.devices.values():
             device.close()
 
@@ -1429,8 +1432,10 @@ class Mapping:
             self.kind, self.target = "run", RUN_TARGETS[target]
         elif target in Pedals.AXES:
             self.kind, self.target = "pedal", target
-        elif target.startswith("axis:") and target[5:].isdigit() and 1 <= int(target[5:]) <= Axes.LIMIT:
-            self.kind, self.target = "axis", int(target[5:])
+        elif target.startswith("axis:") and target[5:].rstrip("+-").isdigit() and 1 <= int(target[5:].rstrip("+-")) <= Axes.LIMIT \
+                and len(target[5:]) - len(target[5:].rstrip("+-")) <= 1:
+            self.kind, self.target = "axis", int(target[5:].rstrip("+-"))
+            self.sign = {"+": 1, "-": -1}.get(target[-1], 0)  # 0: the whole axis. + or -: its top or bottom half
         elif target.startswith("mouse-") and target[6:] in Mouse.BUTTONS:
             self.kind, self.target = "mouse-button", target[6:]
         elif target.replace("-", "_") in Gamepad.BUTTONS or target.replace("-", "_") in Gamepad.DPAD:
@@ -1445,7 +1450,8 @@ class Mapping:
             raise ValueError(f"unknown output {target!r} in {text!r}. Sticks: lx- lx+ ly- ly+ rx- rx+ ry- ry+. Triggers: lt rt. "
                              f"Buttons: {' '.join(Gamepad.BUTTONS)} dpad-up dpad-down dpad-left dpad-right. "
                              "Add p2: for a second controller. Pedals: " + " ".join(Pedals.AXES) + ". "
-                             f"Any number of plain axes, eight to a device: axis:1 to axis:{Axes.LIMIT}. "
+                             f"Any number of plain axes, eight to a device: axis:1 to axis:{Axes.LIMIT}, or axis:1+ and axis:1- "
+                             "for two keys sharing one, resting in the middle. "
                              "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
                              "Keystroke: key:F13. Repeating keystroke: tap:RIGHT. Desktop: volume+ volume- brightness+ brightness-. "
                              "Command: run:your-command. Macro: macro:NAME")
@@ -1616,7 +1622,11 @@ class Mapper(_KeyHolder):
             self.pads[player] = Gamepad(f"Apex Analog Player {player} (Xbox 360 layout)")
         kinds = {m.kind for m in self.maps}
         self.pedals = Pedals() if "pedal" in kinds else None
-        self.axes = Axes({m.target for m in self.maps if m.kind == "axis"}) if "axis" in kinds else None
+        shared = {m.target for m in self.maps if m.kind == "axis" and m.sign}
+        whole = {m.target for m in self.maps if m.kind == "axis" and not m.sign}
+        if shared & whole:
+            raise ValueError(f"axis:{min(shared & whole)} is used whole and as halves. Use axis:N on its own, or axis:N+ and axis:N-.")
+        self.axes = Axes(shared | whole, centred=shared) if "axis" in kinds else None
         self.mouse = Mouse() if kinds & {"mouse-axis", "mouse-button"} else None
         self.key_outputs = {m.target for m in self.maps if m.kind in ("key", "tap")}
         self.macros, self.macro_thread = {}, None
@@ -1708,7 +1718,7 @@ class Mapper(_KeyHolder):
             self._check_toggle(depths)
         if self.paused:
             depths = {}
-        pad_values, pedal_values, axis_values, keys, moves, clicks = {}, {}, {}, {}, {}, {}
+        pad_values, pedal_values, axis_values, shared_values, keys, moves, clicks = {}, {}, {}, {}, {}, {}, {}
         if self.ss_taps and self._ss_tap(depths, dt):
             for m in self.ss_taps:
                 self._fire(m)
@@ -1726,6 +1736,8 @@ class Mapper(_KeyHolder):
                 slots[m.target] = m.digital.update(mm) or slots.get(m.target, False)
             elif m.kind == "pedal":
                 pedal_values[m.target] = max(pedal_values.get(m.target, 0.0), amount)
+            elif m.kind == "axis" and m.sign:
+                shared_values[m.target] = shared_values.get(m.target, 0.0) + m.sign * amount
             elif m.kind == "axis":
                 axis_values[m.target] = max(axis_values.get(m.target, 0.0), amount)
             elif m.kind == "mouse-axis":
@@ -1762,6 +1774,11 @@ class Mapper(_KeyHolder):
             self.pedals.set(**pedal_values)
             values.update(pedal_values)
         if self.axes:
+            for number in self.axes.rest:
+                if self.axes.rest[number] == 0.5:
+                    axis_values[number] = 0.5 + 0.5 * max(-1.0, min(1.0, shared_values.get(number, 0.0)))
+                else:
+                    axis_values.setdefault(number, 0.0)
             self.axes.set(axis_values)
             values.update({f"axis:{n}": v for n, v in axis_values.items()})
         self.values = values
@@ -4635,6 +4652,7 @@ def build_parser():
             "Rules look like KEY=OUTPUT, or KEY=OUTPUT@mm for on/off outputs. Sticks: lx- lx+ ly- ly+ rx- rx+ ry- ry+. Triggers: lt rt. "
             "Buttons: a b x y lb rb back start guide ls rs dpad-up dpad-down dpad-left dpad-right. Add p2: for a second controller. "
             "Pedals: clutch handbrake pedal3 pedal4 pedal5 pedal6. Plain axes, eight to a device: axis:1 to axis:64. "
+            "Two keys can share one, resting in the middle: J=axis:1+ K=axis:1-. "
             "Mouse: mouse-x- mouse-x+ mouse-y- mouse-y+ wheel- wheel+ hwheel- hwheel+ mouse-left mouse-right mouse-middle. "
             "Keystroke: key:F13. Repeating keystroke, faster the deeper you press: tap:RIGHT. "
             "Desktop: volume+ volume- brightness+ brightness-. Any command: run:your-command. A saved macro: macro:NAME. "

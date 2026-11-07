@@ -18,7 +18,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"  # never on screen, whatever the ses
 from PySide6.QtCore import QEvent, QEventLoop, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 import gui
 import aerox
@@ -392,52 +392,81 @@ class KeyboardPageTest(unittest.TestCase):
         self.page.feature_boxes["oled"].click()
         self.assertEqual(self.device.calls, [("stop", "oled")])
 
-    def picked(self, *names):
-        for name in names:
-            QTest.mouseClick(self.page.caps[name], Qt.LeftButton)
+    def window(self):
+        self.page.open_controller()
+        self.addCleanup(self.page.controller_window.close)
+        return self.page.controller_window
 
-    def test_keys_act_as_a_controller_from_the_actuation_tab(self):
-        self.picked("W")
-        self.page.pad_output.setCurrentIndex(self.page.pad_output.findData("ly-"))
-        self.page.pad_set.click()
+    def pick(self, w, *names):
+        for name in names:
+            QTest.mouseClick(w.caps[name], Qt.LeftButton)
+
+    def role(self, w, out):
+        return next(b for b in w.role_buttons if b.toolTip().startswith(f"The picked keys act as {gui.controller_label(out)}"))
+
+    def test_the_controller_has_its_own_window(self):
+        w = self.window()
+        self.assertTrue(w.isVisible())
+        self.assertTrue(w.caps["F1"].inert)  # no sensor, so no axis
+        self.assertTrue(w.caps["SS"].inert)  # the SteelSeries key stays itself
+        self.assertFalse(any(b.isEnabled() for b in w.role_buttons))
+        self.pick(w, "W")
+        self.role(w, "ly-").click()
         name, config, run = self.device.calls[-1]
         self.assertEqual((name, config["keys"], run), ("set_controller", {"W": "ly-"}, True))
-        self.assertEqual(config["deadzone"], 0.3)
+        self.assertEqual(w.selected(), [])  # picks clear after each change
+        self.assertEqual(w.caps["W"].detail, "LS\u2191")
+        self.assertEqual(w.table.rowCount(), 1)
+        w.table.cellWidget(0, 2).click()
+        self.assertEqual(self.device.calls[-1][1]["keys"], {})
 
-    def test_quick_setups_and_own_axes(self):
-        self.page.pad_layout.setCurrentIndex(self.page.pad_layout.findData("W A S D as the left stick"))
-        self.page.pad_layout.activated.emit(self.page.pad_layout.currentIndex())
+    def test_quick_setups_and_axes(self):
+        w = self.window()
+        quick = {b.text(): b for b in w.findChildren(QPushButton)}
+        quick["W A S D as the left stick"].click()
         self.assertEqual(self.device.calls[-1][1]["keys"], {"W": "ly-", "S": "ly+", "A": "lx-", "D": "lx+"})
-        self.page.pad_layout.setCurrentIndex(self.page.pad_layout.findData("Every key its own axis"))
-        self.page.pad_layout.activated.emit(self.page.pad_layout.currentIndex())
+        quick["Every key its own axis"].click()
         keys = self.device.calls[-1][1]["keys"]
         self.assertGreater(len(keys), 40)
-        self.assertEqual(sorted(int(v[5:]) for v in keys.values()), list(range(1, len(keys) + 1)))
-        self.assertNotIn("SS", keys)
-        self.picked("J", "K")
-        self.page.pad_output.setCurrentIndex(self.page.pad_output.findData(gui.OWN_AXIS))
-        self.page.pad_set.click()
-        keys = self.device.calls[-1][1]["keys"]
-        self.assertEqual(len(set(keys.values())), len(keys))  # no two keys share an axis
-        self.assertNotEqual(keys["J"], keys["K"])
+        self.assertEqual(sorted(gui.axis_of(v)[0] for v in keys.values()), list(range(1, len(keys) + 1)))
+        quick["Clear all"].click()
+        self.assertEqual(self.device.calls[-1][1]["keys"], {})
+        self.pick(w, "J", "K")
+        w.own_axis.click()
+        self.assertEqual(set(self.device.calls[-1][1]["keys"].values()), {"axis:1", "axis:2"})
 
-    def test_the_toggle_and_response_are_settings(self):
-        self.page.pad_toggle.setCurrentIndex(self.page.pad_toggle.findData("G"))
-        self.page.pad_deadzone.setValue(0.5)
-        self.page.pad_curve.setValue(1.5)
-        self.picked("W")
-        self.page.pad_output.setCurrentIndex(self.page.pad_output.findData("rt"))
-        self.page.pad_set.click()
+    def test_two_keys_share_one_axis(self):
+        w = self.window()
+        self.pick(w, "LSHIFT")
+        self.assertFalse(w.shared_axis.isEnabled())  # it takes exactly two
+        self.pick(w, "LCTRL")
+        w.shared_axis.click()
+        self.assertEqual(self.device.calls[-1][1]["keys"], {"LSHIFT": "axis:1+", "LCTRL": "axis:1-"})
+        self.assertEqual(w.caps["LSHIFT"].detail, "Ax1\u2191")
+
+    def test_settings_and_rules(self):
+        w = self.window()
+        w.toggle.setCurrentIndex(w.toggle.findData("G"))
+        w.deadzone.setValue(0.5)
+        w.curve.setValue(1.5)
+        w.type_too.setChecked(True)
+        w.rules.setPlainText("W=rt  # gas\nS=lt\nLSHIFT=axis:3+\nLCTRL=axis:3-")
+        w.apply_rules()
         config = self.device.calls[-1][1]
-        self.assertEqual((config["toggle"], config["deadzone"], config["curve"]), ("G", 0.5, 1.5))
+        self.assertEqual(config["keys"], {"W": "rt", "S": "lt", "LSHIFT": "axis:3+", "LCTRL": "axis:3-"})
+        self.assertEqual((config["toggle"], config["deadzone"], config["curve"], config["type_too"]), ("G", 0.5, 1.5, True))
         argv = gui.KeyboardDevice.controller_args(config)
-        self.assertEqual(argv[:2], ["map", "W=rt"])
-        self.assertIn("--toggle", argv)
+        self.assertIn("LSHIFT=axis:3+", argv)
+        self.assertIn("--no-swallow", argv)
         self.assertEqual(argv[argv.index("--toggle-colors") + 1], "00ff00,ff0000")
-        self.page.pad_toggle.setCurrentIndex(self.page.pad_toggle.findData("W"))
         calls = len(self.device.calls)
-        self.page.pad_apply.click()
-        self.assertEqual(len(self.device.calls), calls)  # W can't be the toggle and on the controller
+        for bad in ("W=ly-\nQQ=lt", "W=nonsense", "W=axis:2\nS=axis:2+"):
+            w.rules.setPlainText(bad)
+            w.apply_rules()
+        self.assertEqual(len(self.device.calls), calls)
+        w.toggle.setCurrentIndex(w.toggle.findData("W"))  # W is on the controller, so it can't be the toggle
+        w.submit(dict(config["keys"]), "")
+        self.assertEqual(len(self.device.calls), calls)
 
     def test_turn_off_buttons_follow_the_jobs(self):
         self.assertEqual(self.page.turn_off.count(), 2)

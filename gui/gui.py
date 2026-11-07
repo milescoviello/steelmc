@@ -24,7 +24,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPalett
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QRubberBand, QSizePolicy, QSlider,
-    QSpinBox, QDoubleSpinBox,
+    QSpinBox, QDoubleSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QPlainTextEdit,
     QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -237,30 +237,76 @@ CONTROLLER_LAYOUTS = {
     "W A S D for driving": {"W": "rt", "S": "lt", "A": "lx-", "D": "lx+"},
     "Every key its own axis": "every",
 }
-CONTROLLER_DEFAULTS = {"keys": {}, "toggle": None, "toggle_on": "00ff00", "toggle_off": "ff0000", "deadzone": 0.3, "full": 3.5, "curve": 1.0}
+CONTROLLER_DEFAULTS = {"keys": {}, "toggle": None, "toggle_on": "00ff00", "toggle_off": "ff0000", "deadzone": 0.3, "full": 3.5, "curve": 1.0,
+                       "type_too": False}
 TOGGLE_KEYS = [c for c in "ABCDEFGHJKLMNPRSUVWXYZ"] + ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]  # not SS+Q, I, O or T
 
 
+AXIS_RULE = re.compile(r"axis:(\d+)([+-]?)")
+
+
+def axis_of(out):
+    """(number, half) for a plain axis output: half is "" for the whole axis, + or - for one of two keys sharing it."""
+    match = AXIS_RULE.fullmatch(out) if isinstance(out, str) else None
+    return (int(match.group(1)), match.group(2)) if match else None
+
+
 def controller_short(out):
-    return f"Ax{out[5:]}" if out.startswith("axis:") else CONTROLLER_SHORT.get(out, out)
+    axis = axis_of(out)
+    if axis:
+        return f"Ax{axis[0]}" + {"+": "\u2191", "-": "\u2193", "": ""}[axis[1]]
+    return CONTROLLER_SHORT.get(out, out)
 
 
 def controller_label(out):
-    return f"Axis {out[5:]}" if out.startswith("axis:") else dict((o, l) for l, o, _ in CONTROLLER_OUTPUTS).get(out, out)
+    axis = axis_of(out)
+    if axis:
+        return f"Axis {axis[0]}" + {"+": ", top half", "-": ", bottom half", "": ""}[axis[1]]
+    return dict((o, l) for l, o, _ in CONTROLLER_OUTPUTS).get(out, out)
 
 
 def valid_controller_output(out):
-    return out in CONTROLLER_SHORT or (isinstance(out, str) and out.startswith("axis:") and out[5:].isdigit()
-                                       and 1 <= int(out[5:]) <= AXIS_LIMIT)
+    axis = axis_of(out)
+    return out in CONTROLLER_SHORT or bool(axis and 1 <= axis[0] <= AXIS_LIMIT)
 
 
 def next_axes(taken, count):
     """The lowest free axis numbers."""
-    used = {int(o[5:]) for o in taken if o.startswith("axis:")}
+    used = {axis_of(o)[0] for o in taken if axis_of(o)}
     free = [n for n in range(1, AXIS_LIMIT + 1) if n not in used]
     if len(free) < count:
         raise ValueError(f"Only {AXIS_LIMIT} axes: {len(free)} are free.")
     return [f"axis:{n}" for n in free[:count]]
+
+
+ARG_KEYS = {v: k for k, v in KEY_ARGS.items()}
+
+
+def controller_rules(mapping):
+    """The setup as apex-analog map rules, one per line."""
+    return "\n".join(f"{KEY_ARGS.get(k, k)}={out}" for k, out in sorted(mapping.items()))
+
+
+def parse_controller_rules(text, keys):
+    """KEY=OUTPUT lines back into a setup. Raises ValueError naming the first line that's wrong."""
+    mapping = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        name, sep, out = line[1:].partition("=")
+        name, out = (line[0] + name).strip(), out.strip()
+        key = ARG_KEYS.get(name.upper(), ARG_KEYS.get(name, name.upper()))
+        if not sep or key not in keys:
+            raise ValueError(f"Line {number}: {line!r} should be KEY=OUTPUT, with a key that has a sensor.")
+        if not valid_controller_output(out):
+            raise ValueError(f"Line {number}: {out!r} isn't a controller output. Use ly-, rt, a, dpad-up, axis:3, axis:3+ ...")
+        mapping[key] = out
+    shared = {axis_of(o)[0] for o in mapping.values() if axis_of(o) and axis_of(o)[1]}
+    whole = {axis_of(o)[0] for o in mapping.values() if axis_of(o) and not axis_of(o)[1]}
+    if shared & whole:
+        raise ValueError(f"Axis {min(shared & whole)} is used whole and as halves. Use axis:N on its own, or axis:N+ and axis:N-.")
+    return mapping
 
 
 def pretty_action(action):
@@ -518,6 +564,8 @@ class KeyboardDevice:
                 "--deadzone", f"{config['deadzone']:g}", "--full", f"{config['full']:g}", "--curve", f"{config['curve']:g}"]
         if config.get("toggle"):
             argv += ["--toggle", config["toggle"], "--toggle-colors", f"{config['toggle_on']},{config['toggle_off']}"]
+        if config.get("type_too"):
+            argv.append("--no-swallow")
         return argv
 
     def set_controller(self, config, run=True):
@@ -1668,7 +1716,7 @@ class KeyboardPage(QWidget):
         """Actuation or bindings: the same keys, picked on the plate, with a different panel under them."""
         self.mode_buttons = {}
         group = QButtonGroup(self)
-        for mode, label in (("actuation", "Actuation"), ("bindings", "Bindings"), ("controller", "Controller")):
+        for mode, label in (("actuation", "Actuation"), ("bindings", "Bindings")):
             button = QPushButton(label)
             button.setObjectName("segment")
             button.setCheckable(True)
@@ -1682,13 +1730,16 @@ class KeyboardPage(QWidget):
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.build_actuation())
         self.mode_stack.addWidget(self.build_bindings())
-        self.mode_stack.addWidget(self.build_controller())
         self.selection_changed()
+        self.controller_button = QPushButton("Controller\u2026")
+        self.controller_button.setToolTip("Keys as a game controller, axes and buttons, in a window of its own")
+        self.controller_button.clicked.connect(self.open_controller)
+        self.controller_window = None
         box = QWidget()
         layout = QVBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        layout.addLayout(row(self.mode_buttons["actuation"], self.mode_buttons["bindings"], self.mode_buttons["controller"], None))
+        layout.addLayout(row(self.mode_buttons["actuation"], self.mode_buttons["bindings"], None, self.controller_button))
         layout.addWidget(self.mode_stack, 1)
         return box
 
@@ -1777,65 +1828,6 @@ class KeyboardPage(QWidget):
                      row(self.set_depth, None), row(self.rapid_on, self.rapid_off, None),
                      fill_hint,
                      row(check, typing, None), self.report)
-        panel.layout().addStretch(1)
-        return panel
-
-    def build_controller(self):
-        """Keys as a virtual controller: pick them on the plate, say what each does, and run it."""
-        self.pad_selection = QLabel("Pick keys for the controller")
-        self.pad_selection.setObjectName("title")
-        self.pad_output = QComboBox()
-        self.pad_output.addItem("Its own axis (one each)", OWN_AXIS)
-        for label, out, _ in CONTROLLER_OUTPUTS:
-            self.pad_output.addItem(label, out)
-        self.pad_set = QPushButton("Use picked keys")
-        self.pad_set.setToolTip("The picked keys act as this on a virtual controller, by how far they're pressed")
-        self.pad_set.clicked.connect(self.apply_controller_key)
-        self.pad_clear = QPushButton("Picked keys type again")
-        self.pad_clear.clicked.connect(self.clear_controller_keys)
-        self.pad_layout = QComboBox()
-        self.pad_layout.addItem("Quick setup", None)
-        for name in CONTROLLER_LAYOUTS:
-            self.pad_layout.addItem(name, name)
-        self.pad_layout.activated.connect(self.controller_layout_picked)
-        self.pad_run = QPushButton("Start controller")
-        self.pad_run.clicked.connect(self.toggle_controller)
-        self.pad_note = muted("")
-        self.pad_note.setWordWrap(True)
-        self.pad_toggle = QComboBox()
-        self.pad_toggle.addItem("no toggle", None)
-        for key in TOGGLE_KEYS:
-            self.pad_toggle.addItem(f"SteelSeries + {key}", key)
-        self.pad_on_color, self.pad_off_color = Swatch("00ff00"), Swatch("ff0000")
-        self.pad_on_color.setToolTip("While SteelSeries is held, the toggle key glows this colour when the controller is on")
-        self.pad_off_color.setToolTip("...and this colour when it's off")
-        self.pad_deadzone, self.pad_full, self.pad_curve = QDoubleSpinBox(), QDoubleSpinBox(), QDoubleSpinBox()
-        for spin, low, high, step, suffix in ((self.pad_deadzone, 0.0, 3.9, 0.1, " mm"), (self.pad_full, 0.2, 4.0, 0.1, " mm"),
-                                              (self.pad_curve, 0.2, 4.0, 0.1, "")):
-            spin.setRange(low, high)
-            spin.setSingleStep(step)
-            spin.setDecimals(1)
-            spin.setSuffix(suffix)
-        self.pad_deadzone.setToolTip("An axis stays at 0 until the key is this deep")
-        self.pad_full.setToolTip("An axis is all the way at this depth")
-        self.pad_curve.setToolTip("Above 1 gives finer control near the top of the press")
-        self.pad_apply = QPushButton("Use these settings")
-        self.pad_apply.clicked.connect(self.apply_controller_settings)
-        for widget in (self.pad_output, self.pad_layout, self.pad_toggle):
-            widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-            widget.setMinimumContentsLength(12)
-        settings = QLabel("Settings")
-        settings.setObjectName("title")
-        pick = []
-        for label, names in (("All", None), ("None", [])):
-            button = QPushButton(label)
-            button.clicked.connect(lambda checked=False, n=names: self.pick(n))
-            pick.append(button)
-        panel = well(self.pad_selection, row(*pick, None), self.pad_layout, self.pad_output, row(self.pad_set, self.pad_clear, None), self.pad_note,
-                     row(self.pad_run, None),
-                     settings, row(muted("Toggle"), self.pad_toggle, self.pad_on_color, self.pad_off_color, None),
-                     row(muted("Axes from"), self.pad_deadzone, muted("to"), self.pad_full, None),
-                     row(muted("Curve"), self.pad_curve, None, self.pad_apply))
         panel.layout().addStretch(1)
         return panel
 
@@ -1931,7 +1923,8 @@ class KeyboardPage(QWidget):
         self.shortcuts = data.get("shortcuts", {})
         self.controller_config = data.get("controller") or dict(CONTROLLER_DEFAULTS, keys={})
         self.controller = self.controller_config["keys"]
-        self.show_controller_settings()
+        if self.controller_window:
+            self.controller_window.loaded(self.controller_config, self.controller_on, self.settings)
         self.controller_on = any(j["on"] and j["name"] == "input" and j["command"] == "map" for j in data["jobs"])
         self.bindings = data.get("bindings")
         if self.bindings and self.bindings_original is None:
@@ -1978,11 +1971,6 @@ class KeyboardPage(QWidget):
                 rapid = key["mode"] != 0
                 cap.fires_at = key["press"]
                 shortcut = self.shortcuts.get(name)
-                pad = self.controller.get(name) if self.mode == "controller" else None
-                if pad:
-                    cap.set_detail(controller_short(pad), fill=key["press"] / TRAVEL_MM, marked=True)
-                    cap.setToolTip(f"Controller: {controller_label(pad)}" + ("" if self.controller_on else " (not running)"))
-                    continue
                 cap.set_detail(f"{mm:.1f}" + (" R" if rapid else ""), fill=key["press"] / TRAVEL_MM, marked=rapid or bool(shortcut))
                 cap.setToolTip(f"Fires at {mm:.1f} mm" + (", rapid tap on" if rapid else "") + (f". With the SteelSeries key: {shortcut}" if shortcut else ""))
             else:
@@ -2019,7 +2007,7 @@ class KeyboardPage(QWidget):
             mode = "actuation"
         self.mode = mode
         self.mode_buttons[mode].setChecked(True)
-        self.mode_stack.setCurrentIndex({"actuation": 0, "bindings": 1, "controller": 2}[mode])
+        self.mode_stack.setCurrentIndex(0 if mode == "actuation" else 1)
         for cap in self.caps.values():
             cap.setChecked(False)
         self.bind_control = None
@@ -2162,12 +2150,8 @@ class KeyboardPage(QWidget):
         else:
             text = f"{len(chosen)} keys picked"
         self.selection_label.setText(text)
-        if hasattr(self, "pad_selection"):
-            self.pad_selection.setText(text.replace("Pick keys to change", "Pick keys for the controller"))
-        for button in (self.set_depth, self.rapid_on, self.rapid_off, self.pad_set):
+        for button in (self.set_depth, self.rapid_on, self.rapid_off):
             button.setEnabled(bool(chosen))
-        self.pad_clear.setEnabled(any(n in self.controller for n in chosen))
-        self.show_controller()
         if len(chosen) == 1 and chosen[0] in self.settings:
             self.depth.setValue(DEPTHS.index(self.key_depth(self.settings[chosen[0]])))
         self.show_set_label()
@@ -2390,95 +2374,13 @@ class KeyboardPage(QWidget):
         color = self.effect_color.color if default and self.effect_color.color != default else None
         self.apply(lambda: self.device.lights(args, color), f"Lighting set: {self.effect.currentText().lower()}.")
 
-    def show_controller(self):
-        if not hasattr(self, "pad_run"):
-            return
-        self.pad_run.setText("Stop controller" if self.controller_on else "Start controller")
-        self.pad_run.setEnabled(bool(self.controller) or self.controller_on)
-        if not self.controller:
-            self.pad_note.setText("Pick keys and choose what they do, or use a quick setup. Sticks and triggers follow how far a key "
-                                  "is pressed. While the controller runs, its keys stop typing.")
-        else:
-            keys = " ".join(f"{KEY_LABELS.get(k, k)}={controller_short(v)}" for k, v in sorted(self.controller.items()))
-            toggle = self.controller_config.get("toggle")
-            self.pad_note.setText(("Running: " if self.controller_on else "Not running: ") + keys
-                                  + (f". SteelSeries + {toggle} turns it off and on." if toggle else ""))
-
-    def show_controller_settings(self):
-        config = self.controller_config
-        self.pad_toggle.setCurrentIndex(max(0, self.pad_toggle.findData(config.get("toggle"))))
-        self.pad_on_color.set_color(config["toggle_on"])
-        self.pad_off_color.set_color(config["toggle_off"])
-        self.pad_deadzone.setValue(config["deadzone"])
-        self.pad_full.setValue(config["full"])
-        self.pad_curve.setValue(config["curve"])
-
-    def controller_settings(self):
-        return {"toggle": self.pad_toggle.currentData(), "toggle_on": self.pad_on_color.color, "toggle_off": self.pad_off_color.color,
-                "deadzone": round(self.pad_deadzone.value(), 1), "full": round(self.pad_full.value(), 1), "curve": round(self.pad_curve.value(), 1)}
-
-    def change_controller(self, mapping, done):
-        if mapping and self.pad_full.value() <= self.pad_deadzone.value():
-            self.status.say("Full has to be deeper than where axes start.", "bad")
-            return
-        toggle = self.pad_toggle.currentData()
-        if toggle and mapping.get(toggle):
-            self.status.say(f"{toggle} is the toggle key, so it can't be on the controller too. Pick another toggle.", "bad")
-            return
-        config = {**self.controller_config, **self.controller_settings(), "keys": mapping}
-
-        def after(_):
-            self.status.say(done)
-            self.refresh()
-        run = bool(mapping)
-        self.runner.submit(lambda: self.device.set_controller(config, run), after, lambda e: self.status.say(str(e), "bad"))
-
-    def apply_controller_settings(self):
-        self.change_controller(dict(self.controller), "Controller settings saved." + (" It's running with them." if self.controller else ""))
-
-    def apply_controller_key(self):
-        names = self.selected_keys()
-        out = self.pad_output.currentData()
-        if not names or not out:
-            return
-        names = [n for n in names if n != "SS"]
-        try:
-            outs = next_axes([v for k, v in self.controller.items() if k not in names], len(names)) if out == OWN_AXIS else [out] * len(names)
-        except ValueError as e:
-            self.status.say(str(e), "bad")
-            return
-        mapping = {**self.controller, **dict(zip(names, outs))}
-        label = "their own axes" if out == OWN_AXIS and len(names) > 1 else controller_label(outs[0]) if outs else ""
-        self.change_controller(mapping, f"{self.target_label(names)} now {'act' if len(names) > 1 else 'acts'} as {label}. "
-                                        f"The controller is running, and those keys don't type while it does.")
-
-    def clear_controller_keys(self):
-        names = [n for n in self.selected_keys() if n in self.controller]
-        mapping = {k: v for k, v in self.controller.items() if k not in names}
-        self.change_controller(mapping, f"{self.target_label(names)} type again." + ("" if mapping else " The controller is off."))
-
-    def controller_layout_picked(self, *_):
-        name = self.pad_layout.currentData()
-        self.pad_layout.setCurrentIndex(0)
-        if not name:
-            return
-        layout = CONTROLLER_LAYOUTS[name]
-        if layout == "every":
-            toggle = self.pad_toggle.currentData()
-            keys = [k for k in self.caps if k in self.settings and k not in ("SS", toggle)]
-            mapping = dict(zip(keys, next_axes([], len(keys))))
-            self.change_controller(mapping, f"Every key is its own axis: {len(keys)} axes, eight to a virtual device. Nothing types while "
-                                            "it runs" + (f", so SteelSeries + {toggle} turns it off." if toggle else ". Pause turns it off."))
-            return
-        mapping = {**{k: v for k, v in self.controller.items() if k not in layout}, **layout}
-        self.change_controller(mapping, f"{name}. The controller is running, and those keys don't type while it does.")
-
-    def toggle_controller(self):
-        if self.controller_on:
-            self.runner.submit(lambda: self.device.stop("map"), lambda _: (self.status.say("Controller off: the keys type again."), self.refresh()),
-                               self.failed)
-        elif self.controller:
-            self.change_controller(dict(self.controller), "Controller on.")
+    def open_controller(self):
+        if self.controller_window is None:
+            self.controller_window = ControllerWindow(self.device, self.runner, self.refresh, self)
+        self.controller_window.loaded(self.controller_config, self.controller_on, self.settings)
+        self.controller_window.show()
+        self.controller_window.raise_()
+        self.controller_window.activateWindow()
 
     def toggle_feature(self, name, on):
         call = (lambda: self.device.start(name)) if on else (lambda: self.device.stop(name))
@@ -2515,6 +2417,315 @@ class KeyboardPage(QWidget):
 SIDETONE_LEVELS = [("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")]
 EQ_PRESET_LABELS = [("Flat", 0), ("Bass boost", 1), ("Reference", 2), ("Smiley", 3), ("Custom", 4)]
 SLEEP_MINUTES = [0, 5, 10, 15, 30, 60, 90]
+
+
+class ControllerWindow(QWidget):
+    """Keys as a game controller, in a window of its own. Pick keys on the keyboard, click what they should be, and it runs.
+    The setup is kept on this computer. The rules box holds the same setup as apex-analog map rules, for typing it directly."""
+
+    UNIT = 46
+    ROLE_GROUPS = [
+        ("Left stick", [("\u2191", "ly-"), ("\u2193", "ly+"), ("\u2190", "lx-"), ("\u2192", "lx+")]),
+        ("Right stick", [("\u2191", "ry-"), ("\u2193", "ry+"), ("\u2190", "rx-"), ("\u2192", "rx+")]),
+        ("Triggers", [("LT", "lt"), ("RT", "rt")]),
+        ("Bumpers", [("LB", "lb"), ("RB", "rb")]),
+        ("Buttons", [("A", "a"), ("B", "b"), ("X", "x"), ("Y", "y")]),
+        ("Stick clicks", [("L3", "ls"), ("R3", "rs")]),
+        ("D-pad", [("\u2191", "dpad-up"), ("\u2193", "dpad-down"), ("\u2190", "dpad-left"), ("\u2192", "dpad-right")]),
+        ("Menu", [("Back", "back"), ("Start", "start"), ("Guide", "guide")]),
+    ]
+
+    def __init__(self, device, runner, changed, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("Controller")
+        self.setObjectName("page")
+        self.device, self.runner, self.changed = device, runner, changed
+        self.config = dict(CONTROLLER_DEFAULTS, keys={})
+        self.running = False
+        self.sensor_keys = set()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(10)
+
+        title = QLabel("Controller")
+        title.setObjectName("title")
+        self.state = muted("")
+        self.run_button = QPushButton("Start")
+        self.run_button.setObjectName("primary")
+        self.run_button.clicked.connect(self.toggle_running)
+        root.addLayout(row(title, self.state, None, self.run_button))
+
+        self.plate = KeyPlate(self.UNIT)
+        self.plate.picked.connect(self.selection_changed)
+        self.plate.screen.hide()  # the screen and the wheel aren't part of the controller
+        self.caps = self.plate.caps
+        root.addWidget(self.plate, 0, Qt.AlignHCenter)
+
+        # what the picked keys do
+        self.picked_label = QLabel("Pick keys on the keyboard")
+        self.picked_label.setObjectName("title")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
+        self.role_buttons = []
+        for r, (label, items) in enumerate(self.ROLE_GROUPS):
+            grid.addWidget(muted(label), r, 0)
+            for c, (text, out) in enumerate(items):
+                button = QPushButton(text)
+                button.setToolTip(f"The picked keys act as {controller_label(out)}" + (", by how far they're pressed"
+                                                                                       if out[:2] in ("lx", "ly", "rx", "ry", "lt", "rt") else ""))
+                button.setMinimumWidth(max(52, button.fontMetrics().horizontalAdvance(text) + 24))
+                button.clicked.connect(lambda checked=False, o=out: self.assign(o))
+                grid.addWidget(button, r, 1 + c)
+                self.role_buttons.append(button)
+        self.own_axis = QPushButton("An axis each")
+        self.own_axis.setToolTip("Each picked key gets an axis of its own: 0 at rest, full at the bottom. Eight axes to a virtual device.")
+        self.own_axis.clicked.connect(self.assign_own_axes)
+        self.shared_axis = QPushButton("Two keys, one axis")
+        self.shared_axis.setToolTip("Pick two keys. The axis rests in the middle: the upper key on the keyboard moves it up, "
+                                    "the other one down, each by how far it's pressed.")
+        self.shared_axis.clicked.connect(self.assign_shared_axis)
+        self.type_again = QPushButton("Type normally")
+        self.type_again.setToolTip("The picked keys leave the controller and type again")
+        self.type_again.clicked.connect(self.unassign)
+        roles = well(self.picked_label, grid, muted("Axes"), row(self.own_axis, self.shared_axis, None), row(self.type_again, None))
+        roles.layout().addStretch(1)
+
+        # what's set now
+        quick = QGridLayout()
+        quick.setSpacing(6)
+        for i, name in enumerate([*CONTROLLER_LAYOUTS, "Clear all"]):
+            button = QPushButton(name)
+            button.clicked.connect(lambda checked=False, n=name: self.quick_setup(n))
+            quick.addWidget(button, i // 2, i % 2)
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["Key", "Does", ""])
+        self.table.verticalHeader().hide()
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setMinimumHeight(200)
+        self.table.itemSelectionChanged.connect(self.table_picked)
+        current = well(muted("Quick setups"), quick, muted("Set now"), self.table, title="Setup")
+
+        # how it responds, and the rules
+        self.toggle = QComboBox()
+        self.toggle.addItem("No toggle", None)
+        for key in TOGGLE_KEYS:
+            self.toggle.addItem(f"SteelSeries + {key}", key)
+        self.toggle.setToolTip("Hold the SteelSeries key and press this to turn the controller off, so the keys type, and on again")
+        self.on_color, self.off_color = Swatch("00ff00"), Swatch("ff0000")
+        self.on_color.setToolTip("While SteelSeries is held, the toggle key glows this colour when the controller is on")
+        self.off_color.setToolTip("...and this colour when it's off")
+        self.deadzone, self.full, self.curve = QDoubleSpinBox(), QDoubleSpinBox(), QDoubleSpinBox()
+        for spin, low, high, suffix in ((self.deadzone, 0.0, 3.9, " mm"), (self.full, 0.2, 4.0, " mm"), (self.curve, 0.2, 4.0, "")):
+            spin.setRange(low, high)
+            spin.setSingleStep(0.1)
+            spin.setDecimals(1)
+            spin.setSuffix(suffix)
+        self.deadzone.setToolTip("Sticks, triggers and axes stay at rest until a key is this deep")
+        self.full.setToolTip("...and are all the way at this depth")
+        self.curve.setToolTip("1 is straight. Above 1 gives finer control near the top of the press")
+        self.type_too = QCheckBox("Controller keys keep typing too")
+        self.type_too.setToolTip("Normally keys on the controller stop typing while it runs")
+        apply_settings = QPushButton("Use these settings")
+        apply_settings.clicked.connect(lambda: self.submit(dict(self.config["keys"]), "Settings saved."))
+        self.rules = QPlainTextEdit()
+        self.rules.setPlaceholderText("W=ly-\nS=ly+\nLSHIFT=axis:1+\nLCTRL=axis:1-")
+        self.rules.setToolTip("One KEY=OUTPUT per line, as apex-analog map takes them. Outputs: lx- lx+ ly- ly+ rx- rx+ ry- ry+, "
+                              "lt rt, a b x y lb rb ls rs back start guide, dpad-up dpad-down dpad-left dpad-right, axis:1 to axis:64, "
+                              "and axis:N+ with axis:N- for two keys sharing one. # starts a comment.")
+        self.rules.setMinimumHeight(120)
+        apply_rules = QPushButton("Use these rules")
+        apply_rules.clicked.connect(self.apply_rules)
+        settings = well(row(muted("Toggle"), self.toggle, None), row(muted("Glows"), self.on_color, muted("on"), self.off_color, muted("off"), None),
+                        row(muted("Axes move from"), self.deadzone, muted("to"), self.full, None), row(muted("Curve"), self.curve, None),
+                        self.type_too, row(None, apply_settings),
+                        muted("Rules, for typing it all at once"), self.rules, row(None, apply_rules), title="Settings")
+
+        columns = QHBoxLayout()
+        columns.setSpacing(10)
+        columns.addWidget(roles, 3)
+        columns.addWidget(current, 3)
+        columns.addWidget(settings, 3)
+        root.addLayout(columns, 1)
+        self.status = StatusLine()
+        root.addWidget(self.status)
+        self.selection_changed()
+
+    # ---- showing ----
+    def loaded(self, config, running, sensor_keys):
+        self.config, self.running = dict(config), running
+        self.sensor_keys = {k for k in sensor_keys if k != "SS"}
+        for name, cap in self.caps.items():
+            live = name in self.sensor_keys
+            cap.inert = not live
+            cap.setEnabled(live)
+            if not live:
+                cap.setChecked(False)
+        self.show_caps()
+        self.show_table()
+        self.toggle.setCurrentIndex(max(0, self.toggle.findData(config.get("toggle"))))
+        self.on_color.set_color(config["toggle_on"])
+        self.off_color.set_color(config["toggle_off"])
+        self.deadzone.setValue(config["deadzone"])
+        self.full.setValue(config["full"])
+        self.curve.setValue(config["curve"])
+        self.type_too.setChecked(bool(config.get("type_too")))
+        self.rules.setPlainText(controller_rules(config["keys"]))
+        keys = config["keys"]
+        self.state.setText("Running." + (f" SteelSeries + {config['toggle']} turns it off and on." if config.get("toggle") else
+                                         " Pause turns it off and on.") if running else ("Not running." if keys else "Nothing set up yet."))
+        self.run_button.setText("Stop" if running else "Start")
+        self.run_button.setEnabled(running or bool(keys))
+        self.selection_changed()
+
+    def show_caps(self):
+        keys = self.config["keys"]
+        for name, cap in self.caps.items():
+            out = keys.get(name)
+            cap.set_detail(controller_short(out) if out else "", fill=None, marked=bool(out))
+            cap.setToolTip(controller_label(out) if out else "")
+
+    def show_table(self):
+        keys = self.config["keys"]
+        self.table.blockSignals(True)
+        self.table.setRowCount(len(keys))
+        for r, (key, out) in enumerate(sorted(keys.items(), key=lambda kv: (axis_of(kv[1]) or (0, ""), kv[0]))):
+            name = QTableWidgetItem(KEY_LABELS.get(key, key))
+            name.setData(Qt.UserRole, key)
+            self.table.setItem(r, 0, name)
+            self.table.setItem(r, 1, QTableWidgetItem(controller_label(out)))
+            remove = QPushButton("Remove")
+            remove.clicked.connect(lambda checked=False, k=key: self.remove(k))
+            self.table.setCellWidget(r, 2, remove)
+        self.table.resizeColumnToContents(0)
+        self.table.resizeColumnToContents(2)
+        self.table.blockSignals(False)
+
+    def selected(self):
+        return [n for n, cap in self.caps.items() if cap.isChecked()]
+
+    def selection_changed(self, *_):
+        chosen = self.selected()
+        if not chosen:
+            text = "Pick keys on the keyboard"
+        elif len(chosen) <= 6:
+            text = "Picked " + " ".join(KEY_LABELS.get(n, n) for n in chosen)
+        else:
+            text = f"{len(chosen)} keys picked"
+        self.picked_label.setText(text)
+        for button in (*self.role_buttons, self.own_axis):
+            button.setEnabled(bool(chosen))
+        self.shared_axis.setEnabled(len(chosen) == 2)
+        self.type_again.setEnabled(any(n in self.config["keys"] for n in chosen))
+
+    def table_picked(self):
+        wanted = {self.table.item(i.row(), 0).data(Qt.UserRole) for i in self.table.selectedIndexes()}
+        for name, cap in self.caps.items():
+            if not cap.inert:
+                cap.setChecked(name in wanted)
+        self.selection_changed()
+
+    def clear_picks(self):
+        for cap in self.caps.values():
+            cap.setChecked(False)
+        self.selection_changed()
+
+    # ---- changing ----
+    def settings(self):
+        return {"toggle": self.toggle.currentData(), "toggle_on": self.on_color.color, "toggle_off": self.off_color.color,
+                "deadzone": round(self.deadzone.value(), 1), "full": round(self.full.value(), 1), "curve": round(self.curve.value(), 1),
+                "type_too": self.type_too.isChecked()}
+
+    def submit(self, mapping, message, run=True):
+        settings = self.settings()
+        if mapping and settings["full"] <= settings["deadzone"]:
+            self.status.say("Axes have to move to a point deeper than where they start.", "bad")
+            return False
+        if settings["toggle"] and settings["toggle"] in mapping:
+            self.status.say(f"{settings['toggle']} is the toggle key, so it can't be on the controller too. Pick another toggle.", "bad")
+            return False
+        config = {**self.config, **settings, "keys": mapping}
+
+        def done(_):
+            self.status.say(message)
+            self.changed()
+        self.runner.submit(lambda: self.device.set_controller(config, run and bool(mapping)), done, lambda e: self.status.say(str(e), "bad"))
+        return True
+
+    def assign(self, out):
+        names = self.selected()
+        if not names:
+            return
+        if self.submit({**self.config["keys"], **{n: out for n in names}},
+                       f"{' '.join(KEY_LABELS.get(n, n) for n in names[:6])}: {controller_label(out)}."):
+            self.clear_picks()
+
+    def assign_own_axes(self):
+        names = self.selected()
+        try:
+            outs = next_axes([o for k, o in self.config["keys"].items() if k not in names], len(names))
+        except ValueError as e:
+            self.status.say(str(e), "bad")
+            return
+        if self.submit({**self.config["keys"], **dict(zip(names, outs))}, f"{len(names)} key{'s' if len(names) != 1 else ''}, an axis each."):
+            self.clear_picks()
+
+    def assign_shared_axis(self):
+        names = self.selected()
+        if len(names) != 2:
+            return
+        try:
+            number = axis_of(next_axes([o for k, o in self.config["keys"].items() if k not in names], 1)[0])[0]
+        except ValueError as e:
+            self.status.say(str(e), "bad")
+            return
+        top, bottom = names  # the keyboard's order: the upper key, or the left one on the same row, comes first
+        mapping = {**self.config["keys"], top: f"axis:{number}+", bottom: f"axis:{number}-"}
+        if self.submit(mapping, f"Axis {number}: {KEY_LABELS.get(top, top)} moves it up, {KEY_LABELS.get(bottom, bottom)} down, "
+                                f"and it rests in the middle."):
+            self.clear_picks()
+
+    def unassign(self):
+        names = [n for n in self.selected() if n in self.config["keys"]]
+        mapping = {k: v for k, v in self.config["keys"].items() if k not in names}
+        if self.submit(mapping, f"{' '.join(KEY_LABELS.get(n, n) for n in names[:6])} type again."):
+            self.clear_picks()
+
+    def remove(self, key):
+        self.submit({k: v for k, v in self.config["keys"].items() if k != key}, f"{KEY_LABELS.get(key, key)} types again.")
+
+    def quick_setup(self, name):
+        if name == "Clear all":
+            self.submit({}, "Cleared: every key types again.")
+            return
+        layout = CONTROLLER_LAYOUTS[name]
+        if layout == "every":
+            toggle = self.toggle.currentData()
+            keys = [k for k in self.caps if k in self.sensor_keys and k != toggle]
+            self.submit(dict(zip(keys, next_axes([], len(keys)))),
+                        f"Every key is its own axis: {len(keys)} of them, eight to a virtual device. Nothing types while it runs"
+                        + (f": SteelSeries + {toggle} turns it off." if toggle else ". Pause turns it off, or set a toggle."))
+            return
+        self.submit({**{k: v for k, v in self.config["keys"].items() if k not in layout}, **layout}, f"{name}.")
+
+    def apply_rules(self):
+        try:
+            mapping = parse_controller_rules(self.rules.toPlainText(), self.sensor_keys)
+        except ValueError as e:
+            self.status.say(str(e), "bad")
+            return
+        self.submit(mapping, f"Using {len(mapping)} rule{'s' if len(mapping) != 1 else ''}.")
+
+    def toggle_running(self):
+        if self.running:
+            def done(_):
+                self.status.say("Controller off: the keys type again.")
+                self.changed()
+            self.runner.submit(lambda: self.device.stop("map"), done, lambda e: self.status.say(str(e), "bad"))
+        elif self.config["keys"]:
+            self.submit(dict(self.config["keys"]), "Controller on.")
 
 
 class HeadsetPage(QWidget):
