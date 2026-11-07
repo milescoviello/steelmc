@@ -28,6 +28,7 @@ class SimulatedTransmitter:
         self.sock = sock
         self.frames = []
         self.noisy = False
+        self.drop = 0  # replies to leave unsent, as a busy transmitter sometimes does
         self.settings = {"sidetone": -18, "mic": 0, "surround": 0, "preset": 0, "bands": [0] * 10, "sleep": 180}
         self.connected = True
         self.saved = 0
@@ -37,6 +38,9 @@ class SimulatedTransmitter:
         self.sock.send(bytes([0, 1, 0, 0x0F, 0x6E, 1, 0, 64, 64]).ljust(64, b"\0"))
 
     def reply(self, data):
+        if self.drop:
+            self.drop -= 1
+            return
         if self.noisy:
             self.push()
         self.sock.send(bytes(data).ljust(64, b"\0"))
@@ -160,6 +164,14 @@ class Reading(Harness):
         self.assertEqual(self.arctis.eq_preset(), 0)
         self.assertEqual(self.arctis.sleep_seconds(), 180)
         self.assertEqual(self.arctis.status()["chat"], 70)
+
+    def test_a_lost_reply_is_asked_again(self):
+        self.sim.drop = 2
+        self.assertEqual(self.arctis.sidetone(), -18)
+        self.assertEqual([f[1] for f in self.sim.frames], [0x16, 0x16, 0x16])
+        self.sim.drop = 3
+        with self.assertRaisesRegex(arctis.ArctisError, "No reply"):
+            self.arctis.sidetone()
 
     def test_only_reads_on_status(self):
         code, said = self.cli()

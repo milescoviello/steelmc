@@ -32,7 +32,8 @@ FIRMWARE_BCD = "0101"  # bcdDevice of transmitter firmware 1.1, the only version
 DESCRIPTOR = bytes.fromhex("06c0ff0901a10106c1ff150026ff00750809f09540810209f19540910209f2960202b102c0")
 SYSFS = "/sys/class/hidraw"
 COMMAND_GAP = 0.02  # between commands, as the vendor's own software leaves
-REPLY_TIMEOUT = 1.0
+REPLY_TIMEOUT = 0.35  # replies come within a few ms
+READ_TRIES = 3
 
 # Every command this can send. Each handler was read in the transmitter's firmware: the reads copy memory into the reply,
 # and the writes store a setting in memory and pass it on to the headset. Only SAVE reaches flash.
@@ -220,19 +221,23 @@ class Arctis:
         os.write(self.fd, frame)
 
     def read(self, cmd):
-        """Send a read and return the first reply that has its shape."""
+        """Send a read and return the first reply that has its shape. A reply can go missing while the transmitter is busy
+        with one of its own reports, and a read changes nothing, so it's asked again."""
         if cmd not in READS:
             raise Refused(f"command {cmd:#04x} is not a read")
-        self._send(cmd)
-        end = time.monotonic() + REPLY_TIMEOUT
         try:
-            while True:
-                left = end - time.monotonic()
-                if left <= 0 or not select.select([self.fd], [], [], left)[0]:
-                    raise ArctisError(f"No reply to {cmd:#04x}. Replug the transmitter and retry.")
-                reply = os.read(self.fd, 64)
-                if len(reply) >= 64 and VALID[cmd](reply):
-                    return reply
+            for _ in range(READ_TRIES):
+                self._send(cmd)
+                end = time.monotonic() + REPLY_TIMEOUT
+                while True:
+                    left = end - time.monotonic()
+                    if left <= 0 or not select.select([self.fd], [], [], left)[0]:
+                        break
+                    reply = os.read(self.fd, 64)
+                    if len(reply) >= 64 and VALID[cmd](reply):
+                        return reply
+                time.sleep(COMMAND_GAP)
+            raise ArctisError(f"No reply to {cmd:#04x}. Replug the transmitter and retry.")
         finally:
             time.sleep(COMMAND_GAP)
 
