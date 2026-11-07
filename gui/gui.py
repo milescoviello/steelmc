@@ -30,8 +30,11 @@ from PySide6.QtWidgets import (
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "aerox"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "arctis"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "devices"))
 import aerox  # noqa: E402
 import arctis  # noqa: E402
+import gear  # noqa: E402
+import steelmc_devices  # noqa: E402
 
 CHASSIS = "#26282b"
 WELL = "#1b1d1f"
@@ -292,7 +295,7 @@ class Runner(QObject):
             call, done, failed = self._jobs.get()
             try:
                 value = call()
-            except (aerox.AeroxError, arctis.ArctisError, KeyboardError, OSError) as e:
+            except (aerox.AeroxError, arctis.ArctisError, gear.GearError, KeyboardError, OSError) as e:
                 if failed:
                     self._finished.emit(failed, e)
             else:
@@ -2425,6 +2428,257 @@ class HeadsetPage(QWidget):
             self.apply("save", message="Saved to the transmitter.")
 
 
+class GearDevices:
+    """Every connected SteelSeries device, and the general engine for the ones a definition covers."""
+
+    def scan(self):
+        return [d for d in steelmc_devices.scan() if d["part"] != "bootloader"]
+
+    def families(self):
+        return steelmc_devices.families()
+
+    def status(self, pid):
+        with gear.Gear(pid, self.families()) as g:
+            return {"status": g.status(), "battery": g.battery(), "firmware": g.firmware()}
+
+    def set(self, pid, name, value):
+        with gear.Gear(pid, self.families()) as g:
+            g.set(name, value)
+
+    def save(self, pid):
+        with gear.Gear(pid, self.families()) as g:
+            g.save()
+
+    def remembered(self, pid):
+        return gear.remembered(pid)
+
+
+OWN_TABS = {"mouse": "Mouse", "keyboard": "Keyboard", "headset": "Headset"}
+SETTING_HINTS = {"dpi_stages": "400,800,1600", "buttons": "button4=f13,button5=disable", "gradient": "2000ms:red@0,blue@50,red@100",
+                 "gradient2": "2000ms:red@0,blue@50,red@100", "eq": "0,0,0,0,0,0,0,0,0,0"}
+
+
+class DevicesPage(QWidget):
+    """Every other SteelSeries device plugged in, with the settings its definition offers. Changes there are experimental."""
+
+    def __init__(self, devices, runner, confirm=ask, parent=None):
+        super().__init__(parent)
+        self.setObjectName("page")
+        self.devices, self.runner, self.confirm = devices, runner, confirm
+        self.found, self.covered, self.current = [], {}, None
+        self.inputs = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(10)
+        self.title = QLabel("Other devices")
+        self.title.setObjectName("title")
+        rescan = QPushButton("Look again")
+        rescan.clicked.connect(self.refresh)
+        root.addWidget(header(self.title, None, rescan))
+        body = QHBoxLayout()
+        body.setSpacing(10)
+        self.list = QVBoxLayout()
+        self.list_panel = well(title="Plugged in")
+        self.list_panel.layout().addLayout(self.list)
+        self.list_panel.layout().addStretch(1)
+        body.addWidget(self.list_panel, 2)
+        self.detail = well()
+        body.addWidget(self.detail, 5)
+        root.addLayout(body, 1)
+        self.status = StatusLine()
+        root.addWidget(self.status)
+        self.show_device(None)
+
+    def refresh(self):
+        def load():
+            return self.devices.scan(), self.devices.families()
+        self.runner.submit(load, self.loaded, lambda e: self.status.say(str(e), "bad"))
+
+    def loaded(self, result):
+        self.found, self.covered = result
+        self.empty(self.list)
+        if not self.found:
+            self.list.addWidget(muted("No SteelSeries devices found."))
+        for d in self.found:
+            name = d["product"] or d["name"] or d["id"]
+            pid = d["id"].split(":")[1]
+            button = QPushButton(name)
+            button.setToolTip(d["id"])
+            button.clicked.connect(lambda checked=False, dev=d: self.show_device(dev))
+            self.list.addWidget(button)
+            note = self.support_note(d, pid)
+            label = muted(note)
+            label.setWordWrap(True)
+            self.list.addWidget(label)
+        if self.current and any(d["id"] == self.current["id"] for d in self.found):
+            self.show_device(next(d for d in self.found if d["id"] == self.current["id"]))
+
+    def support_note(self, d, pid):
+        if pid in self.covered:
+            return "Settings here, experimental"
+        if d["support"] in ("full", "experimental", "read-only") and d["kind"] in OWN_TABS:
+            return f"On the {OWN_TABS[d['kind']]} tab"
+        if d["support"] == "part of a supported device":
+            return "Part of a device above"
+        return "Not supported yet"
+
+    @staticmethod
+    def empty(layout):
+        """Take everything out, hiding it straight away: deleteLater leaves a widget on screen until the next event loop pass."""
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
+                item.widget().deleteLater()
+            elif item.layout():
+                DevicesPage.empty(item.layout())
+
+    def clear_detail(self):
+        self.empty(self.detail.layout())
+        self.inputs = {}
+
+    def show_device(self, d):
+        self.clear_detail()
+        self.current = d
+        layout = self.detail.layout()
+        if d is None:
+            layout.addWidget(muted("Pick a device on the left."))
+            layout.addStretch(1)
+            return
+        pid = d["id"].split(":")[1]
+        title = QLabel(d["product"] or d["name"] or d["id"])
+        title.setObjectName("title")
+        layout.addWidget(title)
+        if pid not in self.covered:
+            note = self.support_note(d, pid)
+            text = (f"{note}." if note.startswith("On the") else
+                    "This one isn't supported yet. steelmc-devices probe in a terminal prints what's needed to add it.")
+            layout.addWidget(muted(text))
+            layout.addStretch(1)
+            return
+        family, product = self.covered[pid]
+        warning = muted("Changing settings here is experimental: they come from how this model is known to work, but it hasn't been "
+                        "tried on a real one here.")
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+        self.readout = muted("")
+        self.readout.setWordWrap(True)
+        layout.addWidget(self.readout)
+        if family.get("status") or family.get("battery") or family.get("firmware"):
+            read = QPushButton("Read battery and status")
+            read.clicked.connect(lambda: self.read_status(pid))
+            layout.addLayout(row(read, None))
+        last = self.devices.remembered(pid)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        for i, (name, s) in enumerate(family["settings"].items()):
+            if s["type"].startswith("unsupported"):
+                continue
+            label = muted(s.get("label") or name)
+            widget = self.input_for(s, last.get(name))
+            apply = QPushButton("Do it" if s["type"] == "action" else "Set")
+            apply.clicked.connect(lambda checked=False, n=name, w=widget, t=s["type"]: self.apply(pid, n, w, t))
+            grid.addWidget(label, i, 0)
+            if widget is not None:
+                grid.addWidget(widget, i, 1)
+            grid.addWidget(apply, i, 2)
+            self.inputs[name] = widget
+        layout.addLayout(grid)
+        if family.get("save"):
+            save = QPushButton("Save to device")
+            save.setObjectName("primary")
+            save.clicked.connect(lambda: self.save(pid))
+            layout.addLayout(row(None, save))
+        layout.addStretch(1)
+
+    def input_for(self, s, last):
+        kind = s["type"]
+        if kind == "choice":
+            box = QComboBox()
+            box.addItems([str(k) for k in s["choices"]])
+            if last is not None and box.findText(str(last)) >= 0:
+                box.setCurrentText(str(last))
+            return box
+        if kind in ("number", "number_choice"):
+            spin = QSpinBox()
+            spin.setRange(s["input"][0], s["input"][1])
+            spin.setSingleStep(max(1, s["input"][2] if len(s["input"]) > 2 else 1))
+            spin.setValue(int(last) if last is not None else int(s.get("default", s["input"][0]) or s["input"][0]))
+            return spin
+        if kind in ("color", "reactive_color"):
+            edit = QLineEdit(str(last or s.get("default", "") or ""))
+            edit.setPlaceholderText("RRGGBB or a name" + (", or off" if kind == "reactive_color" else ""))
+            return edit
+        if kind == "eq" and s.get("presets"):
+            box = QComboBox()
+            box.setEditable(True)
+            box.addItems(list(s["presets"]))
+            box.lineEdit().setPlaceholderText(SETTING_HINTS["eq"])
+            if last:
+                box.setCurrentText(str(last))
+            return box
+        if kind == "action":
+            return None
+        edit = QLineEdit(str(last or ""))
+        edit.setPlaceholderText(SETTING_HINTS.get(kind, ""))
+        return edit
+
+    @staticmethod
+    def value_of(widget, kind):
+        if widget is None:
+            return None
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
+        if isinstance(widget, QSpinBox):
+            return str(widget.value())
+        return widget.text().strip()
+
+    def apply(self, pid, name, widget, kind):
+        value = self.value_of(widget, kind)
+        if kind != "action" and not value:
+            self.status.say("Say what to set it to first.", "bad")
+            return
+        self.runner.submit(lambda: self.devices.set(pid, name, value),
+                           lambda _: self.status.say(f"Sent {name}{f' = {value}' if value else ''}. If it didn't take, please report it."),
+                           lambda e: self.status.say(str(e), "bad"))
+
+    def read_status(self, pid):
+        def shown(report):
+            status, parts = report.get("status") or {}, []
+            if status.get("connected") is False:
+                parts.append("not connected")
+            battery = report.get("battery") or ({"percent": status["battery"]} if status.get("battery") is not None else None)
+            if battery and status.get("connected") is not False:
+                parts.append(f"battery {battery['percent']}%" + (", charging" if battery.get("charging") or status.get("charging") else ""))
+            for side in ("left_battery", "right_battery"):
+                if status.get(side) is not None:
+                    parts.append(f"{side.split('_')[0]} bud {status[side]}%")
+            if status.get("chat") is not None:
+                parts.append(f"ChatMix game {status.get('game')}%, chat {status['chat']}%")
+            if report.get("firmware"):
+                parts.append(f"firmware {report['firmware']}")
+            self.readout.setText(", ".join(parts) or "It didn't report anything.")
+
+        self.runner.submit(lambda: self.devices.status(pid), shown, lambda e: self.status.say(str(e), "bad"))
+
+    def save(self, pid):
+        if self.confirm(self, "Save to device", "Write the current settings to the device's memory, so they last after it loses power?", "Save"):
+            self.runner.submit(lambda: self.devices.save(pid), lambda _: self.status.say("Saved."), lambda e: self.status.say(str(e), "bad"))
+
+
+class NoDevices:
+    """For a window made with other devices passed in: it never looks for real ones."""
+
+    def scan(self):
+        return []
+
+    def families(self):
+        return {}
+
+    def remembered(self, pid):
+        return {}
+
+
 class NoHeadset:
     """For a window made with other devices passed in: it never reaches for a real headset."""
 
@@ -2439,7 +2693,7 @@ class NoHeadset:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None, headset=None):
+    def __init__(self, mouse=None, keyboard=None, runners=None, confirm=ask, oled=None, headset=None, devices=None):
         super().__init__()
         self.setWindowTitle("SteelMC")
         runners = runners or (Runner(), Runner(), Runner(), Runner())
@@ -2454,7 +2708,9 @@ class MainWindow(QMainWindow):
                                         confirm)
         tabs.addTab(self.mouse_page, "Mouse")
         tabs.addTab(self.keyboard_page, "Keyboard")
+        self.devices_page = DevicesPage(devices or (GearDevices() if real else NoDevices()), runners[3] if len(runners) > 3 else runners[0], confirm)
         tabs.addTab(self.headset_page, "Headset")
+        tabs.addTab(self.devices_page, "Other devices")
         self.setCentralWidget(tabs)
         self.tabs = tabs
         self.setMinimumSize(QSize(1100, 800))
@@ -2463,6 +2719,7 @@ class MainWindow(QMainWindow):
         self.mouse_page.refresh()
         self.keyboard_page.refresh()
         self.headset_page.refresh()
+        self.devices_page.refresh()
 
     def closeEvent(self, event):
         self.keyboard_page.stop_stream()

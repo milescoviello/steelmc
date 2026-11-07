@@ -32,7 +32,7 @@ class Inline:
     def submit(self, call, done=None, failed=None):
         try:
             value = call()
-        except (aerox.AeroxError, gui.arctis.ArctisError, gui.KeyboardError, OSError) as e:
+        except (aerox.AeroxError, gui.arctis.ArctisError, gui.gear.GearError, gui.KeyboardError, OSError) as e:
             if failed:
                 failed(e)
         else:
@@ -822,6 +822,81 @@ class HeadsetPageTest(unittest.TestCase):
         self.assertEqual(window.tabs.tabText(2), "Headset")
 
 
+class FakeGearDevices:
+    def __init__(self):
+        self.calls = []
+        families = gui.gear.load_families()
+        self.covered = {pid: families[pid] for pid in ("1824", "2202")}
+        self.found = [
+            {"id": "1038:1824", "product": "SteelSeries Rival 3", "name": "Rival 3", "kind": "mouse", "part": "device", "support": "experimental"},
+            {"id": "1038:1640", "product": "Apex Pro Gen 3", "name": "Apex Pro (2024)", "kind": "keyboard", "part": "device", "support": "full"},
+            {"id": "1038:9999", "product": None, "name": None, "kind": None, "part": None, "support": None},
+        ]
+
+    def scan(self):
+        return self.found
+
+    def families(self):
+        return self.covered
+
+    def remembered(self, pid):
+        return {"polling_rate": "500"} if pid == "1824" else {}
+
+    def status(self, pid):
+        return {"status": {}, "battery": {"percent": 70, "charging": True}, "firmware": "1.2"}
+
+    def set(self, pid, name, value):
+        self.calls.append(("set", pid, name, value))
+
+    def save(self, pid):
+        self.calls.append(("save", pid))
+
+
+class DevicesPageTest(unittest.TestCase):
+    def setUp(self):
+        self.devices = FakeGearDevices()
+        self.page = gui.DevicesPage(self.devices, Inline(), yes)
+        self.page.refresh()
+
+    def test_lists_what_is_plugged_in(self):
+        self.assertEqual(self.page.support_note(self.devices.found[0], "1824"), "Settings here, experimental")
+        self.assertEqual(self.page.support_note(self.devices.found[1], "1640"), "On the Keyboard tab")
+        self.assertEqual(self.page.support_note(self.devices.found[2], "9999"), "Not supported yet")
+
+    def test_settings_from_the_definition(self):
+        self.page.show_device(self.devices.found[0])
+        self.assertIn("polling_rate", self.page.inputs)
+        box = self.page.inputs["polling_rate"]
+        self.assertEqual(box.currentText(), "500")
+        box.setCurrentText("1000")
+        self.page.apply("1824", "polling_rate", box, "choice")
+        self.page.inputs["sensitivity"].setText("400,800")
+        self.page.apply("1824", "sensitivity", self.page.inputs["sensitivity"], "dpi_stages")
+        self.assertEqual(self.devices.calls, [("set", "1824", "polling_rate", "1000"), ("set", "1824", "sensitivity", "400,800")])
+
+    def test_empty_values_are_not_sent(self):
+        self.page.show_device(self.devices.found[0])
+        self.page.inputs["sensitivity"].setText("")
+        self.page.apply("1824", "sensitivity", self.page.inputs["sensitivity"], "dpi_stages")
+        self.assertEqual(self.devices.calls, [])
+
+    def test_status_and_save(self):
+        self.page.show_device(self.devices.found[0])
+        self.page.read_status("1824")
+        self.assertIn("battery 70%, charging", self.page.readout.text())
+        self.page.save("1824")
+        self.assertEqual(self.devices.calls, [("save", "1824")])
+
+    def test_headset_equalizer_offers_presets(self):
+        self.page.show_device({"id": "1038:2202", "product": "Arctis Nova 7", "name": "Arctis Nova 7", "kind": "headset", "part": "base station", "support": "experimental"})
+        eq = self.page.inputs["equalizer"]
+        self.assertGreaterEqual(eq.findText("bass"), 0)
+
+    def test_others_point_to_their_tab(self):
+        self.page.show_device(self.devices.found[1])
+        self.assertEqual(self.page.inputs, {})
+
+
 class WholeKeyboard(unittest.TestCase):
     def setUp(self):
         self.page = gui.KeyboardPage(FakeKeyboard(), Inline(), yes)
@@ -1269,7 +1344,7 @@ class Window(unittest.TestCase):
     def test_fits_and_has_every_page(self):
         window = gui.MainWindow(FakeMouse(), FakeKeyboard(), (Inline(), Inline()), yes)
         window.load()
-        self.assertEqual([window.tabs.tabText(i) for i in range(window.tabs.count())], ["Mouse", "Keyboard", "Headset"])
+        self.assertEqual([window.tabs.tabText(i) for i in range(window.tabs.count())], ["Mouse", "Keyboard", "Headset", "Other devices"])
         self.assertLessEqual(window.minimumSize().width(), 1100)
         self.assertLessEqual(window.minimumSize().height(), 800)
         window.close()

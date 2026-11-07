@@ -31,6 +31,8 @@ Run `steelmc`, or find SteelMC in your application menu.
 
 **Headset:** shows whether the headset is connected, its battery, ChatMix and mic. Set sidetone, mic gain, surround, when it turns itself off, and the EQ, as a preset or ten bands. Save to transmitter keeps them.
 
+**Other devices:** lists every SteelSeries device plugged in. For the mice and headsets the definitions in `devices/` cover, it reads battery, connection and ChatMix and shows a control for every setting. Changes there are experimental.
+
 **Keyboard:**
 - Each key shows where it fires, fills as you press it, and sinks once it passes that point.
 - Drag across keys to pick several, or drag from an empty spot to box them, then set their actuation or rapid tap.
