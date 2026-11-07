@@ -120,3 +120,32 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 fontconfig
       - run: pip install PySide6
       - run: python -X faulthandler test_gui.py
+
+  install:
+    # make install is what every package is built from: check each command and the app run from the installed tree, so
+    # a file the Makefile leaves out shows up here and not in a release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 fontconfig
+      - run: pip install PySide6 pillow
+      - name: make install into a folder
+        run: make DESTDIR="$PWD/root" PREFIX=/usr install
+      - name: every command runs from there
+        run: |
+          for link in root/usr/bin/*; do
+            target="root$(readlink "$link")"
+            [ -e "$target" ] || { echo "$link points at a file that wasn't installed"; exit 1; }
+          done
+          for c in steelmc-devices aerox arctis apex-analog steelmc-update; do
+            python "root$(readlink "root/usr/bin/$c")" --help >/dev/null || { echo "$c doesn't start"; exit 1; }
+          done
+          ls root/usr/lib/udev/rules.d/ root/usr/lib/modules-load.d/steelmc.conf root/usr/share/applications/net.local.steelmc.desktop
+      - name: the app opens from there
+        run: |
+          code=0
+          QT_QPA_PLATFORM=offscreen STEELMC_NO_UPDATE_CHECK=1 timeout 10 python root/usr/lib/steelmc/gui/gui.py || code=$?
+          [ "$code" = 124 ] || { echo "the app exited with $code"; exit 1; }
