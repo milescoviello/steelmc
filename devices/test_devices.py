@@ -112,6 +112,9 @@ class Scanning(unittest.TestCase):
         self.assertEqual(query["template"], ["device.yml"])
         self.assertEqual(query["device"], ["SteelSeries Arctis 9 (1038:12c2)"])
         self.assertEqual(query["report"], [text])
+        with open(release, "w") as f:
+            f.write("PRETTY_NAME='Gentoo Linux'\n")
+        self.assertIn(", Gentoo Linux, kernel", sd.system_line(release))
 
     def test_a_long_report_leaves_the_descriptors_out_of_the_link(self):
         self.sys.device("3-8.2", "1038", "12c2", "0101", "SteelSeries Arctis 9", hid=[ARCTIS * 60, MEDIA * 60])

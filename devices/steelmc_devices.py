@@ -158,7 +158,7 @@ def system_line(os_release="/etc/os-release"):
     pretty = ""
     for line in (_read(os_release) or "").splitlines():
         if line.startswith("PRETTY_NAME="):
-            pretty = line.split("=", 1)[1].strip().strip('"')
+            pretty = line.split("=", 1)[1].strip().strip("\"'")  # Gentoo quotes it with ', most with "
     return f"steelmc {__version__}, {pretty or 'Linux'}, kernel {os.uname().release}"
 
 
