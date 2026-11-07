@@ -2,7 +2,7 @@
 
 Configure SteelSeries gear on Linux with no vendor software. Not affiliated with SteelSeries.
 
-![The keyboard page: a key bound on the SteelSeries layer, with the keyboard's screen mirrored, with sample data](docs/bindings.png)
+![The keyboard page, with sample data: a key bound on the SteelSeries layer, and the keyboard's screen mirrored](docs/bindings.png)
 
 | Folder | What it is | Device |
 |---|---|---|
