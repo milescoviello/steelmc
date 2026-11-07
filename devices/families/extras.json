@@ -2284,6 +2284,48 @@
      "interface_unconfirmed": true,
      "usage_page": 65472,
      "usage": 1
+    },
+    "2030": {
+     "name": "MSI Per Key RGB Keyboard (2030)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2054": {
+     "name": "MSI Per Key RGB Keyboard (2054)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2062": {
+     "name": "MSI Per Key RGB Keyboard (2062)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2063": {
+     "name": "MSI Per Key RGB Keyboard (2063)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "205b": {
+     "name": "MSI Per Key RGB Keyboard (205b)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "205e": {
+     "name": "MSI Per Key RGB Keyboard (205e)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
     }
    },
    "save": {
@@ -2314,6 +2356,368 @@
       11,
       0,
       64
+     ],
+     "packet_length": 64
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "msi_alc",
+   "kind": "lighting",
+   "name": "MSI lighting (light bars, Mystic Light, monitors)",
+   "products": {
+    "1124": {
+     "name": "Mystic Light (1124)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1126": {
+     "name": "MSI MPG27C (1126)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1128": {
+     "name": "MSI MPG341CQ (1128)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1130": {
+     "name": "MSI Lightbar (1130)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1132": {
+     "name": "MSI Aurora (1132)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1134": {
+     "name": "MSI Aurora (1134)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1136": {
+     "name": "MSI MEG381CQR (1136)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1138": {
+     "name": "MSI Dragon Shield (1138)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1139": {
+     "name": "MSI Dragon Tiamat (1139)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "113c": {
+     "name": "MSI Aurora (113c)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "113e": {
+     "name": "MSI Aurora (113e)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1140": {
+     "name": "MSI MPG341CQ (1140)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1142": {
+     "name": "MSI MEG381CQR (1142)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1144": {
+     "name": "MSI Aurora (1144)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1145": {
+     "name": "MSI Aurora (1145)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1146": {
+     "name": "MSI Mystic Light (1146)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1149": {
+     "name": "MSI Aurora (1149)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "114a": {
+     "name": "MSI Aurora (114a)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "114b": {
+     "name": "MSI Matrix (114b)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "114d": {
+     "name": "MSI Matrix (114d)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1157": {
+     "name": "MSI Matrix (1157)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "1159": {
+     "name": "Light bar (1159)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "115b": {
+     "name": "MSI Matrix (115b)",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "save": {
+    "command": [
+     9,
+     0
+    ],
+    "packet_length": 64
+   },
+   "settings": {
+    "color": {
+     "type": "color",
+     "label": "Colour",
+     "command": [
+      80,
+      0
+     ],
+     "packet_length": 64
+    },
+    "brightness": {
+     "type": "number_choice",
+     "label": "Brightness (%)",
+     "command": [
+      12,
+      0
+     ],
+     "input": [
+      0,
+      100,
+      1
+     ],
+     "table": {
+      "0": 0,
+      "1": 3,
+      "2": 5,
+      "3": 8,
+      "4": 10,
+      "5": 13,
+      "6": 15,
+      "7": 18,
+      "8": 20,
+      "9": 23,
+      "10": 26,
+      "11": 28,
+      "12": 31,
+      "13": 33,
+      "14": 36,
+      "15": 38,
+      "16": 41,
+      "17": 43,
+      "18": 46,
+      "19": 48,
+      "20": 51,
+      "21": 54,
+      "22": 56,
+      "23": 59,
+      "24": 61,
+      "25": 64,
+      "26": 66,
+      "27": 69,
+      "28": 71,
+      "29": 74,
+      "30": 76,
+      "31": 79,
+      "32": 82,
+      "33": 84,
+      "34": 87,
+      "35": 89,
+      "36": 92,
+      "37": 94,
+      "38": 97,
+      "39": 99,
+      "40": 102,
+      "41": 105,
+      "42": 107,
+      "43": 110,
+      "44": 112,
+      "45": 115,
+      "46": 117,
+      "47": 120,
+      "48": 122,
+      "49": 125,
+      "50": 128,
+      "51": 130,
+      "52": 133,
+      "53": 135,
+      "54": 138,
+      "55": 140,
+      "56": 143,
+      "57": 145,
+      "58": 148,
+      "59": 150,
+      "60": 153,
+      "61": 156,
+      "62": 158,
+      "63": 161,
+      "64": 163,
+      "65": 166,
+      "66": 168,
+      "67": 171,
+      "68": 173,
+      "69": 176,
+      "70": 178,
+      "71": 181,
+      "72": 184,
+      "73": 186,
+      "74": 189,
+      "75": 191,
+      "76": 194,
+      "77": 196,
+      "78": 199,
+      "79": 201,
+      "80": 204,
+      "81": 207,
+      "82": 209,
+      "83": 212,
+      "84": 214,
+      "85": 217,
+      "86": 219,
+      "87": 222,
+      "88": 224,
+      "89": 227,
+      "90": 230,
+      "91": 232,
+      "92": 235,
+      "93": 237,
+      "94": 240,
+      "95": 242,
+      "96": 245,
+      "97": 247,
+      "98": 250,
+      "99": 252,
+      "100": 255
+     },
+     "packet_length": 64
+    }
+   }
+  },
+  {
+   "changes": "experimental",
+   "family": "msi_gt80",
+   "kind": "keyboard",
+   "name": "MSI GT80, GT83, GS40, GS43 keyboard",
+   "products": {
+    "2000": {
+     "name": "MSI GT80 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2011": {
+     "name": "MSI GT83 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "200c": {
+     "name": "MSI GS40 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    },
+    "2012": {
+     "name": "MSI GS43 keyboard",
+     "interface": 0,
+     "interface_unconfirmed": true,
+     "usage_page": 65472,
+     "usage": 1
+    }
+   },
+   "settings": {
+    "brightness": {
+     "type": "number",
+     "label": "Keyboard brightness (%)",
+     "command": [
+      208,
+      0,
+      8
+     ],
+     "input": [
+      0,
+      100,
+      1
+     ],
+     "output": [
+      0,
+      100,
+      1
      ],
      "packet_length": 64
     }

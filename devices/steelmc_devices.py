@@ -144,7 +144,7 @@ def probe_report(device):
     return "\n".join(lines)
 
 
-NO_TYPING = ("speakers", "microphone", "mousepad", "accessory")  # kinds with no interface that can carry keystrokes
+NO_TYPING = ("speakers", "microphone", "mousepad", "accessory", "lighting")  # kinds with no interface that can carry keystrokes
 
 
 def udev_rules():

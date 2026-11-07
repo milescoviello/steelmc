@@ -57,7 +57,7 @@ For 22 of these, every command was checked against the keyboard's own firmware, 
 
 ## MSI laptop keyboards
 
-Many MSI laptops have a SteelSeries keyboard inside. `extras.json` covers 58 of them: the 3-zone ones (GE62, GE72, GF62, GF72, GP62, GP63, GP72, GP73, GS60, GS63, GS72, GS73, GT62, GT72, GT73) get each zone's colour, and the per-key ones get one colour for the whole board, going back to their own lighting, and saving. GG ships no firmware for them and nobody has tried these, so they're the least sure of anything here. They need sudo, since which interface they use is a guess.
+Many MSI laptops have a SteelSeries keyboard inside. `extras.json` covers 68 of them: the 3-zone ones (GE62, GE72, GF62, GF72, GP62, GP63, GP72, GP73, GS60, GS63, GS72, GS73, GT62, GT72, GT73) get each zone's colour, the per-key ones get one colour for the whole board, going back to their own lighting, and saving, and the GT80, GT83, GS40 and GS43 get brightness. MSI's light bars, Aurora and Mystic Light lighting and the MPG27C, MPG341CQ and MEG381CQR monitors get colour, brightness and saving. GG ships no firmware for them and nobody has tried these, so they're the least sure of anything here. They need sudo, since which interface they use is a guess.
 
 The Apex Pro boards, the Aerox 9 Wireless and the Arctis 9 have tools of their own, which go further, and keep them.
 
