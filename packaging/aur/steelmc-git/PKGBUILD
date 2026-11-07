@@ -1,6 +1,6 @@
 # Maintainer: milescoviello <miles@milescoviello.com>
 pkgname=steelmc-git
-pkgver=1.0.0
+pkgver=r101.cd294ed
 pkgrel=1
 pkgdesc="Configure SteelSeries mice, keyboards, headsets and more on Linux, with no vendor software"
 arch=('any')

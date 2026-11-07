@@ -1,0 +1,23 @@
+pkgbase = steelmc-git
+	pkgdesc = Configure SteelSeries mice, keyboards, headsets and more on Linux, with no vendor software
+	pkgver = r101.cd294ed
+	pkgrel = 1
+	url = https://github.com/milescoviello/steelmc
+	install = steelmc.install
+	arch = any
+	license = MIT
+	makedepends = git
+	depends = python
+	depends = pyside6
+	depends = python-pillow
+	depends = bash
+	optdepends = kdotool: switch setups by the focused window on KDE (apex-analog auto)
+	optdepends = libpulse: the music lighting effect (parec)
+	optdepends = wireplumber: volume shortcuts (wpctl)
+	optdepends = brightnessctl: brightness shortcuts
+	provides = steelmc
+	conflicts = steelmc
+	source = steelmc::git+https://github.com/milescoviello/steelmc.git
+	sha256sums = SKIP
+
+pkgname = steelmc-git
