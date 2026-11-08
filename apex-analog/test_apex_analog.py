@@ -843,6 +843,10 @@ class HowYouType(unittest.TestCase):
         report = "\n".join(profile.report(1.89))
         self.assertIn("6 presses on 4 keys", report)
         self.assertIn("1 presses (16.7%) stopped short", report)
+        self.assertNotIn("no sensor", report)
+        profile.other.update({"F5": 3, "ESC": 9})
+        self.assertIn("Keys with no sensor, so presses only: ESC 9, F5 3", "\n".join(profile.report(1.89)))
+        self.assertEqual(profile.counts(), {"E": 1, "H": 2, "L": 2, "O": 1, "F5": 3, "ESC": 9})
 
     def test_health_flags_only_what_is_off(self):
         self.assertEqual(a.key_health(15, 0.8, 2488, 2488), [])
@@ -1418,6 +1422,65 @@ class EffectEngine(unittest.TestCase):
     def test_heatmap_watches_every_key(self):
         self.assertIn("heatmap", a.USES_DEPTH)
 
+    def test_heatmap_counts_keys_with_no_sensor_from_their_key_events(self):
+        class Events:
+            def __init__(self):
+                self.waiting, self.closed = ["F5", "KP_ENTER", "F5"], False
+
+            def presses(self, now):
+                pressed, self.waiting = self.waiting, []
+                return pressed
+
+            def close(self):
+                self.closed = True
+
+        class Board:
+            def __init__(self):
+                self.sent = {}
+
+            def set_colors(self, colors):
+                for key in colors:
+                    a.led_hid(key)
+                self.sent.update(colors)
+
+            def clear_colors(self):
+                pass
+
+        board, events = Board(), Events()
+        heat = a.TypingHeatmap(keep=True, totals={"E": 10, "ESC": 4})
+        heat.events = events
+        heat.update(board, {}, 1.0)
+        self.assertEqual((heat.totals["F5"], heat.totals["KP_ENTER"]), (2, 1))
+        self.assertEqual(set(board.sent), {"E", "ESC", "F5", "KP_ENTER"})
+        heat.stop(board)
+        self.assertTrue(events.closed)
+        self.assertIsNone(heat.events)
+
+    def test_every_key_with_no_sensor_has_an_led(self):
+        for code, name in a.UNSENSED_CODES.items():
+            self.assertIn(a.led_hid(name), a.LED_HIDS, name)
+            self.assertNotIn(name, a.BY_NAME)
+        self.assertEqual(len(a.UNSENSED_CODES), len(a.NO_SENSOR_HIDS) - 1 + len(a.NUMPAD_HIDS))
+
+    def test_key_events_count_presses_once_and_only_of_keys_with_no_sensor(self):
+        event = struct.Struct("llHHi")
+        stream = b"".join(event.pack(0, 0, kind, code, value) for kind, code, value in (
+            (a.EV_KEY, 63, 1), (0, 0, 0), (a.EV_KEY, 63, 2), (a.EV_KEY, 63, 2), (a.EV_KEY, 63, 0),  # F5, held, repeating
+            (4, 4, 0x70022), (a.EV_KEY, 17, 1), (a.EV_KEY, 17, 0),  # W has a sensor, so its depth counts it instead
+            (a.EV_KEY, 96, 1), (a.EV_KEY, 1, 1), (a.EV_KEY, 103, 1)))  # numpad Enter, Esc, Up
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        node = os.path.join(folder.name, "event0")
+        with open(node, "wb") as f:
+            f.write(stream)
+        events = a.KeyEvents(nodes=[node])
+        self.assertEqual(events.presses(1.0), ["F5", "KP_ENTER", "ESC", "UP"])
+        self.assertEqual(events.presses(1.1), [])
+        events.close()
+        self.assertEqual(events.fds, [])
+        gone = a.KeyEvents(nodes=[os.path.join(folder.name, "unplugged")])
+        self.assertEqual(gone.presses(1.0), [])
+
     def test_effect_flags_choose_the_right_thing(self):
         parse = a.build_parser().parse_args
         for flags, kind in ((["--effect", "ripple"], a.Ripple), (["--effect", "music"], a.MusicBars), (["--effect", "stats"], a.StatsMeter),
@@ -1575,7 +1638,23 @@ class Files(unittest.TestCase):
         self.assertEqual(a.TypingRecorder({}, path).profile.keys["J"]["count"], 2)
         with open(path) as f:
             import json
-            self.assertEqual(set(json.load(f)), {"keys"})
+            self.assertEqual(set(json.load(f)), {"keys", "other"})
+
+    def test_recorder_counts_keys_with_no_sensor_and_the_heatmap_starts_from_them(self):
+        os.makedirs(os.path.join(self.folder.name, "state"))
+        path = os.path.join(self.folder.name, "state", "typing.json")
+        events = type("Events", (), {"presses": lambda self, now: ["F5", "F5", "KP1"]})()
+        recorder = a.TypingRecorder({"J": 1.89}, path, every=0.0, events=events)
+        base = time.monotonic() + 1
+        for now, mm in enumerate((0.0, 3.0, 0.0)):
+            recorder.update({"J": mm}, base + now * 0.01)
+        saved = a.TypingProfile(a._load_json(path))
+        self.assertEqual(saved.other, {"F5": 6, "KP1": 3})
+        self.assertEqual(saved.keys["J"]["count"], 1)
+        original = a._state_path
+        self.addCleanup(setattr, a, "_state_path", original)
+        a._state_path = lambda name: path
+        self.assertEqual(a.TypingHeatmap().totals, {"J": 1, "F5": 6, "KP1": 3})
 
     def test_macro_add_list_delete_and_private_file(self):
         a.cmd_macro(self.run_cli("macro", "add", "hi", "text:Hi!", "100", "LCTRL+C"))

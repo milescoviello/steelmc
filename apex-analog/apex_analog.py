@@ -521,7 +521,10 @@ def led_hid(key):
         return BY_NAME[name][1]
     if name in NO_SENSOR_HIDS:
         return NO_SENSOR_HIDS[name]
-    raise ValueError(f"{key!r} isn't a key with an LED. Known: " + " ".join(sorted(k for k in {*BY_NAME, *NO_SENSOR_HIDS} if not k.startswith("INT"))))
+    if name in NUMPAD_HIDS:
+        return NUMPAD_HIDS[name]
+    raise ValueError(f"{key!r} isn't a key with an LED. Known: " +
+                     " ".join(sorted(k for k in {*BY_NAME, *NO_SENSOR_HIDS, *NUMPAD_HIDS} if not k.startswith("INT"))))
 
 
 def parse_rapid_pair(text):
@@ -1342,6 +1345,10 @@ KEYCODES = {name: code for name, (_, _, code) in BY_NAME.items() if code is not 
 KEYCODES.update({"ESC": 1, "PRTSC": 99, "SCRLK": 70, "PAUSE": 119, "INSERT": 110, "DELETE": 111, "HOME": 102, "END": 107, "PGUP": 104,
                  "PGDN": 109, "UP": 103, "LEFT": 105, "RIGHT": 106, "DOWN": 108, "MENU": 127,
                  **{f"F{i}": 58 + i for i in range(1, 11)}, "F11": 87, "F12": 88, **{f"F{i}": 170 + i for i in range(13, 25)}})
+# Linux key code -> name, for the keys with no sensor: only their key events show they were pressed. This board has no Menu key.
+UNSENSED_CODES = {KEYCODES[name]: name for name in NO_SENSOR_HIDS if name != "MENU"}
+UNSENSED_CODES.update({69: "KP_NUM", 98: "KP_DIV", 55: "KP_MUL", 74: "KP_SUB", 78: "KP_ADD", 96: "KP_ENTER", 79: "KP1", 80: "KP2",
+                       81: "KP3", 75: "KP4", 76: "KP5", 77: "KP6", 71: "KP7", 72: "KP8", 73: "KP9", 82: "KP0", 83: "KP_DOT", 121: "KP_COMMA"})
 
 
 def keycode(name):
@@ -1410,6 +1417,59 @@ def _any_key_held(fd):
     buffer = bytearray(KEY_BYTES)
     fcntl.ioctl(fd, _ior("E", 0x18, KEY_BYTES), buffer)
     return any(buffer)
+
+
+class KeyEvents:
+    """Presses of the keys with no sensor (ESC, the F row, nav keys, arrows, the numpad), from the keyboard's own key events.
+
+    Only reads them, alongside the desktop, and never takes the keyboard from it. Finds the keyboard again after a replug.
+    """
+    EVENT = struct.Struct("llHHi")
+
+    def __init__(self, nodes=None):
+        self.nodes, self.fds, self.opened = nodes, [], None
+
+    def _open(self, now):
+        self.opened = now
+        for node in (_physical_key_nodes() if self.nodes is None else self.nodes):
+            try:
+                self.fds.append(os.open(node, os.O_RDONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+
+    def presses(self, now):
+        """Names of the keys pressed since the last call, once per press: held keys repeating don't count again."""
+        if not self.fds and (self.opened is None or now - self.opened >= 2.0):
+            self._open(now)
+        names = []
+        for fd in list(self.fds):
+            while True:
+                try:
+                    data = os.read(fd, self.EVENT.size * 64)
+                except BlockingIOError:
+                    break
+                except OSError:  # unplugged
+                    self._drop(fd)
+                    break
+                if not data:
+                    break
+                for offset in range(0, len(data) - self.EVENT.size + 1, self.EVENT.size):
+                    _, _, kind, code, value = self.EVENT.unpack_from(data, offset)
+                    if kind == EV_KEY and value == 1 and code in UNSENSED_CODES:
+                        names.append(UNSENSED_CODES[code])
+        return names
+
+    def _drop(self, fd):
+        self.fds.remove(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+    def close(self):
+        for fd in list(self.fds):
+            self._drop(fd)
+        self.opened = None
 
 
 class Swallow(threading.Thread):
@@ -2397,6 +2457,11 @@ class TypingProfile:
 
     def __init__(self, data=None):
         self.keys = (data or {}).get("keys", {})
+        self.other = (data or {}).get("other", {})  # keys with no sensor: only how often, since there's no depth to measure
+
+    def counts(self):
+        """Presses per key, sensor or not."""
+        return {**self.other, **{k: s["count"] for k, s in self.keys.items()}}
 
     def add(self, press, actuates_at=None):
         stats = self.keys.setdefault(press.key, {"count": 0, "bins": [0] * 41, "speed": 0.0, "held": 0.0, "near_misses": 0})
@@ -2419,6 +2484,7 @@ class TypingProfile:
     def report(self, actuation=None):
         if not self.keys:
             return ["Nothing recorded yet. Run apex-analog profile and type for a while."]
+        other = sorted(self.other.items(), key=lambda kv: -kv[1])
         bins = [sum(s["bins"][i] for s in self.keys.values()) for i in range(41)]
         total = sum(bins)
         near = sum(s["near_misses"] for s in self.keys.values())
@@ -2437,6 +2503,8 @@ class TypingProfile:
         lines += ["", f"{'key':8}{'presses':>8}{'typical mm':>12}{'mm/s':>8}{'held ms':>9}"]
         for key, s in sorted(self.keys.items(), key=lambda kv: -kv[1]["count"])[:20]:
             lines.append(f"{key:8}{s['count']:8d}{self._percentile(s['bins'], 0.5):12.1f}{s['speed'] / s['count']:8.0f}{1000 * s['held'] / s['count']:9.0f}")
+        if other:
+            lines += ["", f"Keys with no sensor, so presses only: {', '.join(f'{k} {n}' for k, n in other[:12])}"]
         return lines
 
 
@@ -2798,15 +2866,28 @@ class TypingHeatmap(Effect):
             if not os.path.exists(path):
                 raise ApexError("No typing profile yet. Run apex-analog profile and type for a while first.")
             with open(path) as f:
-                totals = {k: v["count"] for k, v in json.load(f).get("keys", {}).items()}
+                totals = TypingProfile(json.load(f)).counts()
         self.totals = totals
         self.log = _PressLog()
+        self.events = None
+
+    def start(self, kb):
+        super().start(kb)
+        if self.events is None:
+            self.events = KeyEvents()
 
     def update(self, kb, depths, now):
         # Count on every reading, not just the ones that redraw, or quick presses would be missed.
-        for press in self.log.update(depths, now):
-            self.totals[press.key] = self.totals.get(press.key, 0) + 1
+        pressed = [press.key for press in self.log.update(depths, now)] + (self.events.presses(now) if self.events else [])
+        for key in pressed:
+            self.totals[key] = self.totals.get(key, 0) + 1
         super().update(kb, depths, now)
+
+    def stop(self, kb):
+        if self.events:
+            self.events.close()
+            self.events = None
+        super().stop(kb)
 
     def frame(self, depths, now, elapsed):
         top = max(self.totals.values(), default=0)
@@ -3585,7 +3666,7 @@ def cmd_record(args):
             break
         except (NotFound, AccessDenied, Disconnected):
             time.sleep(5)
-    recorder = TypingRecorder(press_points)
+    recorder = TypingRecorder(press_points, events=KeyEvents())
     try:
         _loop(args.hz or 60, None, None, recorder.update)
     finally:
@@ -4622,11 +4703,12 @@ def cmd_profile(args):
 class TypingRecorder:
     """Adds finished presses to the saved per-key totals, writing them out every so often."""
 
-    def __init__(self, press_points, path=None, every=30.0):
+    def __init__(self, press_points, path=None, every=30.0, events=None):
         self.path = path or _state_path("typing-profile.json")
         self.press_points, self.every = press_points, every
         self.profile = TypingProfile(_load_json(self.path))
         self.log = _PressLog()
+        self.events = events  # KeyEvents, for the keys with no sensor
         self.saved = time.monotonic()
         self.unsaved = False
 
@@ -4634,13 +4716,16 @@ class TypingRecorder:
         for press in self.log.update(depths, now):
             self.profile.add(press, self.press_points.get(press.key))
             self.unsaved = True
+        for key in (self.events.presses(now) if self.events else []):
+            self.profile.other[key] = self.profile.other.get(key, 0) + 1
+            self.unsaved = True
         if self.unsaved and now - self.saved >= self.every:
             self.save()
             self.saved = now
 
     def save(self):
         if self.unsaved:
-            _write_private(self.path, {"keys": self.profile.keys})
+            _write_private(self.path, {"keys": self.profile.keys, "other": self.profile.other})
             self.unsaved = False
 
 

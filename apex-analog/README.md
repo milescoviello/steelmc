@@ -157,6 +157,8 @@ apex-analog gamepad --lights --effect rev       # the same while driving with W 
 
 `ripple`, `music` and `heatmap` take `--keep` to run over your normal lighting. `stats` and `rev` only touch the rows they use.
 
+The heatmap covers every key. ESC, the F row, the nav keys, arrows and numpad have no sensor, so their key presses are counted instead.
+
 For `rev`, turn on OutGauge in BeamNG under Options, Other, Protocols, with address `127.0.0.1` and the same port as `--port` (default 4444). It needs nothing else from the game. `music` uses `parec` to listen to your output and doesn't record anything.
 
 ## Set colours from your own program
@@ -295,7 +297,7 @@ Add `http://127.0.0.1:8765/overlay` as an OBS browser source. It shows W A S D, 
 apex-analog profile
 ```
 
-It records all the time in the background. This tells you how deep and fast you press, how often you bottom out, how many presses stopped short of your actuation point, and what that means for your settings. `--off` and `--on` stop and start recording, and `--reset` clears it. It stores per-key totals only, never the order of keys, so it can't be read back as text.
+It records all the time in the background. This tells you how deep and fast you press, how often you bottom out, how many presses stopped short of your actuation point, and what that means for your settings. `--off` and `--on` stop and start recording, and `--reset` clears it. Keys with no sensor only count how often you press them. It stores per-key totals only, never the order of keys, so it can't be read back as text.
 
 ## Check your switches
 
